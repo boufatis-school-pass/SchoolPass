@@ -1,0 +1,7 @@
+# Version ranges intentionally cap major releases to avoid unreviewed API changes.
+arabic-reshaper>=3.0.0,<4
+python-bidi>=0.6.0,<1
+reportlab>=4.2.5,<5
+qrcode[pil]>=8.0,<9
+openpyxl>=3.1.5,<4
+xlrd>=2.0.1,<3
