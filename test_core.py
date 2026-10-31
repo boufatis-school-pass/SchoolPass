@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Automated tests for SchoolPass core. Synthetic data only; no GUI, no real student data."""
 from __future__ import annotations
-
+from contextlib import closing
 import csv
 import json
 import os
@@ -39,8 +39,6 @@ def tearDownModule():
 
 def fresh_db():
     core.stop_local_server()
-    for suffix in ("", "-wal", "-shm"):
-        Path(str(core.DB_PATH) + suffix).unlink(missing_ok=True)
     core.init_db()
     admin_id, code = core.bootstrap_admin("director", "المدير", PW)
     sup_id = core.create_user_as(admin_id, "sup1", "مشرف أول", PW)
@@ -57,8 +55,17 @@ def write_csv(path: Path, rows, header=("رقم التعريف", "اللقب", "
 
 class Base(unittest.TestCase):
     def setUp(self):
-        self.admin, self.sup, self.code = fresh_db()
+        core.stop_local_server()
+
         self.tmp = Path(tempfile.mkdtemp(dir=TEST_ROOT))
+        self.data_dir = self.tmp / "data"
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+
+        core.DATA_DIR = self.data_dir
+        core.DB_PATH = self.data_dir / "schoolpass.sqlite3"
+        core.LOG_PATH = self.data_dir / "schoolpass.log"
+
+        self.admin, self.sup, self.code = fresh_db()
         self.csv = self.tmp / "students.csv"
         write_csv(self.csv, [["T-001", "تجريبي", "أحمد", "ذكر", "أولى", "علوم", "1"],
                              ["T-002", "اختباري", "سارة", "أنثى", "أولى", "علوم", "1"]])
