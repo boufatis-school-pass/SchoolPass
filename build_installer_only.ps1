@@ -120,6 +120,7 @@ try {
     Write-Host "المسار الكامل: $output" -ForegroundColor Green
     exit 0
 } catch {
-    Write-Host "`nفشل إنشاء المثبّت: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "`nInstaller creation failed: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "The portable application files and database were not deleted." -ForegroundColor Yellow
     exit 1
 }
