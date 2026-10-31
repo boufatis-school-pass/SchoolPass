@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import csv
-from contextlib import closing
 import json
 import os
 import shutil
@@ -39,9 +38,9 @@ def tearDownModule():
 
 
 def fresh_db():
-    # Each test owns a fresh data directory; never unlink a database that may
-    # still be held by SQLite or a background server thread.
     core.stop_local_server()
+    for suffix in ("", "-wal", "-shm"):
+        Path(str(core.DB_PATH) + suffix).unlink(missing_ok=True)
     core.init_db()
     admin_id, code = core.bootstrap_admin("director", "المدير", PW)
     sup_id = core.create_user_as(admin_id, "sup1", "مشرف أول", PW)
@@ -58,20 +57,8 @@ def write_csv(path: Path, rows, header=("رقم التعريف", "اللقب", "
 
 class Base(unittest.TestCase):
     def setUp(self):
-        core.stop_local_server()
-        self.tmp = Path(tempfile.mkdtemp(dir=TEST_ROOT))
-        self.data_dir = self.tmp / "data"
-        self.data_dir.mkdir(parents=True, exist_ok=True)
-        for sub in ("prints", "backups", "logs"):
-            (self.data_dir / sub).mkdir(exist_ok=True)
-
-        # schoolpass_core resolves these paths at import time. Repoint all
-        # database/log paths for this test before initializing its database.
-        core.DATA_DIR = self.data_dir
-        core.DB_PATH = self.data_dir / "schoolpass.sqlite3"
-        core.LOG_PATH = self.data_dir / "logs" / "schoolpass.log"
-
         self.admin, self.sup, self.code = fresh_db()
+        self.tmp = Path(tempfile.mkdtemp(dir=TEST_ROOT))
         self.csv = self.tmp / "students.csv"
         write_csv(self.csv, [["T-001", "تجريبي", "أحمد", "ذكر", "أولى", "علوم", "1"],
                              ["T-002", "اختباري", "سارة", "أنثى", "أولى", "علوم", "1"]])
@@ -672,11 +659,10 @@ class TestBackupRestore(Base):
         for old_version in ("2", "3"):
             legacy = self.tmp / f"legacy_{old_version}.sqlite3"
             core._copy_db(core.DB_PATH, legacy)
-            with closing(sqlite3.connect(legacy)) as c:
+            with sqlite3.connect(legacy) as c:
                 c.execute("DROP TRIGGER IF EXISTS trg_records_immutable")
                 c.execute("ALTER TABLE records DROP COLUMN issued_at")
                 c.execute("UPDATE settings SET setting_value=? WHERE setting_key='schema_version'", (old_version,))
-                c.commit()
             core.restore_database(legacy, self.admin)
             with core.db_connect() as c:
                 row = c.execute("SELECT issued_at,created_at FROM records ORDER BY id LIMIT 1").fetchone()
@@ -687,7 +673,7 @@ class TestBackupRestore(Base):
         row = core.create_absence_return(self.s1, self.sup, "2025-01-10", "2025-01-12", "مرض", certificate_present=True)
         legacy = self.tmp / "legacy_v5.sqlite3"
         core._copy_db(core.DB_PATH, legacy)
-        with closing(sqlite3.connect(legacy)) as conn:
+        with sqlite3.connect(legacy) as conn:
             conn.execute("DROP TRIGGER IF EXISTS trg_records_immutable")
             details = json.loads(conn.execute("SELECT details_json FROM records WHERE id=?", (row["id"],)).fetchone()[0])
             details["days_count"] = 3  # 0.5.1 stored both the first and return dates
@@ -695,7 +681,6 @@ class TestBackupRestore(Base):
             conn.execute("UPDATE records SET details_json=? WHERE id=?", (json.dumps(details, ensure_ascii=False), row["id"]))
             conn.execute("CREATE TRIGGER trg_records_immutable BEFORE UPDATE OF record_no,qr_token,kind,student_key,student_name,class_name,created_at,issued_at,user_id,reason,details_json,related_record_id ON records BEGIN SELECT RAISE(ABORT,'record content is immutable'); END")
             conn.execute("UPDATE settings SET setting_value='5' WHERE setting_key='schema_version'")
-            conn.commit()
         core.restore_database(legacy, self.admin)
         restored = json.loads(core.record_by_id(row["id"])["details_json"])
         self.assertEqual(restored["days_count"], 2)

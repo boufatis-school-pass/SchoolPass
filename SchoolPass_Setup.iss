@@ -1,5 +1,5 @@
 #define MyAppName "SchoolPass"
-#define MyAppVersion "2.5.0"
+#define MyAppVersion "2.5.1"
 #define MyAppPublisher "SchoolPass"
 
 [Setup]
@@ -25,8 +25,8 @@ CloseApplications=yes
 RestartApplications=no
 Uninstallable=yes
 ChangesAssociations=no
-VersionInfoVersion=2.5.0.0
-VersionInfoProductVersion=2.5.0
+VersionInfoVersion=2.5.1.0
+VersionInfoProductVersion=2.5.1
 VersionInfoProductName=SchoolPass
 VersionInfoCompany=SchoolPass
 

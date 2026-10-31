@@ -2,7 +2,7 @@
 chcp 65001 >nul
 setlocal
 cd /d "%~dp0"
-title SchoolPass 2.5.0 - Build installer only
+title SchoolPass 2.5.1 - Build installer only
 where powershell.exe >nul 2>&1
 if errorlevel 1 (
   echo PowerShell was not found. Windows 10 or later is required.

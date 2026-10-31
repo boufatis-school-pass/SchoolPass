@@ -37,6 +37,7 @@ class TestReleaseCurrent(unittest.TestCase):
     def test_update_checker_parses_release_versions_strictly(self):
         from app import SchoolPassApp
         self.assertEqual(SchoolPassApp._version_parts('v2.5.0'), (2, 5, 0))
+        self.assertEqual(SchoolPassApp._version_parts('v2.5.1'), (2, 5, 1))
         self.assertEqual(SchoolPassApp._version_parts('2.6.1'), (2, 6, 1))
         with self.assertRaises(ValueError):
             SchoolPassApp._version_parts('latest-release')

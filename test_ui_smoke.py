@@ -263,6 +263,21 @@ class TestGuiSmoke(unittest.TestCase):
         self.assertEqual(variable.get(), 'ملغى')
         self.assertEqual(variable._display_to_logical[variable._logical_to_display['ساري']], 'ساري')
 
+    def test_arabic_display_shaping_is_idempotent_and_preserves_latin(self):
+        displayed = self.app.rtl_display('رخصة الدخول — SchoolPass 2.5.1')
+        self.assertEqual(self.app.rtl_display(displayed), displayed)
+        self.assertEqual(self.app.rtl_display('SchoolPass 2.5.1'), 'SchoolPass 2.5.1')
+
+    def test_dashboard_reflows_for_small_and_large_windows(self):
+        app = self.make_app(self.admin)
+        app._adapt_dashboard_layout(520)
+        self.assertEqual(app._dashboard_layout, 'stacked')
+        self.assertEqual(app.maximize_button.kw.get('text'), '□ تكبير')
+        app._adapt_dashboard_layout(1200)
+        self.assertEqual(app._dashboard_layout, 'side_by_side')
+        self.assertEqual(app.maximize_button.kw.get('text'), '□ استعادة / تكبير')
+        self.assertEqual(app.update_button.kw.get('text'), 'بحث عن تحديثات')
+
     def test_qr_phone_scan_is_logged_anonymously_without_opening_windows(self):
         a = self.make_app(self.sup)
         rec = core.create_late_slip(self.s1, self.sup, 'اختبار QR')

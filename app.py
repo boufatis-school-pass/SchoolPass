@@ -43,9 +43,23 @@ def _window_background() -> str:
 
 
 def configure_window(win, title: str, geometry: str = '900x620'):
+    """Configure a resizable window without imposing a larger minimum than its screen."""
     win.title(title)
     win.geometry(geometry)
-    win.minsize(760, 520)
+    try:
+        match = re.match(r'^(\d+)x(\d+)', str(geometry))
+        requested_w, requested_h = (int(match.group(1)), int(match.group(2))) if match else (900, 620)
+        screen_w = int(win.winfo_screenwidth() or 1366)
+        screen_h = int(win.winfo_screenheight() or 768)
+        min_w = min(requested_w, max(440, screen_w - 100))
+        min_h = min(requested_h, max(260, screen_h - 120))
+        win.minsize(min_w, min_h)
+        win.resizable(True, True)
+    except Exception:
+        try:
+            win.minsize(min(760, 900), min(520, 620))
+        except Exception:
+            pass
     try:
         win.configure(background=_window_background())
     except Exception:
@@ -68,13 +82,53 @@ def _install_toplevel_background():
     if getattr(Toplevel, '_schoolpass_theme_installed', False):
         return
     original_init = Toplevel.__init__
+    original_geometry = getattr(Toplevel, 'geometry', None)
+    original_minsize = getattr(Toplevel, 'minsize', None)
+
     def themed_init(self, *args, **kwargs):
         original_init(self, *args, **kwargs)
         try:
             self.configure(background=_window_background())
         except Exception:
             pass
+
+    def screen_fit_geometry(self, *args):
+        # Keep fixed-size dialogs inside the usable desktop area, including on
+        # Windows machines where display scaling reduces the logical work area.
+        if args and isinstance(args[0], str):
+            match = re.match(r'^(\d+)x(\d+)(.*)$', args[0])
+            if match:
+                try:
+                    screen_w = int(self.winfo_screenwidth() or 1366)
+                    screen_h = int(self.winfo_screenheight() or 768)
+                    width = min(int(match.group(1)), max(360, screen_w - 70))
+                    height = min(int(match.group(2)), max(300, screen_h - 90))
+                    args = (f'{width}x{height}{match.group(3)}',) + args[1:]
+                except Exception:
+                    pass
+        if callable(original_geometry):
+            return original_geometry(self, *args)
+        return None
+
+    def screen_fit_minsize(self, width=None, height=None):
+        try:
+            screen_w = int(self.winfo_screenwidth() or 1366)
+            screen_h = int(self.winfo_screenheight() or 768)
+            if width is not None:
+                width = min(int(width), max(360, screen_w - 70))
+            if height is not None:
+                height = min(int(height), max(300, screen_h - 90))
+        except Exception:
+            pass
+        if callable(original_minsize):
+            return original_minsize(self, width, height)
+        return None
+
     Toplevel.__init__ = themed_init
+    if callable(original_geometry):
+        Toplevel.geometry = screen_fit_geometry
+    if callable(original_minsize):
+        Toplevel.minsize = screen_fit_minsize
     Toplevel._schoolpass_theme_installed = True
 
 _install_toplevel_background()
@@ -125,64 +179,72 @@ def make_style(root: Tk, primary: str | None = None, secondary: str | None = Non
     style.configure('TFrame', background=bg)
     style.configure('Surface.TFrame', background=surface, relief='flat')
     style.configure('Sidebar.TFrame', background=green)
-    style.configure('TLabel', background=bg, foreground=ink, font=('Segoe UI', 10))
-    style.configure('Title.TLabel', background=bg, foreground=green2 if dark else green, font=('Segoe UI', 21, 'bold'))
+    style.configure('TLabel', background=bg, foreground=ink, font=('Segoe UI', 9), anchor='e')
+    style.configure('Title.TLabel', background=bg, foreground=green2 if dark else green, font=('Segoe UI', 18, 'bold'))
     style.configure('Subtitle.TLabel', background=bg, foreground=muted, font=('Segoe UI', 10))
     style.configure('Badge.TLabel', background=palette['green_soft'], foreground=palette['sidebar_text'] if dark else green,
-                    padding=(12, 9), font=('Segoe UI', 9, 'bold'))
+                    padding=(9, 6), font=('Segoe UI', 9, 'bold'))
     style.configure('Hint.TLabel', background=surface, foreground=muted, font=('Segoe UI', 9))
     style.configure('Status.TLabel', background=palette['green_soft'], foreground=ink, anchor='e', padding=(12, 6))
     style.configure('Section.TLabel', background=surface, foreground=green2 if dark else green, font=('Segoe UI', 13, 'bold'))
     style.configure('CardTitle.TLabel', background=surface, foreground=muted, font=('Segoe UI', 9, 'bold'))
-    style.configure('CardValue.TLabel', background=surface, foreground=palette['sidebar_muted'] if dark else green, font=('Segoe UI', 25, 'bold'))
+    style.configure('CardValue.TLabel', background=surface, foreground=palette['sidebar_muted'] if dark else green, font=('Segoe UI', 22, 'bold'))
     style.configure('SidebarTitle.TLabel', background=green, foreground=palette['sidebar_text'], font=('Segoe UI', 18, 'bold'))
     style.configure('SidebarSub.TLabel', background=green, foreground=palette['sidebar_muted'], font=('Segoe UI', 9))
     style.configure('Nav.TButton', background=green, foreground='#EAF3EF', borderwidth=0,
-                    focusthickness=0, padding=(14, 12), anchor='e', font=('Segoe UI', 10, 'bold'))
+                    focusthickness=0, padding=(10, 8), anchor='e', font=('Segoe UI', 9, 'bold'))
     style.map('Nav.TButton', background=[('active', '#28624E' if dark else '#1B5B4A'), ('pressed', '#0B3028')],
               foreground=[('active', '#FFFFFF')])
     style.configure('TButton', background=palette['heading'], foreground=ink, borderwidth=0,
-                    focusthickness=0, padding=(12, 10), font=('Segoe UI', 9, 'bold'))
+                    focusthickness=0, padding=(9, 6), font=('Segoe UI', 9, 'bold'))
     style.map('TButton', background=[('active', palette['selected']), ('pressed', palette['selected'])])
     style.configure('Accent.TButton', background=green2, foreground='#FFFFFF', borderwidth=0,
-                    focusthickness=0, padding=(15, 11), font=('Segoe UI', 10, 'bold'))
+                    focusthickness=0, padding=(11, 7), font=('Segoe UI', 9, 'bold'))
     style.map('Accent.TButton', background=[('active', '#23775B'), ('pressed', '#14523E')],
               foreground=[('disabled', '#D6E2DD')])
     style.configure('Gold.TButton', background=gold, foreground='#27372F', borderwidth=0,
-                    padding=(14, 10), font=('Segoe UI', 10, 'bold'))
+                    padding=(10, 7), font=('Segoe UI', 9, 'bold'))
     style.map('Gold.TButton', background=[('active', '#CDA849'), ('pressed', '#B99036')])
-    style.configure('Treeview', font=('Segoe UI', 10), rowheight=40, background=surface,
+    style.configure('Treeview', font=('Segoe UI', 10), rowheight=32, background=surface,
                     fieldbackground=surface, foreground=ink, borderwidth=0, relief='flat')
     style.configure('Treeview.Heading', font=('Segoe UI', 9, 'bold'), background=palette['heading'],
-                    foreground=ink, padding=(10, 12), relief='flat')
+                    foreground=ink, padding=(8, 8), relief='flat')
     style.map('Treeview', background=[('selected', palette['selected'])], foreground=[('selected', ink)])
-    style.configure('TEntry', padding=9, fieldbackground=palette['field'], foreground=ink)
-    style.configure('TCombobox', padding=9, fieldbackground=palette['field'], foreground=ink)
+    style.configure('TEntry', padding=6, fieldbackground=palette['field'], foreground=ink)
+    style.configure('TCombobox', padding=6, fieldbackground=palette['field'], foreground=ink)
     style.configure('TNotebook', background=bg, borderwidth=0)
     style.configure('TNotebook.Tab', padding=(15, 10), font=('Segoe UI', 9, 'bold'))
     style.configure('Horizontal.TProgressbar', troughcolor=border, background=green2)
     style.configure('Vertical.TScrollbar', background=palette['heading'], troughcolor=bg,
-                    bordercolor=bg, arrowcolor=muted, width=12)
+                    bordercolor=bg, arrowcolor=muted, width=11)
     style.configure('Horizontal.TScrollbar', background=palette['heading'], troughcolor=bg,
-                    bordercolor=bg, arrowcolor=muted, width=12)
+                    bordercolor=bg, arrowcolor=muted, width=11)
     style.map('TCombobox', fieldbackground=[('readonly', palette['field'])],
               foreground=[('readonly', ink)])
     style.map('TNotebook.Tab', background=[('selected', surface), ('active', palette['selected'])],
               foreground=[('selected', green if not dark else palette['sidebar_text'])])
-    style.configure('Alert.TLabel', background=palette['alert_bg'], foreground=palette['alert_fg'], padding=(12, 9), font=('Segoe UI', 9, 'bold'))
-    style.configure('Good.TLabel', background=palette['good_bg'], foreground=palette['good_fg'], padding=(12, 9), font=('Segoe UI', 9, 'bold'))
+    style.configure('Alert.TLabel', background=palette['alert_bg'], foreground=palette['alert_fg'], padding=(9, 6), font=('Segoe UI', 9, 'bold'))
+    style.configure('Good.TLabel', background=palette['good_bg'], foreground=palette['good_fg'], padding=(9, 6), font=('Segoe UI', 9, 'bold'))
 
 
 RTL_SHAPING_ENABLED = True
 
 def rtl_display(value) -> str:
-    """Shape each line independently so paragraph wrapping cannot reorder whole lines."""
+    """Return a Tk-ready Arabic visual string exactly once; preserve logical data elsewhere."""
     text = str(value if value is not None else '')
     if not text or not RTL_SHAPING_ENABLED:
         return text
+    # python-bidi/arabic-reshaper output presentation-form code points. Detect them
+    # to prevent a second shaping/reordering pass when a widget is reconfigured.
+    if any(0xFB50 <= ord(ch) <= 0xFDFF or 0xFE70 <= ord(ch) <= 0xFEFF for ch in text):
+        return text
+    has_arabic = any(0x0600 <= ord(ch) <= 0x06FF or 0x0750 <= ord(ch) <= 0x077F or
+                     0x08A0 <= ord(ch) <= 0x08FF for ch in text)
+    if not has_arabic:
+        return text
     try:
         return "\n".join(core._arabic_visual(line) if line.strip() else line for line in text.split("\n"))
-    except (ImportError, RuntimeError):
+    except (ImportError, RuntimeError, ValueError):
         return text
 
 def _wrap_messageboxes_once():
@@ -253,10 +315,20 @@ def _install_rtl_widget_adapters():
         ArabicTextWidget.__name__ = f'ArabicAware{class_name}'
         setattr(ttk, class_name, ArabicTextWidget)
 
+    original_entry = ttk.Entry
+
+    class ArabicAwareEntry(original_entry):
+        def __init__(self, master=None, **kwargs):
+            kwargs.setdefault('justify', 'right')
+            super().__init__(master, **kwargs)
+
+    ttk.Entry = ArabicAwareEntry
+
     original_combo = ttk.Combobox
 
     class ArabicAwareCombobox(original_combo):
         def __init__(self, master=None, **kwargs):
+            kwargs.setdefault('justify', 'right')
             self._schoolpass_original_values = tuple(kwargs.get('values', ()))
             self._schoolpass_display_to_logical = {rtl_display(v): str(v) for v in self._schoolpass_original_values}
             self._schoolpass_logical_to_display = {str(v): rtl_display(v) for v in self._schoolpass_original_values}
@@ -287,11 +359,94 @@ def _install_rtl_widget_adapters():
                 kwargs['values'] = tuple(rtl_display(v) if isinstance(v, str) else v for v in kwargs['values'])
             return super().insert(parent, index, iid=iid, **kwargs)
 
+        def item(self, item, option=None, **kwargs):
+            if 'values' in kwargs:
+                kwargs['values'] = tuple(rtl_display(v) if isinstance(v, str) else v for v in kwargs['values'])
+            return super().item(item, option, **kwargs)
+
     ttk.Treeview = ArabicAwareTreeview
     ttk._schoolpass_rtl_installed = True
 
 
 _install_rtl_widget_adapters()
+
+
+class ScrollableFrame(ttk.Frame):
+    """A width-following vertical content area with reliable Windows mouse-wheel scrolling."""
+    def __init__(self, master, *, inner_style='TFrame', canvas_background=None, width=None, **kwargs):
+        super().__init__(master, width=width, **kwargs)
+        self.canvas = Canvas(self, highlightthickness=0, bd=0,
+                             background=canvas_background or _window_background())
+        self.scrollbar = ttk.Scrollbar(self, orient='vertical', command=self.canvas.yview)
+        self.canvas.configure(yscrollcommand=self.scrollbar.set)
+        self.scrollbar.pack(side=RIGHT, fill=Y)
+        self.canvas.pack(side=LEFT, fill=BOTH, expand=True)
+        self.inner = ttk.Frame(self.canvas, style=inner_style)
+        self._window_id = self.canvas.create_window((0, 0), window=self.inner, anchor='nw')
+        self.inner.bind('<Configure>', self._update_scroll_region)
+        self.canvas.bind('<Configure>', self._fit_inner_width)
+        self.bind_all('<MouseWheel>', self._on_mousewheel, add='+')
+        self.bind_all('<Button-4>', self._on_mousewheel, add='+')
+        self.bind_all('<Button-5>', self._on_mousewheel, add='+')
+
+    def _update_scroll_region(self, _event=None):
+        try:
+            self.canvas.configure(scrollregion=self.canvas.bbox('all'))
+        except Exception:
+            pass
+
+    def _fit_inner_width(self, event=None):
+        try:
+            width = int(getattr(event, 'width', 0) or self.canvas.winfo_width())
+            self.canvas.itemconfigure(self._window_id, width=max(1, width))
+        except Exception:
+            pass
+
+    def set_canvas_background(self, color):
+        try:
+            self.canvas.configure(background=color)
+        except Exception:
+            pass
+
+    def _on_mousewheel(self, event):
+        # Only scroll the container under the pointer; leave tables, text boxes,
+        # combo boxes and entries to their own native scrolling/selection behavior.
+        node = getattr(event, 'widget', None)
+        inside = False
+        while node is not None:
+            if node is self.inner or node is self.canvas:
+                inside = True
+                break
+            try:
+                parent = node.master
+            except Exception:
+                parent = None
+            if callable(parent):
+                parent = None
+            node = parent
+        if not inside:
+            return None
+        try:
+            widget_class = str(event.widget.winfo_class()).lower()
+        except Exception:
+            widget_class = type(getattr(event, 'widget', None)).__name__.lower()
+        if any(name in widget_class for name in ('treeview', 'entry', 'combobox', 'text', 'listbox', 'scrollbar')):
+            return None
+        number = getattr(event, 'num', None)
+        if number == 4:
+            units = -3
+        elif number == 5:
+            units = 3
+        else:
+            delta = int(getattr(event, 'delta', 0) or 0)
+            if not delta:
+                return None
+            units = -int(delta / 120) if abs(delta) >= 120 else (-1 if delta > 0 else 1)
+        try:
+            self.canvas.yview_scroll(units, 'units')
+            return 'break'
+        except Exception:
+            return None
 
 
 def show_error(parent, title: str, exc: Exception):
@@ -563,9 +718,10 @@ class RecordForm:
         self.win.minsize(640, 560)
         self.win.transient(app.root)
         self.win.grab_set()
-        ttk.Label(self.win, text=self.title, style='Title.TLabel').pack(pady=(16, 8))
-        form = ttk.Frame(self.win)
-        form.pack(fill=BOTH, expand=True, padx=25, pady=4)
+        ttk.Label(self.win, text=self.title, style='Title.TLabel').pack(pady=(12, 6))
+        form_scroll = ScrollableFrame(self.win, inner_style='TFrame')
+        form_scroll.pack(fill=BOTH, expand=True, padx=12, pady=4)
+        form = form_scroll.inner
         self.vars: dict[str, StringVar] = {}
         self.check_vars: dict[str, BooleanVar] = {}
 
@@ -593,12 +749,12 @@ class RecordForm:
             end_entry = add_row(form, 'return_date', 'تاريخ العودة (YYYY-MM-DD)', date_today())
             add_row(form, 'reason', 'ملاحظة (اختياري)')
             ttk.Label(form, text='يُحتسب الغياب من تاريخ بدايته إلى اليوم السابق للعودة؛ يوم العودة غير محسوب، ولا تُسجل الساعات.',
-                      foreground='#526579', wraplength=680).pack(anchor=E, pady=2)
+                      foreground='#526579', wraplength=520).pack(anchor=E, pady=2)
 
             rule_box = ttk.Frame(form, relief='groove', borderwidth=1)
             rule_box.pack(fill=X, pady=7)
             ttk.Label(rule_box, text='قاعدة قبول تبرير الغياب', font=('Segoe UI', 9, 'bold')).pack(anchor=E, padx=8, pady=(4, 0))
-            self.rule_label = ttk.Label(rule_box, text='أدخل التاريخين لتحديد طريقة التبرير.', anchor=E, wraplength=650)
+            self.rule_label = ttk.Label(rule_box, text='أدخل التاريخين لتحديد طريقة التبرير.', anchor=E, wraplength=500)
             self.rule_label.pack(fill=X, padx=10, pady=6)
 
             method_row = ttk.Frame(form)
@@ -840,7 +996,7 @@ class SchoolPassApp:
             sh = int(root.winfo_screenheight() or 768)
         except (TypeError, ValueError):
             sw, sh = 1366, 768
-        root.minsize(min(940, max(760, sw - 60)), min(650, max(520, sh - 100)))
+        root.minsize(min(900, max(680, sw - 80)), min(560, max(440, sh - 120)))
         root.resizable(True, True)
         self._windowed_geometry = '1180x760'
         self._fullscreen_mode = False
@@ -1102,9 +1258,13 @@ class SchoolPassApp:
         shell = ttk.Frame(self.root)
         shell.pack(fill=BOTH, expand=True)
 
-        sidebar = ttk.Frame(shell, style='Sidebar.TFrame', width=238)
-        sidebar.pack(side=RIGHT, fill=Y)
-        sidebar.pack_propagate(False)
+        sidebar_scroll = ScrollableFrame(shell, inner_style='Sidebar.TFrame',
+                                         canvas_background='#22312C' if core.setting('theme', 'light') == 'dark' else core.get_theme_colors()[0],
+                                         width=238)
+        sidebar_scroll.pack(side=RIGHT, fill=Y)
+        sidebar_scroll.configure(width=238)
+        self.sidebar_scroll = sidebar_scroll
+        sidebar = sidebar_scroll.inner
         brand = ttk.Frame(sidebar, style='Sidebar.TFrame')
         brand.pack(fill=X, padx=18, pady=(25, 22))
         ttk.Label(brand, text='SchoolPass', style='SidebarTitle.TLabel').pack(anchor=E)
@@ -1134,28 +1294,36 @@ class SchoolPassApp:
         ttk.Frame(sidebar, style='Sidebar.TFrame').pack(fill=BOTH, expand=True)
         ttk.Label(sidebar, text=f'الإصدار الرسمي {APP_VERSION}', style='SidebarSub.TLabel').pack(anchor=E, padx=18, pady=16)
 
-        content = ttk.Frame(shell)
-        content.pack(side=LEFT, fill=BOTH, expand=True)
+        content_outer = ttk.Frame(shell)
+        content_outer.pack(side=LEFT, fill=BOTH, expand=True)
+        main_scroll = ScrollableFrame(content_outer, inner_style='TFrame', canvas_background=_window_background())
+        main_scroll.pack(fill=BOTH, expand=True)
+        self.main_scroll = main_scroll
+        content = main_scroll.inner
         self.content_frame = content
         content.bind('<Configure>', lambda event: self._adapt_dashboard_layout(event.width))
         header = ttk.Frame(content)
-        header.pack(fill=X, padx=24, pady=(18, 9))
+        header.pack(fill=X, padx=18, pady=(14, 7))
         right_head = ttk.Frame(header)
-        right_head.pack(side=RIGHT, fill=X, expand=True)
+        right_head.pack(fill=X, expand=True)
         ttk.Label(right_head, text=setting('school_name', SCHOOL_NAME), style='Title.TLabel').pack(anchor=E)
-        ttk.Label(right_head, text='منصة إدارية موحدة لتصاريح الدخول والخروج وسجل المتابعة  •  F5 تحديث  •  Ctrl+1/2/3 إصدار الرخص',
-                  style='Subtitle.TLabel').pack(anchor=E, pady=(4, 0))
-        controls = ttk.Frame(header)
-        controls.pack(side=LEFT, padx=(8, 0), anchor='n')
-        self.maximize_button = ttk.Button(controls, text='□  تكبير الشاشة', command=self.toggle_maximize)
-        self.maximize_button.pack(side=LEFT, padx=3)
-        ttk.Button(controls, text='⟳  تحديث البيانات', command=self.refresh_all).pack(side=LEFT, padx=3)
-        ttk.Button(controls, text='بحث عن تحديثات', command=self.check_for_updates).pack(side=LEFT, padx=3)
+        ttk.Label(right_head, text='منصة إدارية لتصاريح الدخول والخروج وسجل المتابعة',
+                  style='Subtitle.TLabel').pack(anchor=E, pady=(3, 0))
+        toolbar = ttk.Frame(header)
+        toolbar.pack(fill=X, pady=(7, 0))
+        controls = ttk.Frame(toolbar)
+        controls.pack(side=LEFT, anchor='w')
+        self.maximize_button = ttk.Button(controls, text='□  استعادة / تكبير', command=self.toggle_maximize)
+        self.maximize_button.pack(side=LEFT, padx=2)
+        self.refresh_button = ttk.Button(controls, text='⟳  تحديث البيانات', command=self.refresh_all)
+        self.refresh_button.pack(side=LEFT, padx=2)
+        self.update_button = ttk.Button(controls, text='بحث عن تحديثات', command=self.check_for_updates)
+        self.update_button.pack(side=LEFT, padx=2)
         self.theme_button = ttk.Button(controls, text=('☀  الوضع النهاري' if core.setting('theme', 'light') == 'dark' else '☾  الوضع الليلي'), command=self.toggle_theme)
-        self.theme_button.pack(side=LEFT, padx=3)
-        self.user_badge = ttk.Label(header, text=f"{self.current_user['display_name']}  •  {'مدير النظام' if self.current_user['role']=='admin' else 'مشرف'}",
+        self.theme_button.pack(side=LEFT, padx=2)
+        self.user_badge = ttk.Label(toolbar, text=f"{self.current_user['display_name']}  •  {'مدير النظام' if self.current_user['role']=='admin' else 'مشرف'}",
                                     style='Badge.TLabel')
-        self.user_badge.pack(side=LEFT, padx=(8, 0), anchor='n')
+        self.user_badge.pack(side=RIGHT, padx=(0, 6), anchor='center')
 
         # KPI cards in a responsive 3x2 grid (no squeezed six-card row on 1366x768).
         cards = ttk.Frame(content)
@@ -1165,13 +1333,15 @@ class SchoolPassApp:
             ('students', 'إجمالي التلاميذ النشطين'), ('today_entry', 'التلاميذ الحاصلون على رخصة الدخول اليوم'), ('today_exit', 'التلاميذ الحاصلون على رخصة الخروج اليوم'),
             ('late', 'التلاميذ المتأخرون اليوم'), ('absence', 'العائدون بعد الغياب اليوم'), ('open', 'خروج دون تسجيل العودة')
         ]
+        self.cards_frame = cards
+        self.kpi_cards = []
         for col in range(3):
             cards.grid_columnconfigure(col, weight=1, uniform='kpi')
         for idx, (key, label) in enumerate(card_specs):
-            row, col = divmod(idx, 3)
-            card = ttk.Frame(cards, style='Surface.TFrame', padding=(13, 9))
-            card.grid(row=row, column=2-col, sticky='nsew', padx=4, pady=4)
-            title_label = ttk.Label(card, text=label, style='CardTitle.TLabel')
+            card = ttk.Frame(cards, style='Surface.TFrame', padding=(11, 7))
+            self.kpi_cards.append(card)
+            card.grid(row=idx // 3, column=2 - (idx % 3), sticky='nsew', padx=4, pady=3)
+            title_label = ttk.Label(card, text=label, style='CardTitle.TLabel', wraplength=260, justify='right')
             title_label.pack(anchor=E)
             value = ttk.Label(card, text='—', style='CardValue.TLabel')
             value.pack(anchor=E, pady=(3, 0))
@@ -1221,13 +1391,18 @@ class SchoolPassApp:
         ttk.Button(alert_panel, text='فتح سجل العمليات', command=self.open_logs).pack(fill=X, pady=2)
 
         action_row = ttk.Frame(content)
-        action_row.pack(fill=X, padx=24, pady=(0, 7))
-        ttk.Button(action_row, text='＋  إصدار رخصة الدخول — تأخر', command=lambda: RecordForm(self, 'late'), style='Accent.TButton').pack(side=RIGHT, padx=(0, 7))
-        ttk.Button(action_row, text='↩  رخصة عودة بعد الغياب', command=lambda: RecordForm(self, 'absence_return')).pack(side=RIGHT, padx=7)
-        ttk.Button(action_row, text='⇥  إصدار رخصة خروج', command=lambda: RecordForm(self, 'exit_permit'), style='Gold.TButton').pack(side=RIGHT, padx=7)
+        action_row.pack(fill=X, padx=18, pady=(0, 7))
+        self.dashboard_action_buttons = []
+        def add_dashboard_action(parent, full, compact, command, style=None, side=RIGHT):
+            button = ttk.Button(parent, text=full, command=command, style=style or 'TButton')
+            button.pack(side=side, padx=3)
+            self.dashboard_action_buttons.append((button, full, compact))
+        add_dashboard_action(action_row, '＋  إصدار رخصة الدخول — تأخر', '＋ دخول — تأخر', lambda: RecordForm(self, 'late'), 'Accent.TButton')
+        add_dashboard_action(action_row, '↩  رخصة عودة بعد الغياب', '↩ عودة بعد الغياب', lambda: RecordForm(self, 'absence_return'))
+        add_dashboard_action(action_row, '⇥  إصدار رخصة خروج', '⇥ خروج', lambda: RecordForm(self, 'exit_permit'), 'Gold.TButton')
         if self.current_user['role'] == 'admin':
-            ttk.Button(action_row, text='التقرير اليومي التفصيلي A4', command=self.daily_summary, style='Accent.TButton').pack(side=LEFT, padx=3)
-        ttk.Button(action_row, text='التقرير الشهري', command=self.monthly_report).pack(side=LEFT, padx=3)
+            add_dashboard_action(action_row, 'التقرير اليومي التفصيلي A4', 'التقرير اليومي A4', self.daily_summary, 'Accent.TButton', LEFT)
+        add_dashboard_action(action_row, 'التقرير الشهري', 'شهري', self.monthly_report, 'TButton', LEFT)
 
         panel = ttk.Frame(content, style='Surface.TFrame', padding=(13, 10))
         panel.pack(fill=BOTH, expand=True, padx=22, pady=(0, 12))
@@ -1262,14 +1437,20 @@ class SchoolPassApp:
         self.tree.bind('<Double-1>', self.open_selected_record)
         bar = ttk.Frame(panel, style='Surface.TFrame')
         bar.pack(fill=X, pady=(8, 0))
-        ttk.Button(bar, text='عرض التفاصيل', command=self.open_selected_record).pack(side=RIGHT, padx=3)
-        ttk.Button(bar, text='إعادة الطباعة', command=self.reprint_selected, style='Accent.TButton').pack(side=RIGHT, padx=3)
-        ttk.Button(bar, text='تسجيل العودة', command=self.return_selected_exit).pack(side=RIGHT, padx=3)
-        ttk.Button(bar, text='إلغاء السجل', command=self.cancel_selected).pack(side=LEFT, padx=3)
-        ttk.Button(bar, text='طباعة رخصتين مختلفتين على A4', command=self.print_two_selected, style='Gold.TButton').pack(side=LEFT, padx=6)
+        self.record_action_buttons = []
+        def add_record_action(full, compact, command, style=None, side=RIGHT):
+            button = ttk.Button(bar, text=full, command=command, style=style or 'TButton')
+            button.pack(side=side, padx=3)
+            self.record_action_buttons.append((button, full, compact))
+        add_record_action('عرض التفاصيل', 'تفاصيل', self.open_selected_record)
+        add_record_action('إعادة الطباعة', 'إعادة طباعة', self.reprint_selected, 'Accent.TButton')
+        add_record_action('تسجيل العودة', 'عودة', self.return_selected_exit)
+        add_record_action('إلغاء السجل', 'إلغاء', self.cancel_selected, side=LEFT)
+        add_record_action('طباعة رخصتين مختلفتين على A4', 'رخصتان A4', self.print_two_selected, 'Gold.TButton', LEFT)
         self.status_text = DisplayStringVar(value='')
-        status = ttk.Label(content, textvariable=self.status_text, style='Status.TLabel')
+        status = ttk.Label(content_outer, textvariable=self.status_text, style='Status.TLabel')
         status.pack(fill=X, side='bottom')
+        self.root.after_idle(lambda: self._adapt_dashboard_layout(self.content_frame.winfo_width()))
 
     def _apply_main_tree_tags(self):
         if not hasattr(self, 'tree'):
@@ -1288,6 +1469,11 @@ class SchoolPassApp:
             core.set_setting('theme', selected)
             make_style(self.root)
             self._apply_main_tree_tags()
+            surface_background = '#17211E' if selected == 'dark' else core.get_theme_colors()[1]
+            if hasattr(self, 'main_scroll'):
+                self.main_scroll.set_canvas_background(surface_background)
+            if hasattr(self, 'sidebar_scroll'):
+                self.sidebar_scroll.set_canvas_background('#17211E' if selected == 'dark' else core.get_theme_colors()[0])
             # Canvas/text widgets do not inherit ttk styles; update the live dashboard.
             if hasattr(self, 'dashboard_chart'):
                 self.dashboard_chart.configure(background='#22312C' if selected == 'dark' else '#FFFFFF')
@@ -1299,15 +1485,33 @@ class SchoolPassApp:
             show_error(self.root, 'تعذر تغيير المظهر', exc)
 
     def _adapt_dashboard_layout(self, available_width: int):
-        """Stack chart and alert cards on narrower displays instead of clipping controls."""
+        """Reflow dashboard cards and controls as the available width changes."""
+        width = max(1, int(available_width or 1))
+        if hasattr(self, 'kpi_cards'):
+            columns = 3 if width >= 1050 else (2 if width >= 650 else 1)
+            for index, card in enumerate(self.kpi_cards):
+                card.grid_configure(row=index // columns, column=columns - 1 - (index % columns))
+            for col in range(3):
+                self.cards_frame.grid_columnconfigure(col, weight=1 if col < columns else 0,
+                                                      uniform='kpi' if col < columns else '')
+        compact = width < 900
+        if hasattr(self, 'maximize_button'):
+            self.maximize_button.configure(text='□ تكبير' if compact else '□ استعادة / تكبير')
+            self.refresh_button.configure(text='⟳ تحديث' if compact else '⟳ تحديث البيانات')
+            self.update_button.configure(text='تحديثات' if compact else 'بحث عن تحديثات')
+            self.theme_button.configure(text=('☀ نهاري' if compact else '☀ الوضع النهاري') if core.setting('theme', 'light') == 'dark'
+                                        else ('☾ ليلي' if compact else '☾ الوضع الليلي'))
+        for button, full, short in getattr(self, 'dashboard_action_buttons', []):
+            button.configure(text=short if compact else full)
+        for button, full, short in getattr(self, 'record_action_buttons', []):
+            button.configure(text=short if compact else full)
         if not hasattr(self, 'chart_panel') or not hasattr(self, 'alert_panel'):
             return
-        narrow = int(available_width or 0) < 900
-        layout = 'stacked' if narrow else 'side_by_side'
+        layout = 'stacked' if compact else 'side_by_side'
         if getattr(self, '_dashboard_layout', None) == layout:
             return
         self._dashboard_layout = layout
-        if narrow:
+        if compact:
             self.chart_panel.pack_configure(side='top', fill=X, expand=True, padx=(0, 0), pady=(0, 5))
             self.alert_panel.pack_configure(side='top', fill=X, expand=False, padx=(0, 0), pady=(0, 0))
             self.dashboard_chart.configure(height=125)
@@ -2181,11 +2385,12 @@ class SchoolPassApp:
             return
         win = Toplevel(self.root)
         win.title('إعدادات المؤسسة')
-        win.geometry('760x850')
+        win.geometry('760x720')
         win.transient(self.root)
-        ttk.Label(win, text='إعدادات المؤسسة', style='Title.TLabel').pack(pady=(18, 8))
-        form = ttk.Frame(win)
-        form.pack(fill=X, padx=25, pady=6)
+        ttk.Label(win, text='إعدادات المؤسسة', style='Title.TLabel').pack(pady=(12, 6))
+        settings_scroll = ScrollableFrame(win, inner_style='TFrame')
+        settings_scroll.pack(fill=BOTH, expand=True, padx=12, pady=4)
+        form = settings_scroll.inner
         name = StringVar(value=setting('school_name', SCHOOL_NAME))
         host = StringVar(value=core.qr_host())
         primary_saved, secondary_saved = core.get_theme_colors()
@@ -2276,8 +2481,10 @@ class SchoolPassApp:
                     show_error(win, 'تعذر', exc)
                     return
                 show_recovery_code(win, code)
-        ttk.Button(win, text='حفظ الإعدادات', command=save, style='Accent.TButton').pack(pady=10)
-        ttk.Button(win, text='إنشاء رمز استرداد جديد للمدير', command=new_code).pack(pady=4)
+        settings_actions = ttk.Frame(win)
+        settings_actions.pack(fill=X, padx=12, pady=(4, 9))
+        ttk.Button(settings_actions, text='حفظ الإعدادات', command=save, style='Accent.TButton').pack(side=RIGHT, padx=4)
+        ttk.Button(settings_actions, text='إنشاء رمز استرداد جديد للمدير', command=new_code).pack(side=RIGHT, padx=4)
 
     def audit_view(self):
         if self.current_user['role'] != 'admin':

@@ -1,26 +1,38 @@
-
-# Python cache
+# Python
 __pycache__/
 *.py[cod]
-
-# Test cache
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
 # Build outputs
 build/
 dist/
+*.spec
+*.egg-info/
 
-# Virtual environments
-.venv/
-venv/
-env/
-
-# Local secrets
+# Local configuration and secrets
 .env
 .env.*
+*.token
+*.secret
 
-# Editor and OS files
-.vscode/
-.idea/
-.DS_Store
-Thumbs.db
+# School and user data — never commit these
+*.sqlite
+*.sqlite3
+*.sqlite3-*
+*.db
+*.db-*
+*.bak
+*.backup
+backups/
+logs/
+prints/
+student*.csv
+students*.csv
+قوائم_التلاميذ*.csv
+قائمة_التلاميذ_الحقيقية*.csv
+
+# Test artifacts
+.testdata/
+test_report.txt
