@@ -272,11 +272,11 @@ class TestGuiSmoke(unittest.TestCase):
         app = self.make_app(self.admin)
         app._adapt_dashboard_layout(520)
         self.assertEqual(app._dashboard_layout, 'stacked')
-        self.assertEqual(app.maximize_button.kw.get('text'), '□ تكبير')
+        self.assertEqual(app.maximize_button.kw.get('text'), self.app.rtl_display('□ تكبير'))
         app._adapt_dashboard_layout(1200)
         self.assertEqual(app._dashboard_layout, 'side_by_side')
-        self.assertEqual(app.maximize_button.kw.get('text'), '□ استعادة / تكبير')
-        self.assertEqual(app.update_button.kw.get('text'), 'بحث عن تحديثات')
+        self.assertEqual(app.maximize_button.kw.get('text'), self.app.rtl_display('□ استعادة / تكبير'))
+        self.assertEqual(app.update_button.kw.get('text'), self.app.rtl_display('بحث عن تحديثات'))
 
     def test_qr_phone_scan_is_logged_anonymously_without_opening_windows(self):
         a = self.make_app(self.sup)
