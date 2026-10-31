@@ -230,7 +230,7 @@ try {
     Write-Host "SHA256: $hash" -ForegroundColor Green
 
     exit 0
-
+    
 } catch {
     Write-Host "`nInstaller creation failed: $($_.Exception.Message)" -ForegroundColor Red
     Write-Host 'Portable application files and database were not deleted.' -ForegroundColor Yellow
