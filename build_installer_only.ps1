@@ -124,3 +124,4 @@ try {
     Write-Host "The portable application files and database were not deleted." -ForegroundColor Yellow
     exit 1
 }
+
