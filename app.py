@@ -318,34 +318,62 @@ def _install_rtl_widget_adapters():
         ArabicTextWidget.__name__ = f'ArabicAware{class_name}'
         setattr(ttk, class_name, ArabicTextWidget)
 
+    # Keep references to the original Tk themed classes before patching ttk.
+    # ttk.Combobox.__init__ internally resolves ttk.Entry from module globals.
+    # Replacing ttk.Entry first can therefore cause an incompatible subclass call.
     original_entry = ttk.Entry
+    original_combo = ttk.Combobox
 
     class ArabicAwareEntry(original_entry):
         def __init__(self, master=None, *args, **kwargs):
             kwargs.setdefault('justify', 'right')
-            super().__init__(master, *args, **kwargs)
-
-    ttk.Entry = ArabicAwareEntry
-
-    original_combo = ttk.Combobox
+            original_entry.__init__(self, master, *args, **kwargs)
 
     class ArabicAwareCombobox(original_combo):
         def __init__(self, master=None, *args, **kwargs):
             kwargs.setdefault('justify', 'right')
+
             self._schoolpass_original_values = tuple(kwargs.get('values', ()))
-            self._schoolpass_display_to_logical = {rtl_display(v): str(v) for v in self._schoolpass_original_values}
-            self._schoolpass_logical_to_display = {str(v): rtl_display(v) for v in self._schoolpass_original_values}
+
+            self._schoolpass_display_to_logical = {
+                rtl_display(v): str(v)
+                for v in self._schoolpass_original_values
+            }
+
+            self._schoolpass_logical_to_display = {
+                str(v): rtl_display(v)
+                for v in self._schoolpass_original_values
+            }
+
             if 'values' in kwargs:
-                kwargs['values'] = tuple(self._schoolpass_logical_to_display[str(v)] for v in self._schoolpass_original_values)
-            super().__init__(master, *args, **kwargs)
+                kwargs['values'] = tuple(
+                    self._schoolpass_logical_to_display[str(v)]
+                    for v in self._schoolpass_original_values
+                )
+
+            # Create the Tcl combobox directly through the original Entry class.
+            # This avoids calling ttk.Combobox.__init__ after ttk.Entry is patched.
+            original_entry.__init__(
+                self,
+                master,
+                'ttk::combobox',
+                **kwargs
+            )
 
         def get(self):
-            value = super().get()
+            value = original_combo.get(self)
             return self._schoolpass_display_to_logical.get(value, value)
 
         def set(self, value):
-            super().set(self._schoolpass_logical_to_display.get(str(value), rtl_display(value)))
+            original_combo.set(
+                self,
+                self._schoolpass_logical_to_display.get(
+                    str(value),
+                    rtl_display(value)
+                )
+            )
 
+    ttk.Entry = ArabicAwareEntry
     ttk.Combobox = ArabicAwareCombobox
 
     original_tree = ttk.Treeview
