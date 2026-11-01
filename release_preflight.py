@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-EXPECTED = "2.5.1"
+EXPECTED = "2.5.2"
 
 
 def main() -> int:
