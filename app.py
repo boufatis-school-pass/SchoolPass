@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """SchoolPass — Windows GUI (Tkinter). All business rules and permission checks live in schoolpass_core.py."""
 from __future__ import annotations
 
@@ -340,7 +340,12 @@ def _install_rtl_widget_adapters():
     class ArabicAwareEntry(original_entry):
         def __init__(self, master=None, *args, **kwargs):
             kwargs.setdefault('justify', 'right')
-            super().__init__(master, *args, **kwargs)
+            # ttk.Combobox inherits from the original ttk.Entry, but its
+            # __init__ resolves ttk.Entry through the module at runtime.
+            # Since ttk.Entry is replaced below, calling super() here would
+            # reject a Combobox instance (it is not an ArabicAwareEntry).
+            # Invoke the original Entry initializer directly instead.
+            original_entry.__init__(self, master, *args, **kwargs)
 
     ttk.Entry = ArabicAwareEntry
 
