@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import hashlib
+import tempfile
+import subprocess
 import os
 import queue
 import socket
@@ -318,23 +321,23 @@ def _install_rtl_widget_adapters():
     original_entry = ttk.Entry
 
     class ArabicAwareEntry(original_entry):
-        def __init__(self, master=None, **kwargs):
+        def __init__(self, master=None, *args, **kwargs):
             kwargs.setdefault('justify', 'right')
-            super().__init__(master, **kwargs)
+            super().__init__(master, *args, **kwargs)
 
     ttk.Entry = ArabicAwareEntry
 
     original_combo = ttk.Combobox
 
     class ArabicAwareCombobox(original_combo):
-        def __init__(self, master=None, **kwargs):
+        def __init__(self, master=None, *args, **kwargs):
             kwargs.setdefault('justify', 'right')
             self._schoolpass_original_values = tuple(kwargs.get('values', ()))
             self._schoolpass_display_to_logical = {rtl_display(v): str(v) for v in self._schoolpass_original_values}
             self._schoolpass_logical_to_display = {str(v): rtl_display(v) for v in self._schoolpass_original_values}
             if 'values' in kwargs:
                 kwargs['values'] = tuple(self._schoolpass_logical_to_display[str(v)] for v in self._schoolpass_original_values)
-            super().__init__(master, **kwargs)
+            super().__init__(master, *args, **kwargs)
 
         def get(self):
             value = super().get()
@@ -1145,6 +1148,7 @@ class SchoolPassApp:
             messagebox.showerror('مصدر التحديثات غير صحيح', 'راجع إعداد مستودع GitHub.', parent=self.root)
             return
 
+        self._update_repo = repo
         self._update_check_running = True
         self.status_text.set(self.base_status + ' | جارٍ البحث عن التحديثات عبر GitHub…')
         self.root.update_idletasks()
@@ -1222,16 +1226,84 @@ class SchoolPassApp:
             notes = str(release.get('body') or '').strip()[:1600]
             answer = messagebox.askyesno('يتوفر تحديث جديد',
                 f'النسخة الحالية: {APP_VERSION}\nالإصدار الجديد: {tag}\nحجم المثبّت: {size_text}\n\n'
-                f'ملاحظات الإصدار:\n{notes or "راجع صفحة الإصدار لمعرفة التغييرات."}\n\n'
-                'سيتم فتح صفحة GitHub لتنزيل ملف التثبيت. أغلق البرنامج وشغّل المثبّت فوق النسخة الحالية.\n'
-                'تبقى قاعدة البيانات في مجلدها المستقل ولا تحذفها أثناء التحديث.\n\nفتح صفحة التحديث؟',
+                f'ملاحظات الإصدار:\n{notes or "لا توجد ملاحظات إضافية."}\n\n'
+                'سيُنزل البرنامج ملف التحديث ويتحقق من سلامته، ثم يشغّل التثبيت تلقائيًا. '
+                'سيُغلق SchoolPass أثناء التثبيت وتبقى قاعدة البيانات كما هي.\n\nمتابعة التحديث؟',
                 parent=self.root)
             if answer:
-                webbrowser.open(release_page)
+                self._download_and_install_update(setup_asset, tag)
         except Exception as exc:
             messagebox.showerror('تعذر قراءة الإصدار', f'بيانات الإصدار على GitHub غير صالحة.\n{exc}', parent=self.root)
         finally:
             self.status_text.set(self.base_status)
+
+    def _download_and_install_update(self, asset, tag):
+        """Download and verify the installer before handing off to Inno Setup."""
+        import threading
+        url = str(asset.get('browser_download_url') or '').strip()
+        if not url.startswith('https://'):
+            messagebox.showerror('رابط تحديث غير صالح', 'لم يقدّم GitHub رابط تنزيل آمنًا.', parent=self.root)
+            return
+        self.status_text.set(self.base_status + ' | جارٍ تنزيل التحديث…')
+        self.root.update_idletasks()
+
+        def worker():
+            installer_path = None
+            try:
+                request = Request(url, headers={'User-Agent': f'SchoolPass/{APP_VERSION}'})
+                with urlopen(request, timeout=90) as response:
+                    payload = response.read(250 * 1024 * 1024 + 1)
+                if not payload or len(payload) > 250 * 1024 * 1024:
+                    raise ValueError('حجم ملف التحديث غير مقبول.')
+                digest = hashlib.sha256(payload).hexdigest()
+                api = f'https://api.github.com/repos/{self._update_repo}/releases/tags/{tag}'
+                req = Request(api, headers={'Accept': 'application/vnd.github+json',
+                    'User-Agent': f'SchoolPass/{APP_VERSION}', 'X-GitHub-Api-Version': '2022-11-28'})
+                with urlopen(req, timeout=20) as response:
+                    release_data = json.loads(response.read(2_000_000).decode('utf-8'))
+                checksum_asset = next((x for x in release_data.get('assets', [])
+                    if str(x.get('name', '')).casefold() == 'schoolpass_setup.exe.sha256'), None)
+                if not checksum_asset:
+                    raise ValueError('ملف SHA-256 غير مرفق بالإصدار؛ أُلغي التحديث.')
+                checksum_req = Request(checksum_asset['browser_download_url'],
+                    headers={'User-Agent': f'SchoolPass/{APP_VERSION}'})
+                with urlopen(checksum_req, timeout=20) as response:
+                    checksum_text = response.read(4096).decode('ascii', errors='strict')
+                expected = checksum_text.strip().split()[0].lower()
+                if not re.fullmatch(r'[0-9a-f]{64}', expected) or digest != expected:
+                    raise ValueError('فشل التحقق من SHA-256؛ أُلغي التحديث لحماية البرنامج.')
+                import tempfile
+                fd, installer_path = tempfile.mkstemp(prefix='SchoolPass_Update_', suffix='.exe')
+                os.close(fd)
+                with open(installer_path, 'wb') as stream:
+                    stream.write(payload)
+                self.root.after(0, lambda: self._launch_update_installer(installer_path))
+            except Exception as exc:
+                detail = str(exc)
+                try:
+                    if installer_path and os.path.exists(installer_path):
+                        os.remove(installer_path)
+                except OSError:
+                    pass
+                self.root.after(0, lambda msg=detail: self._update_download_failed(msg))
+        threading.Thread(target=worker, name='SchoolPassUpdateDownload', daemon=True).start()
+
+    def _launch_update_installer(self, installer_path):
+        try:
+            import subprocess
+            subprocess.Popen([installer_path, '/SILENT', '/CLOSEAPPLICATIONS',
+                '/RESTARTAPPLICATIONS', '/SUPPRESSMSGBOXES'], close_fds=True)
+            self.status_text.set('يجري تثبيت التحديث…')
+            self.root.after(900, self.close)
+        except Exception as exc:
+            messagebox.showerror('تعذر بدء التثبيت', f'تم تنزيل التحديث والتحقق منه، لكن تعذر تشغيل المثبّت.\n{exc}',
+                parent=self.root)
+            self.status_text.set(self.base_status)
+
+    def _update_download_failed(self, detail):
+        self.status_text.set(self.base_status)
+        messagebox.showerror('فشل تنزيل التحديث أو التحقق منه',
+            f'لم يتم تثبيت أي ملف.\n\nالتفاصيل: {detail}', parent=self.root)
 
     def periodic_backup(self):
         """Refresh local and configured external backups hourly during a long session."""
