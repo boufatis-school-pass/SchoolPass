@@ -248,6 +248,39 @@ class TestGuiSmoke(unittest.TestCase):
         COMMANDS.clear(); self.app.SetupDialog(root); self.press_all("setup")     # empty fields -> error message, no crash
         self.assertFalse(core.has_admin())
 
+    def test_special_entry_form_creates_expulsion_with_teacher_and_subject(self):
+        a = self.make_app(self.sup)
+        form = self.app.RecordForm(a, "special_entry")
+        form.student = self.s1
+        form.special_reason.set("الطرد من الحصة")
+        form.vars["teacher_name"].set("الأستاذ التجريبي")
+        form.vars["subject"].set("رياضيات")
+        with mock.patch.object(a, "show_record") as show_record:
+            form.save()
+        show_record.assert_called_once()
+        report = core.get_expulsion_report(core.date_today(), core.date_today(), "الأستاذ التجريبي")
+        self.assertEqual(report["total"], 1)
+        self.assertEqual(report["records"][0]["subject"], "رياضيات")
+
+    def test_expulsion_report_window_loads_teacher_filtered_rows(self):
+        a = self.make_app(self.sup)
+        core.create_special_entry(self.s1, self.sup, "class_expulsion", "أستاذ الواجهة", "علوم")
+        core.create_special_entry(self.s1, self.sup, "administration_visit")
+        a.open_expulsion_report()  # constructs date pickers, teacher filter, table, and initial query
+        self.assertEqual(core.get_expulsion_report(core.date_today(), core.date_today(), "أستاذ الواجهة")["total"], 1)
+
+    def test_long_absence_ui_offers_combined_medical_and_guardian_choice(self):
+        a = self.make_app(self.sup)
+        form = self.app.RecordForm(a, "absence_return")
+        form.vars["absence_start"].set((__import__("datetime").date.today() - __import__("datetime").timedelta(days=4)).isoformat())
+        form.vars["return_date"].set(core.date_today())
+        form._update_absence_rule()
+        self.assertEqual(tuple(form.method_combo.kw["values"]), (
+            "حضور ولي الأمر شخصيًا", "شهادة طبية + حضور ولي الأمر شخصيًا"))
+        form.proof_method.set("شهادة طبية + حضور ولي الأمر شخصيًا")
+        form._refresh_absence_method()
+        self.assertTrue(form.medical_frame.kw.get("_packed", True))
+
     def test_theme_color_helpers_preserve_contrast(self):
         self.assertEqual(self.app._text_on("#000000"), "#ffffff")
         self.assertEqual(self.app._text_on("#FFFFFF"), "#000000")

@@ -12,6 +12,7 @@ import socket
 import sys
 import time
 import re
+import calendar as calendar_module
 import webbrowser
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
@@ -45,9 +46,25 @@ def _window_background() -> str:
         return '#F2F6F4'
 
 
+def application_asset_path(name: str) -> Path:
+    """Locate bundled assets in both source runs and PyInstaller onedir builds."""
+    base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+    return base / name
+
+def apply_application_icon(win) -> None:
+    icon_path = application_asset_path("app.ico")
+    try:
+        if icon_path.is_file():
+            win.iconbitmap(default=str(icon_path))
+    except Exception:
+        # Window managers other than Windows may not support ICO files.
+        pass
+
+
 def configure_window(win, title: str, geometry: str = '900x620'):
     """Configure a resizable window without imposing a larger minimum than its screen."""
     win.title(title)
+    apply_application_icon(win)
     win.geometry(geometry)
     try:
         match = re.match(r'^(\d+)x(\d+)', str(geometry))
@@ -318,62 +335,34 @@ def _install_rtl_widget_adapters():
         ArabicTextWidget.__name__ = f'ArabicAware{class_name}'
         setattr(ttk, class_name, ArabicTextWidget)
 
-    # Keep references to the original Tk themed classes before patching ttk.
-    # ttk.Combobox.__init__ internally resolves ttk.Entry from module globals.
-    # Replacing ttk.Entry first can therefore cause an incompatible subclass call.
     original_entry = ttk.Entry
-    original_combo = ttk.Combobox
 
     class ArabicAwareEntry(original_entry):
         def __init__(self, master=None, *args, **kwargs):
             kwargs.setdefault('justify', 'right')
-            original_entry.__init__(self, master, *args, **kwargs)
+            super().__init__(master, *args, **kwargs)
+
+    ttk.Entry = ArabicAwareEntry
+
+    original_combo = ttk.Combobox
 
     class ArabicAwareCombobox(original_combo):
         def __init__(self, master=None, *args, **kwargs):
             kwargs.setdefault('justify', 'right')
-
             self._schoolpass_original_values = tuple(kwargs.get('values', ()))
-
-            self._schoolpass_display_to_logical = {
-                rtl_display(v): str(v)
-                for v in self._schoolpass_original_values
-            }
-
-            self._schoolpass_logical_to_display = {
-                str(v): rtl_display(v)
-                for v in self._schoolpass_original_values
-            }
-
+            self._schoolpass_display_to_logical = {rtl_display(v): str(v) for v in self._schoolpass_original_values}
+            self._schoolpass_logical_to_display = {str(v): rtl_display(v) for v in self._schoolpass_original_values}
             if 'values' in kwargs:
-                kwargs['values'] = tuple(
-                    self._schoolpass_logical_to_display[str(v)]
-                    for v in self._schoolpass_original_values
-                )
-
-            # Create the Tcl combobox directly through the original Entry class.
-            # This avoids calling ttk.Combobox.__init__ after ttk.Entry is patched.
-            original_entry.__init__(
-                self,
-                master,
-                'ttk::combobox',
-                **kwargs
-            )
+                kwargs['values'] = tuple(self._schoolpass_logical_to_display[str(v)] for v in self._schoolpass_original_values)
+            super().__init__(master, *args, **kwargs)
 
         def get(self):
-            value = original_combo.get(self)
+            value = super().get()
             return self._schoolpass_display_to_logical.get(value, value)
 
         def set(self, value):
-            original_combo.set(
-                self,
-                self._schoolpass_logical_to_display.get(
-                    str(value),
-                    rtl_display(value)
-                )
-            )
+            super().set(self._schoolpass_logical_to_display.get(str(value), rtl_display(value)))
 
-    ttk.Entry = ArabicAwareEntry
     ttk.Combobox = ArabicAwareCombobox
 
     original_tree = ttk.Treeview
@@ -735,17 +724,107 @@ class StudentPicker:
         self.win.destroy()
 
 
+class DatePicker:
+    """Mouse-only date selector. Future days are disabled; no free-typing is allowed."""
+    def __init__(self, parent, variable: StringVar, on_change=None):
+        self.parent = parent
+        self.variable = variable
+        self.on_change = on_change
+        self.button = ttk.Button(parent, text='📅', width=4, command=self.open)
+
+    def pack(self, **kwargs):
+        self.button.pack(**kwargs)
+
+    def open(self):
+        try:
+            selected = date.fromisoformat(core.normalize_digits(self.variable.get()).strip())
+        except ValueError:
+            selected = date.fromisoformat(date_today())
+        today = date.fromisoformat(date_today())
+        shown = {'year': selected.year, 'month': selected.month}
+        win = Toplevel(self.parent.winfo_toplevel())
+        win.title('اختيار التاريخ')
+        win.geometry('310x300')
+        win.resizable(False, False)
+        win.transient(self.parent.winfo_toplevel())
+        win.grab_set()
+        outer = ttk.Frame(win, padding=9)
+        outer.pack(fill=BOTH, expand=True)
+        head = ttk.Frame(outer)
+        head.pack(fill=X, pady=(0, 8))
+        grid_frame = ttk.Frame(outer)
+        grid_frame.pack(fill=BOTH, expand=True)
+
+        def render():
+            for child in (head.winfo_children() or []):
+                child.destroy()
+            for child in (grid_frame.winfo_children() or []):
+                child.destroy()
+            previous = ttk.Button(head, text='‹', width=4, command=lambda: move(-1))
+            previous.pack(side=LEFT)
+            month_names = ('', 'جانفي', 'فيفري', 'مارس', 'أفريل', 'ماي', 'جوان',
+                           'جويلية', 'أوت', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر')
+            title = f"{month_names[shown['month']]} {shown['year']}"
+            ttk.Label(head, text=title, anchor='center').pack(side=LEFT, fill=X, expand=True)
+            next_btn = ttk.Button(head, text='›', width=4, command=lambda: move(1))
+            next_btn.pack(side=RIGHT)
+            if (shown['year'], shown['month']) >= (today.year, today.month):
+                next_btn.configure(state='disabled')
+            weekdays = ('أحد', 'إثنين', 'ثلاثاء', 'أربعاء', 'خميس', 'جمعة', 'سبت')
+            for col, label in enumerate(weekdays):
+                ttk.Label(grid_frame, text=label, anchor='center').grid(row=0, column=col, sticky='nsew', padx=1, pady=2)
+                grid_frame.grid_columnconfigure(col, weight=1)
+            cal = calendar_module.Calendar(firstweekday=6)
+            weeks = cal.monthdayscalendar(shown['year'], shown['month'])
+            for r, week in enumerate(weeks, start=1):
+                for col, day_num in enumerate(week):
+                    if not day_num:
+                        ttk.Label(grid_frame, text='').grid(row=r, column=col, sticky='nsew', padx=1, pady=1)
+                        continue
+                    value = date(shown['year'], shown['month'], day_num)
+                    state = 'disabled' if value > today else 'normal'
+                    btn = ttk.Button(grid_frame, text=str(day_num), width=4, state=state,
+                                     command=lambda value=value: choose(value))
+                    if value == selected:
+                        btn.configure(style='Accent.TButton')
+                    btn.grid(row=r, column=col, sticky='nsew', padx=1, pady=1)
+
+        def move(delta):
+            m = shown['month'] + delta
+            y = shown['year']
+            if m < 1:
+                m, y = 12, y - 1
+            elif m > 12:
+                m, y = 1, y + 1
+            if (y, m) <= (today.year, today.month):
+                shown.update(year=y, month=m)
+                render()
+
+        def choose(value):
+            self.variable.set(value.isoformat())
+            if callable(self.on_change):
+                self.on_change()
+            win.destroy()
+
+        render()
+
+
 class RecordForm:
     def __init__(self, app: 'SchoolPassApp', kind: str):
         self.app = app
         self.kind = kind
         self.student = None
         self._saving = False
-        titles = {'late': 'إصدار رخصة الدخول — تأخر', 'absence_return': 'إصدار رخصة الدخول — عودة بعد الغياب', 'exit_permit': 'إصدار رخصة خروج استثنائي'}
+        titles = {
+            'late': 'إصدار رخصة الدخول — تأخر',
+            'absence_return': 'إصدار رخصة الدخول — عودة بعد الغياب',
+            'special_entry': 'إصدار رخصة الدخول — حالة خاصة',
+            'exit_permit': 'إصدار رخصة خروج استثنائي',
+        }
         self.title = titles[kind]
         self.win = Toplevel(app.root)
         self.win.title(self.title)
-        self.win.geometry('760x720' if kind == 'absence_return' else '650x600')
+        self.win.geometry('780x760' if kind == 'absence_return' else '700x640')
         self.win.minsize(640, 560)
         self.win.transient(app.root)
         self.win.grab_set()
@@ -766,40 +845,65 @@ class RecordForm:
             ent.pack(side=RIGHT, fill=X, expand=True)
             return ent
 
-        row = ttk.Frame(form)
-        row.pack(fill=X, pady=6)
-        ttk.Label(row, text='التلميذ', width=29, anchor=E).pack(side=RIGHT, padx=(4, 8))
+        def add_date_row(parent, key, label, value=''):
+            row = ttk.Frame(parent)
+            row.pack(fill=X, pady=5)
+            ttk.Label(row, text=label, width=29, anchor=E).pack(side=RIGHT, padx=(4, 8))
+            v = StringVar(value=value or date_today())
+            self.vars[key] = v
+            ent = ttk.Entry(row, textvariable=v, justify='center', state='readonly', width=15)
+            ent.pack(side=RIGHT, padx=4)
+            picker = DatePicker(row, v, self._update_absence_rule if key == 'absence_start' else None)
+            picker.pack(side=RIGHT, padx=3)
+            return ent
+
+        student_row = ttk.Frame(form)
+        student_row.pack(fill=X, pady=6)
+        ttk.Label(student_row, text='التلميذ', width=29, anchor=E).pack(side=RIGHT, padx=(4, 8))
         self.student_label = DisplayStringVar(value='لم يتم اختيار التلميذ')
-        ttk.Label(row, textvariable=self.student_label, relief='sunken', anchor=E, padding=7).pack(side=RIGHT, fill=X, expand=True)
-        ttk.Button(row, text='اختيار...', command=self.pick_student).pack(side=RIGHT, padx=6)
+        ttk.Label(student_row, textvariable=self.student_label, relief='sunken', anchor=E, padding=7).pack(side=RIGHT, fill=X, expand=True)
+        ttk.Button(student_row, text='اختيار...', command=self.pick_student).pack(side=RIGHT, padx=6)
 
         if kind == 'late':
-            add_row(form, 'reason', 'سبب التأخر')
+            ttk.Label(form, text='سبب التأخر', anchor=E).pack(fill=X, pady=(9, 3))
+            late_options = ('التواجد في الاستشارة', 'التأخر بسبب انعدام النقل', 'التأخر في الالتحاق بالقسم')
+            self.late_reason = ComboStringVar(late_options, value='')
+            self.vars['reason'] = self.late_reason  # logical reason alias used by the form's save/validation path
+            self.late_combo = ttk.Combobox(form, textvariable=self.late_reason, state='readonly', values=late_options, justify='right')
+            self.late_combo.pack(fill=X, pady=3)
+            add_row(form, 'reason_note', 'ملاحظة (اختياري)')
         elif kind == 'absence_return':
-            start_entry = add_row(form, 'absence_start', 'تاريخ بداية الغياب (YYYY-MM-DD)', date_today())
-            end_entry = add_row(form, 'return_date', 'تاريخ العودة (YYYY-MM-DD)', date_today())
+            add_date_row(form, 'absence_start', 'تاريخ بداية الغياب')
+            row = ttk.Frame(form)
+            row.pack(fill=X, pady=5)
+            ttk.Label(row, text='تاريخ العودة (يُحدد تلقائيًا)', width=29, anchor=E).pack(side=RIGHT, padx=(4, 8))
+            self.vars['return_date'] = StringVar(value=date_today())
+            ttk.Entry(row, textvariable=self.vars['return_date'], justify='center', state='readonly', width=15).pack(side=RIGHT, padx=4)
+            ttk.Label(form, text='يُحسب الغياب من تاريخ بدايته إلى اليوم السابق للعودة؛ يوم العودة غير محسوب.',
+                      foreground='#526579', wraplength=600).pack(anchor=E, pady=3)
             add_row(form, 'reason', 'ملاحظة (اختياري)')
-            ttk.Label(form, text='يُحتسب الغياب من تاريخ بدايته إلى اليوم السابق للعودة؛ يوم العودة غير محسوب، ولا تُسجل الساعات.',
-                      foreground='#526579', wraplength=520).pack(anchor=E, pady=2)
-
             rule_box = ttk.Frame(form, relief='groove', borderwidth=1)
             rule_box.pack(fill=X, pady=7)
             ttk.Label(rule_box, text='قاعدة قبول تبرير الغياب', font=('Segoe UI', 9, 'bold')).pack(anchor=E, padx=8, pady=(4, 0))
-            self.rule_label = ttk.Label(rule_box, text='أدخل التاريخين لتحديد طريقة التبرير.', anchor=E, wraplength=500)
+            self.rule_label = ttk.Label(rule_box, text='اختر تاريخ بداية الغياب لتحديد طريقة التبرير.', anchor=E, wraplength=560)
             self.rule_label.pack(fill=X, padx=10, pady=6)
-
-            method_row = ttk.Frame(form)
-            method_row.pack(fill=X, pady=5)
+            self.proof_choices = {
+                'شهادة طبية': 'medical_certificate',
+                'حضور ولي الأمر شخصيًا': 'guardian',
+                'شهادة طبية + حضور ولي الأمر شخصيًا': 'medical_and_guardian',
+                'تبرير آخر': 'other',
+            }
+            choice_labels = tuple(self.proof_choices)
+            self.proof_method = ComboStringVar(choice_labels, value='شهادة طبية')
+            method_row = ttk.Frame(form); method_row.pack(fill=X, pady=5)
             ttk.Label(method_row, text='طريقة تبرير الغياب', width=29, anchor=E).pack(side=RIGHT, padx=(4, 8))
-            self.proof_method = StringVar(value='شهادة طبية')
-            self.method_combo = ttk.Combobox(method_row, textvariable=self.proof_method, state='readonly', justify='right',
-                                              values=('شهادة طبية', 'حضور ولي الأمر شخصيًا'))
-            self.method_combo.current(0)
+            self.method_combo = ttk.Combobox(method_row, textvariable=self.proof_method, state='readonly',
+                                              values=choice_labels, justify='right')
             self.method_combo.pack(side=RIGHT, fill=X, expand=True)
-            self.medical_frame = ttk.Frame(form)
+            self.medical_frame = ttk.Frame(form, relief='groove', borderwidth=1)
             self.check_vars['certificate_present'] = BooleanVar(value=False)
             ttk.Checkbutton(self.medical_frame, text='أؤكد استلام الشهادة الطبية والتحقق منها.',
-                            variable=self.check_vars['certificate_present']).pack(anchor=E, pady=4)
+                            variable=self.check_vars['certificate_present']).pack(anchor=E, padx=7, pady=6)
             self.guardian_frame = ttk.Frame(form, relief='groove', borderwidth=1)
             ttk.Label(self.guardian_frame, text='بيانات ولي الأمر — يجب أن يكون حاضرًا فعليًا', font=('Segoe UI', 9, 'bold')).pack(anchor=E, padx=6, pady=4)
             add_row(self.guardian_frame, 'guardian_name', 'الاسم الكامل لولي الأمر')
@@ -807,59 +911,88 @@ class RecordForm:
             add_row(self.guardian_frame, 'national_id', 'رقم بطاقة الهوية الوطنية')
             self.check_vars['guardian_present'] = BooleanVar(value=False)
             ttk.Checkbutton(self.guardian_frame, text='أؤكد حضور ولي الأمر شخصيًا إلى الإدارة والتحقق من هويته.',
-                            variable=self.check_vars['guardian_present']).pack(anchor=E, pady=6)
+                            variable=self.check_vars['guardian_present']).pack(anchor=E, padx=7, pady=6)
+            self.other_frame = ttk.Frame(form, relief='groove', borderwidth=1)
+            ttk.Label(self.other_frame, text='تفاصيل التبرير الآخر', font=('Segoe UI', 9, 'bold')).pack(anchor=E, padx=6, pady=4)
+            add_row(self.other_frame, 'other_reason', 'اكتب سبب التبرير')
             self.method_combo.bind('<<ComboboxSelected>>', lambda _e: self._refresh_absence_method())
-
-            def date_changed(_event=None):
-                self._update_absence_rule()
-            start_entry.bind('<KeyRelease>', date_changed)
-            end_entry.bind('<KeyRelease>', date_changed)
             self._update_absence_rule()
-
+        elif kind == 'special_entry':
+            self.special_options = {'الطرد من الحصة': 'class_expulsion', 'التواجد في الإدارة': 'administration_visit'}
+            self.special_reason = ComboStringVar(tuple(self.special_options), value='الطرد من الحصة')
+            reason_row = ttk.Frame(form); reason_row.pack(fill=X, pady=7)
+            ttk.Label(reason_row, text='سبب رخصة الدخول', width=29, anchor=E).pack(side=RIGHT, padx=(4, 8))
+            self.special_combo = ttk.Combobox(reason_row, textvariable=self.special_reason, state='readonly',
+                                               values=tuple(self.special_options), justify='right')
+            self.special_combo.pack(side=RIGHT, fill=X, expand=True)
+            self.expulsion_frame = ttk.Frame(form, relief='groove', borderwidth=1)
+            ttk.Label(self.expulsion_frame, text='معلومات الطرد من الحصة', font=('Segoe UI', 9, 'bold')).pack(anchor=E, padx=6, pady=4)
+            add_row(self.expulsion_frame, 'teacher_name', 'اسم الأستاذ الذي طرد التلميذ')
+            add_row(self.expulsion_frame, 'subject', 'المادة الدراسية')
+            self.special_note = add_row(form, 'special_note', 'ملاحظة (اختياري)')
+            self.special_combo.bind('<<ComboboxSelected>>', lambda _e: self._refresh_special_reason())
+            self._refresh_special_reason()
         elif kind == 'exit_permit':
             add_row(form, 'reason', 'سبب الخروج')
             add_row(form, 'guardian_name', 'اسم ولي الأمر')
             add_row(form, 'relationship', 'صلة القرابة')
             add_row(form, 'national_id', 'رقم بطاقة الهوية الوطنية')
             ttk.Label(form, text='لن يُطبع رقم الهوية كاملًا ولن يوضع داخل رمز QR؛ سيظهر آخر 4 أرقام فقط على التصريح.',
-                      foreground='#526579', wraplength=540).pack(anchor=E, pady=4)
+                      foreground='#526579', wraplength=580).pack(anchor=E, pady=4)
+
         bar = ttk.Frame(self.win)
         bar.pack(fill=X, padx=25, pady=16)
         ttk.Button(bar, text='حفظ وإصدار الرخصة', command=self.save, style='Accent.TButton').pack(side=RIGHT, padx=5)
         ttk.Button(bar, text='إلغاء', command=self.win.destroy).pack(side=RIGHT, padx=5)
 
+    def _absence_days_now(self):
+        if self.kind != 'absence_return':
+            return 0
+        try:
+            return core.absence_days(self.vars['absence_start'].get(), self.vars['return_date'].get())[2]
+        except Exception:
+            return 0
+
     def _update_absence_rule(self):
         if self.kind != 'absence_return':
             return
-        start = self.vars['absence_start'].get().strip()
-        end = self.vars['return_date'].get().strip()
         try:
-            s, e, absence_count = core.absence_days(start, end)
-            duration_days = absence_count
+            days = core.absence_days(self.vars['absence_start'].get(), self.vars['return_date'].get())[2]
         except Exception:
-            self.rule_label.configure(text='تحقق من التاريخين بصيغة YYYY-MM-DD. لا يمكن تحديد طريقة التبرير بعد.', foreground='#A05A00')
-            self.method_combo.configure(state='readonly')
-            self._refresh_absence_method()
-            return
-        if duration_days > core.ABSENCE_CERTIFICATE_MAX_DURATION_DAYS:
-            self.rule_label.configure(text=f'مدة الغياب قبل يوم العودة {duration_days} يومًا. حضور ولي الأمر شخصيًا إلزامي حتى مع وجود شهادة طبية.', foreground='#B42318')
-            self.method_combo.set('حضور ولي الأمر شخصيًا')
-            self.method_combo.configure(state='disabled')
+            self.rule_label.configure(text='تاريخ البداية غير صالح أو يقع بعد تاريخ اليوم.', foreground='#A05A00')
+            days = 0
+        if days > core.ABSENCE_CERTIFICATE_MAX_DURATION_DAYS:
+            self.rule_label.configure(text=f'مدة الغياب {days} يومًا قبل يوم العودة. حضور ولي الأمر شخصيًا إلزامي؛ اختر حضور الولي أو حضوره مع شهادة طبية.', foreground='#B42318')
         else:
-            self.rule_label.configure(text=f'مدة الغياب قبل يوم العودة {duration_days} يومًا. يمكن قبول الشهادة الطبية بعد التحقق منها أو حضور ولي الأمر شخصيًا.', foreground='#18794E')
-            self.method_combo.configure(state='readonly')
+            self.rule_label.configure(text=f'مدة الغياب {days} يومًا قبل يوم العودة. يمكن اختيار شهادة طبية أو حضور الولي أو تبرير آخر.', foreground='#18794E')
         self._refresh_absence_method()
 
     def _refresh_absence_method(self):
         if self.kind != 'absence_return':
             return
-        method = self.method_combo.get()
-        self.medical_frame.pack_forget()
-        self.guardian_frame.pack_forget()
-        if method == 'حضور ولي الأمر شخصيًا':
-            self.guardian_frame.pack(fill=X, pady=5)
-        else:
+        days = self._absence_days_now()
+        choices = tuple(self.proof_choices) if days <= core.ABSENCE_CERTIFICATE_MAX_DURATION_DAYS else (
+            'حضور ولي الأمر شخصيًا', 'شهادة طبية + حضور ولي الأمر شخصيًا')
+        current = self.proof_method.get()
+        if current not in choices:
+            self.proof_method.set('حضور ولي الأمر شخصيًا' if days > core.ABSENCE_CERTIFICATE_MAX_DURATION_DAYS else 'شهادة طبية')
+        self.method_combo.configure(values=choices)
+        method = self.proof_choices.get(self.proof_method.get(), '')
+        self.medical_frame.pack_forget(); self.guardian_frame.pack_forget(); self.other_frame.pack_forget()
+        if method in ('medical_certificate', 'medical_and_guardian'):
             self.medical_frame.pack(fill=X, pady=5)
+        if method in ('guardian', 'medical_and_guardian'):
+            self.guardian_frame.pack(fill=X, pady=5)
+        if method == 'other':
+            self.other_frame.pack(fill=X, pady=5)
+
+    def _refresh_special_reason(self):
+        if self.kind != 'special_entry':
+            return
+        if self.special_options.get(self.special_reason.get()) == 'class_expulsion':
+            self.expulsion_frame.pack(fill=X, pady=7)
+        else:
+            self.expulsion_frame.pack_forget()
 
     def pick_student(self):
         with db_connect() as conn:
@@ -909,18 +1042,20 @@ class RecordForm:
         self._saving = True
         try:
             if self.kind == 'late':
-                row = core.create_late_slip(self.student, uid, g('reason'))
+                selected_reason = self.late_reason.get().strip()
+                if not selected_reason:
+                    raise ValueError('اختر سبب التأخر قبل إصدار الرخصة.')
+                row = core.create_late_slip(self.student, uid, selected_reason, g('reason_note'))
             elif self.kind == 'absence_return':
-                method = self.method_combo.get()
-                proof_method = 'guardian' if method == 'حضور ولي الأمر شخصيًا' else 'medical_certificate'
-                if proof_method == 'medical_certificate' and not self.check_vars['certificate_present'].get():
-                    raise ValueError('يجب تأكيد استلام الشهادة الطبية والتحقق منها قبل إصدار الرخصة.')
+                proof_method = self.proof_choices[self.proof_method.get()]
                 row = core.create_absence_return(
                     self.student, uid, g('absence_start'), g('return_date'), g('reason'),
                     proof_method=proof_method, certificate_present=self.check_vars['certificate_present'].get(),
                     guardian_name=g('guardian_name'), relationship=g('relationship'), national_id=g('national_id'),
-                    guardian_present=self.check_vars['guardian_present'].get(),
-                )
+                    guardian_present=self.check_vars['guardian_present'].get(), other_reason=g('other_reason'))
+            elif self.kind == 'special_entry':
+                entry_reason = self.special_options[self.special_reason.get()]
+                row = core.create_special_entry(self.student, uid, entry_reason, g('teacher_name'), g('subject'), g('special_note'))
             else:
                 row = core.create_exit_permit(self.student, uid, g('reason'), g('guardian_name'), g('relationship'), g('national_id'))
         except USER_ERRORS as exc:
@@ -1037,6 +1172,7 @@ class SchoolPassApp:
         self.root.bind_all('<Control-Key-1>', lambda _e: RecordForm(self, 'late'))
         self.root.bind_all('<Control-Key-2>', lambda _e: RecordForm(self, 'absence_return'))
         self.root.bind_all('<Control-Key-3>', lambda _e: RecordForm(self, 'exit_permit'))
+        self.root.bind_all('<Control-Key-4>', lambda _e: RecordForm(self, 'special_entry'))
         self.root.bind_all('<Control-Key-f>', lambda _e: self.quick_search_entry.focus_set())
         self.root.bind_all('<Control-Shift-Key-p>', lambda _e: self.daily_summary())
         self.root.bind_all('<Control-Alt-Key-d>', lambda _e: self.toggle_theme())
@@ -1377,6 +1513,7 @@ class SchoolPassApp:
         nav('⌂   لوحة التحكم', self.refresh_all)
         nav('＋   رخصة الدخول — تأخر', lambda: RecordForm(self, 'late'))
         nav('↩   رخصة الدخول — عودة بعد الغياب', lambda: RecordForm(self, 'absence_return'))
+        nav('⚑   رخصة الدخول — طرد / إدارة', lambda: RecordForm(self, 'special_entry'))
         nav('⇥   رخصة خروج استثنائي', lambda: RecordForm(self, 'exit_permit'))
         nav('▤   إدارة التلاميذ', self.manage_students)
         nav('▥   سجل العمليات والتصفية', self.open_logs)
@@ -1499,6 +1636,7 @@ class SchoolPassApp:
             self.dashboard_action_buttons.append((button, full, compact))
         add_dashboard_action(action_row, '＋  إصدار رخصة الدخول — تأخر', '＋ دخول — تأخر', lambda: RecordForm(self, 'late'), 'Accent.TButton')
         add_dashboard_action(action_row, '↩  رخصة عودة بعد الغياب', '↩ عودة بعد الغياب', lambda: RecordForm(self, 'absence_return'))
+        add_dashboard_action(action_row, '⚑  دخول خاص — طرد / إدارة', '⚑ دخول خاص', lambda: RecordForm(self, 'special_entry'))
         add_dashboard_action(action_row, '⇥  إصدار رخصة خروج', '⇥ خروج', lambda: RecordForm(self, 'exit_permit'), 'Gold.TButton')
         if self.current_user['role'] == 'admin':
             add_dashboard_action(action_row, 'التقرير اليومي التفصيلي A4', 'التقرير اليومي A4', self.daily_summary, 'Accent.TButton', LEFT)
@@ -1559,6 +1697,7 @@ class SchoolPassApp:
         self.tree.tag_configure('late', background='#4A3D23' if dark else '#FFF8E8', foreground='#F4E8C8' if dark else '#1E2B25')
         self.tree.tag_configure('absence', background='#253C4B' if dark else '#EEF7FF', foreground='#D8EAF5' if dark else '#1E2B25')
         self.tree.tag_configure('exit', background='#263F34' if dark else '#F0F7F2', foreground='#D9EDE2' if dark else '#1E2B25')
+        self.tree.tag_configure('special', background='#4A302B' if dark else '#FFF1EC', foreground='#F6DDD6' if dark else '#4D271D')
         self.tree.tag_configure('cancelled', foreground='#FF9C9C' if dark else '#A12D2D')
 
     def toggle_theme(self):
@@ -1650,7 +1789,8 @@ class SchoolPassApp:
         c.create_line(left, top, left, bottom, fill=axis)
         c.create_line(left, bottom, right, bottom, fill=axis)
         names = [('late', 'تأخر', '#D7A33B'), ('absence_return', 'عودة بعد غياب', '#4A89B8'),
-                 ('exit_permit', 'خروج', '#2D8062'), ('exit_return', 'إثبات عودة', '#8A78B7')]
+                 ('special_entry', 'دخول خاص', '#B85A45'), ('exit_permit', 'خروج', '#2D8062'),
+                 ('exit_return', 'إثبات عودة', '#8A78B7')]
         values = data['series']
         maximum = max([1] + [v for arr in values.values() for v in arr])
         n = len(data['labels'])
@@ -1796,7 +1936,7 @@ class SchoolPassApp:
                       (r['issued_at'] or r['created_at']), r['supervisor'] or '—', status_label(r['status']))
             if query and query not in ' '.join(str(v or '') for v in values).casefold():
                 continue
-            tag = 'late' if r['kind'] == 'late' else ('absence' if r['kind'] == 'absence_return' else 'exit')
+            tag = 'late' if r['kind'] == 'late' else ('absence' if r['kind'] == 'absence_return' else ('special' if r['kind'] == 'special_entry' else 'exit'))
             tags = ('cancelled',) if r['status'] == 'cancelled' else (tag,)
             self.tree.insert('', END, iid=str(r['id']), values=values, tags=tags)
 
@@ -1868,13 +2008,26 @@ class SchoolPassApp:
                  f"القسم: {row['class_name']}", f"تاريخ ووقت الإصدار: {row['issued_at'] if row['issued_at'] else row['created_at']}", f"المشرف: {creator['display_name'] if creator else '—'}",
                  f"السبب: {row['reason'] or '—'}", f"عدد مرات الطباعة المسجل: {row['printed_count']}"]
         if row['kind'] == 'absence_return':
+            proof_labels = {'guardian': 'حضور ولي الأمر شخصيًا', 'medical_certificate': 'شهادة طبية',
+                            'medical_and_guardian': 'شهادة طبية + حضور ولي الأمر شخصيًا', 'other': 'تبرير آخر'}
             lines += [f"بداية الغياب: {details.get('absence_start', '—')}", f"تاريخ العودة: {details.get('return_date', '—')}",
                       f"أيام الغياب (دون احتساب يوم العودة): {details.get('days_count', '—')} يومًا",
-                      f"طريقة التبرير: {'حضور ولي الأمر شخصيًا' if details.get('proof_method') == 'guardian' else 'شهادة طبية'}"]
-            if details.get('proof_method') == 'guardian':
+                      f"طريقة التبرير: {proof_labels.get(details.get('proof_method'), '—')}"]
+            if details.get('proof_method') == 'other':
+                lines.append(f"تفاصيل التبرير الآخر: {details.get('other_proof_reason', '—')}")
+            if details.get('medical_certificate_confirmed'):
+                lines.append(f"الشهادة الطبية: تم الاستلام والتحقق ({details.get('medical_certificate_verified_at', '—')})")
+            if details.get('guardian_present'):
                 lines += [f"ولي الأمر: {details.get('guardian_name', '—')}", f"صلة القرابة: {details.get('relationship', '—')}",
                           f"رقم الهوية (مقنّع؛ الأصل مشفّر): {core.mask_national_id(details)}",
                           f"وقت تأكيد الحضور: {details.get('guardian_verified_at', '—')}"]
+        if row['kind'] == 'special_entry':
+            lines += [f"سبب الدخول: {details.get('entry_reason_label', 'حالة خاصة')}"]
+            if details.get('entry_reason') == 'class_expulsion':
+                lines += [f"الأستاذ الذي قام بالطرد: {details.get('expelling_teacher', '—')}",
+                          f"المادة: {details.get('subject', '—')}"]
+            if details.get('note'):
+                lines.append(f"ملاحظة: {details.get('note')}")
         if row['kind'] == 'exit_return':
             lines.append(f"مرجع تصريح الخروج: {details.get('permit_no', '—')}")
         if row['kind'] == 'exit_permit':
@@ -1912,7 +2065,7 @@ class SchoolPassApp:
     def _ask_initial_print(self, record_id, win):
         if not win.winfo_exists():
             return
-        if messagebox.askyesno('طباعة الرخصة', 'تم حفظ السجل. هل تريد إنشاء ملف الرخصة الآن؟\nعند فتح نافذة الطباعة اختر الطابعة وورق A6 والحجم الفعلي 100%. رخصة الدخول الآن بتنسيق كبير مماثل لرخصة الخروج.', parent=win):
+        if messagebox.askyesno('طباعة الرخصة', 'تم حفظ السجل. هل تريد إنشاء ملف الرخصة الآن؟\nعند فتح نافذة الطباعة اختر الطابعة وورق A6 والحجم الفعلي 100%. رخصة الدخول بتنسيق A6.', parent=win):
             self._reprint_by_id(record_id, win)
 
     def _reprint_by_id(self, record_id, parent):
@@ -2141,6 +2294,7 @@ class SchoolPassApp:
         return_after_absence = 0
         exit_count = 0
         open_exit_count = 0
+        special_entry_count = 0
         for r in records:
             if r['status'] == 'cancelled':
                 continue
@@ -2149,6 +2303,8 @@ class SchoolPassApp:
                 return_after_absence += 1
                 try: total_absence_days += int(json.loads(r['details_json'] or '{}').get('days_count', 0) or 0)
                 except (ValueError, TypeError): pass
+            elif r['kind'] == 'special_entry':
+                special_entry_count += 1
             elif r['kind'] == 'exit_permit':
                 exit_count += 1
                 if r['status'] == 'valid': open_exit_count += 1
@@ -2161,7 +2317,8 @@ class SchoolPassApp:
         ttk.Label(win, text=f"رقم التعريف: {student['student_key']}   |   القسم: {student['class_name']}   |   الحالة: {'نشط' if student['active'] else 'غير نشط'}").pack(pady=(0, 8))
         cards = ttk.Frame(win); cards.pack(fill=X, padx=12, pady=6)
         metrics = [('عدد العمليات', len(records)), ('مرات التأخر', late_count), ('العودة بعد الغياب', return_after_absence),
-                   ('أيام الغياب المدخلة', total_absence_days), ('تصاريح الخروج', exit_count), ('خروج دون عودة', open_exit_count)]
+                   ('دخول خاص (طرد / إدارة)', special_entry_count), ('أيام الغياب المدخلة', total_absence_days),
+                   ('تصاريح الخروج', exit_count), ('خروج دون عودة', open_exit_count)]
         for title, val in metrics:
             box = ttk.Frame(cards, style='Surface.TFrame', padding=(8, 7)); box.pack(side=RIGHT, fill=X, expand=True, padx=3)
             ttk.Label(box, text=title, style='CardTitle.TLabel').pack(anchor=E)
@@ -2173,7 +2330,7 @@ class SchoolPassApp:
         for col,title,width in heads:
             tree.heading(col,text=title); tree.column(col,width=width,anchor=E)
         tree.tag_configure('late', background='#FFF8E8'); tree.tag_configure('absence', background='#EEF7FF')
-        tree.tag_configure('exit', background='#F0F7F2'); tree.tag_configure('cancelled', foreground='#A12D2D')
+        tree.tag_configure('exit', background='#F0F7F2'); tree.tag_configure('special', background='#FFF1EC'); tree.tag_configure('cancelled', foreground='#A12D2D')
         history_wrap = ttk.Frame(win)
         history_wrap.pack(fill=BOTH, expand=True, padx=12, pady=6)
         history_y = ttk.Scrollbar(history_wrap, orient='vertical', command=tree.yview)
@@ -2183,7 +2340,7 @@ class SchoolPassApp:
         history_y.pack(side=RIGHT, fill=Y)
         history_x.pack(side='bottom', fill=X)
         for r in records:
-            typetag = 'late' if r['kind']=='late' else ('absence' if r['kind']=='absence_return' else 'exit')
+            typetag = 'late' if r['kind']=='late' else ('absence' if r['kind']=='absence_return' else ('special' if r['kind']=='special_entry' else 'exit'))
             tags = ('cancelled',) if r['status']=='cancelled' else (typetag,)
             tree.insert('', END, iid=str(r['id']), values=(r['record_no'], kind_label(r['kind']), r['issued_at'] or r['created_at'], r['reason'] or '—', status_label(r['status']), r['supervisor'] or '—'), tags=tags)
         tree.bind('<Double-1>', lambda _e: self.show_record(int(tree.selection()[0])) if tree.selection() else None)
@@ -2205,7 +2362,9 @@ class SchoolPassApp:
         ent = ttk.Entry(search_frame, textvariable=q, justify='right'); ent.pack(side=RIGHT, fill=X, expand=True)
         filters = ttk.Frame(win); filters.pack(fill=X, padx=14, pady=(0, 8))
         date_from, date_to = StringVar(), StringVar()
-        kinds = {'late': 'رخصة الدخول — تأخر', 'absence_return': 'رخصة الدخول — عودة بعد الغياب', 'exit_permit': 'رخصة خروج استثنائي', 'exit_return': 'إثبات عودة من خروج استثنائي'}
+        kinds = {'late': 'رخصة الدخول — تأخر', 'absence_return': 'رخصة الدخول — عودة بعد الغياب',
+                 'special_entry': 'رخصة الدخول — حالة خاصة', 'exit_permit': 'رخصة خروج استثنائي',
+                 'exit_return': 'إثبات عودة من خروج استثنائي'}
         kind = ComboStringVar(['الكل'] + list(kinds.values()), value='الكل')
         status = ComboStringVar(['الكل', 'ساري', 'ملغى', 'تمت العودة'], value='الكل')
         ttk.Label(filters, text='النوع:').pack(side=RIGHT, padx=(6, 2))
@@ -2238,7 +2397,7 @@ class SchoolPassApp:
         for col,title,width in headings:
             tree.heading(col,text=title,command=lambda c=col: sort_tree(c)); tree.column(col,width=width,anchor=E,stretch=True)
         tree.tag_configure('late', background='#FFF8E8'); tree.tag_configure('absence', background='#EEF7FF')
-        tree.tag_configure('exit', background='#F0F7F2'); tree.tag_configure('cancelled', foreground='#A12D2D')
+        tree.tag_configure('exit', background='#F0F7F2'); tree.tag_configure('special', background='#FFF1EC'); tree.tag_configure('cancelled', foreground='#A12D2D')
         yscroll=ttk.Scrollbar(win,orient='vertical',command=tree.yview)
         xscroll=ttk.Scrollbar(win,orient='horizontal',command=tree.xview)
         tree.configure(yscrollcommand=yscroll.set,xscrollcommand=xscroll.set)
@@ -2260,7 +2419,7 @@ class SchoolPassApp:
             state['rows'] = rows
             for item in tree.get_children(): tree.delete(item)
             for r in rows:
-                tag = 'late' if r['kind']=='late' else ('absence' if r['kind']=='absence_return' else 'exit')
+                tag = 'late' if r['kind']=='late' else ('absence' if r['kind']=='absence_return' else ('special' if r['kind']=='special_entry' else 'exit'))
                 tags = ('cancelled',) if r['status']=='cancelled' else (tag,)
                 tree.insert('',END,iid=str(r['id']),values=(r['record_no'],kind_label(r['kind']),r['student_name'],r['class_name'],
                     r['issued_at'] or r['created_at'],r.get('supervisor') or '—',status_label(r['status']),r['printed_count']),tags=tags)
@@ -2324,6 +2483,101 @@ class SchoolPassApp:
         core.open_pdf(out)
         messagebox.showinfo('التقرير الشهري جاهز', f'تم إنشاء التقرير وحفظه في:\n{out}\n\nفُتح الملف للمعاينة والطباعة.', parent=self.root)
 
+    def open_expulsion_report(self):
+        """Browse and export class-expulsion records by teacher and date interval."""
+        today_text = date_today()
+        today_value = date.fromisoformat(today_text)
+        start_var = StringVar(value=today_value.replace(day=1).isoformat())
+        end_var = StringVar(value=today_text)
+        win = Toplevel(self.root)
+        win.title('إحصائيات الطرد من الحصة حسب الأستاذ')
+        win.geometry('1180x690')
+        win.minsize(900, 560)
+        win.transient(self.root)
+        ttk.Label(win, text='تقرير حالات الطرد من الحصة حسب الأستاذ', style='Title.TLabel').pack(pady=(14, 6))
+
+        filters = ttk.Frame(win)
+        filters.pack(fill=X, padx=16, pady=8)
+        def date_control(parent, caption, variable):
+            group = ttk.Frame(parent)
+            group.pack(side=RIGHT, padx=5)
+            ttk.Label(group, text=caption).pack(side=RIGHT, padx=4)
+            entry = ttk.Entry(group, textvariable=variable, state='readonly', width=12, justify='center')
+            entry.pack(side=RIGHT, padx=2)
+            DatePicker(group, variable).pack(side=RIGHT, padx=2)
+        date_control(filters, 'من تاريخ:', start_var)
+        date_control(filters, 'إلى تاريخ:', end_var)
+
+        teacher_names = set()
+        with db_connect() as conn:
+            stored = conn.execute("SELECT details_json FROM records WHERE kind='special_entry'").fetchall()
+        for item in stored:
+            try:
+                details = json.loads(item['details_json'] or '{}')
+            except (TypeError, json.JSONDecodeError):
+                continue
+            if details.get('entry_reason') == 'class_expulsion':
+                name = str(details.get('expelling_teacher') or '').strip()
+                if name:
+                    teacher_names.add(name)
+        teacher_values = ['الكل'] + sorted(teacher_names, key=str.casefold)
+        teacher_var = ComboStringVar(teacher_values, value='الكل')
+        ttk.Label(filters, text='الأستاذ:').pack(side=RIGHT, padx=(12, 3))
+        ttk.Combobox(filters, textvariable=teacher_var, values=teacher_values, state='readonly', width=28, justify='right').pack(side=RIGHT, padx=3)
+
+        summary = DisplayStringVar(value='حدد الفترة والأستاذ ثم اضغط عرض النتائج.')
+        ttk.Label(win, textvariable=summary, style='Badge.TLabel').pack(anchor=E, padx=18, pady=(2, 6))
+        columns = ('issued', 'teacher', 'subject', 'student', 'class_name', 'supervisor', 'record_no')
+        tree = ttk.Treeview(win, columns=columns, show='headings')
+        headings = [('issued', 'تاريخ ووقت الطرد', 155), ('teacher', 'الأستاذ', 175), ('subject', 'المادة', 120),
+                    ('student', 'التلميذ', 185), ('class_name', 'القسم', 140), ('supervisor', 'المشرف الذي أصدر الرخصة', 175),
+                    ('record_no', 'رقم الرخصة', 130)]
+        for col, title, width in headings:
+            tree.heading(col, text=title)
+            tree.column(col, width=width, anchor=E, stretch=True)
+        tree.pack(fill=BOTH, expand=True, padx=14, pady=8)
+
+        state = {'report': None}
+        def refresh():
+            try:
+                report = core.get_expulsion_report(start_var.get(), end_var.get(), teacher_var.get())
+            except USER_ERRORS as exc:
+                messagebox.showwarning('تحقق من الفترة', str(exc), parent=win)
+                return
+            state['report'] = report
+            for item_id in tree.get_children():
+                tree.delete(item_id)
+            for row in report['records']:
+                tree.insert('', END, iid=str(row['id']), values=(row['issued_at_text'], row['expelling_teacher'],
+                    row['subject'], row['student_name'], row['class_name'], row.get('supervisor') or '—', row['record_no']))
+            distinct = len({row['student_key'] for row in report['records']})
+            summary.set(f"الفترة: {report['start_date']} ← {report['end_date']}  |  الأستاذ: {report['teacher']}  |  عدد حالات الطرد: {report['total']}  |  عدد التلاميذ المختلفين: {distinct}")
+
+        def export_pdf():
+            if not state['report']:
+                refresh()
+                if not state['report']:
+                    return
+            initial = f"SchoolPass_Expulsions_{start_var.get()}_{end_var.get()}.pdf"
+            path = filedialog.asksaveasfilename(parent=win, title='حفظ تقرير الطرد حسب الأستاذ',
+                initialfile=initial, defaultextension='.pdf', filetypes=[('PDF', '*.pdf')])
+            if not path:
+                return
+            try:
+                out = core.create_expulsion_report_pdf(path, start_var.get(), end_var.get(), teacher_var.get(), self.current_user['id'])
+            except (USER_ERRORS + (ImportError,)) as exc:
+                show_error(win, 'تعذر إنشاء تقرير الطرد', exc)
+                return
+            core.open_pdf(out)
+            messagebox.showinfo('التقرير جاهز', f'تم إنشاء التقرير وحفظه في:\n{out}', parent=win)
+
+        buttons = ttk.Frame(win)
+        buttons.pack(fill=X, padx=14, pady=(0, 12))
+        ttk.Button(buttons, text='عرض النتائج', command=refresh, style='Accent.TButton').pack(side=RIGHT, padx=4)
+        ttk.Button(buttons, text='إنشاء تقرير PDF', command=export_pdf).pack(side=RIGHT, padx=4)
+        ttk.Button(buttons, text='إغلاق', command=win.destroy).pack(side=LEFT, padx=4)
+        refresh()
+
     def show_stats(self):
         win = Toplevel(self.root)
         win.title('الإحصائيات والرسوم البيانية')
@@ -2342,7 +2596,8 @@ class SchoolPassApp:
             data=core.dashboard_series({'اليوم':'day','الأسبوع':'week','الشهر':'month'}.get(period.get(),'week'))
             chart.delete('all'); chart.update_idletasks(); w=max(600,chart.winfo_width()); h=max(180,chart.winfo_height())
             l,r,t,b=45,w-16,14,h-34; chart.create_line(l,b,r,b,fill='#D9E4DE')
-            series=[('late','تأخر','#D7A33B'),('absence_return','عودة بعد غياب','#4A89B8'),('exit_permit','خروج','#2D8062'),('exit_return','إثبات عودة','#8A78B7')]
+            series=[('late','تأخر','#D7A33B'),('absence_return','عودة بعد غياب','#4A89B8'),
+                    ('special_entry','دخول خاص','#B85A45'),('exit_permit','خروج','#2D8062'),('exit_return','إثبات عودة','#8A78B7')]
             mx=max([1]+[n for arr in data['series'].values() for n in arr]); gw=(r-l)/max(1,len(data['labels'])); bw=max(2,min(10,gw/5))
             for tick in range(4):
                 y=b-(b-t)*tick/3; chart.create_line(l,y,r,y,fill='#EDF2EF'); chart.create_text(l-8,y,text=str(round(mx*tick/3)),anchor='e',font=('Segoe UI',8),fill='#667A73')
@@ -2368,6 +2623,7 @@ class SchoolPassApp:
                 ('عمليات الشهر حسب النوع والحالة',[f"{kind_label(r['kind'])} — {status_label(r['status'])}: {r['n']}" for r in st['month_by_kind']]),
                 ('حسب القسم هذا الشهر',[f"{r['class_name']} — {kind_label(r['kind'])}: {r['n']}" for r in st['by_class']]),
                 ('حسب المشرف هذا الشهر',[f"{r['supervisor']} — {kind_label(r['kind'])}: {r['n']}" for r in st['by_supervisor']]),
+                ('حالات الطرد حسب الأستاذ هذا الشهر',[f"{r['teacher']}: {r['count']} حالة — {r.get('student_count', len(r['students']))} تلميذًا مختلفًا" for r in st['expulsion_by_teacher']]),
                 ('أكثر أسباب العمليات',[f"{kind_label(r['kind'])} — {r['reason']}: {r['n']}" for r in st['by_reason']]),
                 ('فترات الغياب المدخلة يدويًا',[f"{r['student_name']} — {r['class_name']}: {r['n']} فترة، {r['days']} يومًا" for r in st['absence_totals']])]
             for title,lines in sections:
@@ -2376,6 +2632,7 @@ class SchoolPassApp:
             text_widget.configure(state='disabled')
         bar=ttk.Frame(win);bar.pack(fill=X,padx=18,pady=(0,12))
         ttk.Button(bar,text='تحديث الإحصائيات',command=refresh_text).pack(side=RIGHT,padx=4)
+        ttk.Button(bar,text='تقرير الطرد حسب الأستاذ',command=self.open_expulsion_report).pack(side=RIGHT,padx=4)
         ttk.Button(bar,text='إنشاء التقرير الشهري PDF',command=self.monthly_report,style='Accent.TButton').pack(side=RIGHT,padx=4)
         draw_chart();refresh_text()
 
@@ -2498,7 +2755,7 @@ class SchoolPassApp:
         secondary = StringVar(value=secondary_saved)
         backup_path = StringVar(value=core.setting('external_backup_path', ''))
         late_threshold = StringVar(value=core.setting('late_alert_threshold', '3'))
-        rtl_enabled = BooleanVar(value=core.setting('rtl_shaping', '1') != '0')
+        rtl_enabled = BooleanVar(value=True)
         ttk.Label(form, text='اسم المؤسسة على الوصول والتصاريح:').pack(anchor=E)
         ttk.Entry(form, textvariable=name, justify='right').pack(fill=X, pady=6)
         ttk.Label(form, text='عنوان هذا الحاسوب داخل رموز QR (يُفضّل عنوان ثابت):').pack(anchor=E, pady=(8, 0))
@@ -2543,7 +2800,7 @@ class SchoolPassApp:
         ttk.Button(form, text='استعادة الألوان الافتراضية', command=reset_theme).pack(anchor=E, pady=4)
         ttk.Label(form, text='حد إنذار التأخر المتكرر خلال الشهر (2–20):').pack(anchor=E, pady=(10, 0))
         ttk.Entry(form, textvariable=late_threshold, justify='center', width=8).pack(anchor=E, pady=3)
-        ttk.Checkbutton(form, text='تفعيل تشكيل وعرض النصوص العربية (أزل العلامة إذا ظهر التشكيل مضاعفًا)', variable=rtl_enabled).pack(anchor=E, pady=4)
+        ttk.Label(form, text='يُعرض النص العربي تلقائيًا بالاتجاه الصحيح دون إضافة حركات صوتية أو معالجة مكررة.', style='Subtitle.TLabel', wraplength=650).pack(anchor=E, pady=4)
         backup_row = ttk.Frame(form); backup_row.pack(fill=X, pady=(10, 3))
         ttk.Label(backup_row, text='مجلد نسخة احتياطية خارجي (USB أو قرص آخر):').pack(anchor=E)
         ttk.Entry(backup_row, textvariable=backup_path, justify='left').pack(side=LEFT, fill=X, expand=True, padx=4)
@@ -2568,7 +2825,7 @@ class SchoolPassApp:
                 show_error(win, 'تعذر الحفظ', exc)
                 return
             global RTL_SHAPING_ENABLED
-            RTL_SHAPING_ENABLED = rtl_enabled.get()
+            RTL_SHAPING_ENABLED = True
             make_style(self.root, primary.get(), secondary.get())
             win.destroy()
             messagebox.showinfo('تم', 'حُفظت إعدادات المؤسسة وألوان الواجهة. طُبّقت الألوان فورًا.', parent=self.root)
@@ -2679,6 +2936,7 @@ def _single_instance() -> bool:
 
 def main():
     root = Tk()
+    apply_application_icon(root)
     # Keep a real, visible Tk owner window during startup. In 0.5.6 the root
     # was withdrawn before creating transient login/setup Toplevels; on some
     # Windows/Tk builds those dialogs never became visible, leaving a silent
@@ -2708,9 +2966,10 @@ def main():
         return
     startup_log('single-instance lock acquired')
     core.init_db()
+    core.set_setting('rtl_shaping', '1')
     startup_log('database initialized')
     global RTL_SHAPING_ENABLED
-    RTL_SHAPING_ENABLED = core.setting('rtl_shaping', '1') != '0'
+    RTL_SHAPING_ENABLED = True
     core.check_database_integrity()
     startup_log('database integrity checked')
     make_style(root)  # reload the administrator's saved palette before showing the login window

@@ -38,6 +38,7 @@ class TestReleaseCurrent(unittest.TestCase):
         from app import SchoolPassApp
         self.assertEqual(SchoolPassApp._version_parts('v2.5.0'), (2, 5, 0))
         self.assertEqual(SchoolPassApp._version_parts('v2.5.2'), (2, 5, 2))
+        self.assertEqual(SchoolPassApp._version_parts('v2.5.3'), (2, 5, 3))
         self.assertEqual(SchoolPassApp._version_parts('2.6.1'), (2, 6, 1))
         with self.assertRaises(ValueError):
             SchoolPassApp._version_parts('latest-release')

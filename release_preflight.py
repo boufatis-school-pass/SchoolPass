@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-EXPECTED = "2.5.2"
+EXPECTED = "2.5.3"
 
 
 def main() -> int:
@@ -30,7 +30,7 @@ def main() -> int:
     required = [
         "app.py", "schoolpass_core.py", "requirements.txt", "requirements_dev.txt",
         "SchoolPass_Setup.iss", "build_windows.ps1", "build_installer_only.ps1",
-        "release_preflight.py", ".github/workflows/release-windows.yml",
+        "release_preflight.py", ".github/workflows/release-windows.yml", "app.ico",
     ]
     for name in required:
         if not (ROOT / name).is_file():
@@ -53,6 +53,14 @@ def main() -> int:
         errors.append("GitHub release workflow does not publish SchoolPass_Setup.exe")
     if "schoolpass_setup.exe" not in (ROOT / "app.py").read_text(encoding="utf-8").lower():
         errors.append("In-app update checker does not verify the setup asset")
+    if "--icon" not in (ROOT / "build_windows.ps1").read_text(encoding="utf-8"):
+        errors.append("Windows build does not embed app.ico in SchoolPass.exe")
+    if "--add-data" not in (ROOT / "build_windows.ps1").read_text(encoding="utf-8"):
+        errors.append("Windows build does not package the runtime app.ico asset")
+    if "SetupIconFile=app.ico" not in setup:
+        errors.append("Inno Setup wizard icon is not configured")
+    if 'IconFilename: "{app}\\app.ico"' not in setup:
+        errors.append("Installed SchoolPass shortcuts do not use the branded icon")
 
     if errors:
         print("Release preflight failed:")

@@ -1,9 +1,9 @@
-﻿$ErrorActionPreference = 'Stop'
+$ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $Root
-$PythonVersion = '3.13.17'
+$PythonVersion = '3.13.18'
 $PythonUrl = "https://www.python.org/ftp/python/$PythonVersion/python-$PythonVersion-amd64.exe"
 
 function Say([string]$Message) { Write-Host "`n=== $Message ===" -ForegroundColor Cyan }
@@ -85,6 +85,7 @@ try {
         if (Test-Path $path) { Remove-Item $path -Recurse -Force }
     }
     $args = @('-m','PyInstaller','--noconfirm','--clean','--onedir','--windowed','--name','SchoolPass',
+        '--icon',(Join-Path $Root 'app.ico'),'--add-data',((Join-Path $Root 'app.ico') + ';.'),
         '--collect-all','qrcode','--collect-all','reportlab','--collect-all','arabic_reshaper',
         '--collect-all','bidi','--collect-all','openpyxl','--hidden-import','xlrd','--hidden-import','schoolpass_core','app.py')
     Invoke-NativeChecked $Python $args 'فشل بناء SchoolPass.exe.'
@@ -99,7 +100,7 @@ try {
     $setup = Join-Path $Root 'dist\SchoolPass_Setup.exe'
     if (-not (Test-Path $setup) -or (Get-Item $setup).Length -lt 1000000) { throw 'لم يتم العثور على مثبت Windows صالح.' }
 
-    Write-Host "`nاكتمل بناء SchoolPass 2.5.2." -ForegroundColor Green
+    Write-Host "`nاكتمل بناء SchoolPass 2.5.3." -ForegroundColor Green
     Write-Host "ملف التثبيت: $setup" -ForegroundColor Green
     Write-Host 'لم يجر لمس مجلد بيانات المستخدم %LOCALAPPDATA%\SchoolPass.'
     Start-Process explorer.exe -ArgumentList (Join-Path $Root 'dist')

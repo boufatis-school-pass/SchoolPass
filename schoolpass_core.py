@@ -28,12 +28,12 @@ from pathlib import Path
 from typing import NamedTuple
 
 APP_NAME = "SchoolPass"
-APP_VERSION = "2.5.2"
+APP_VERSION = "2.5.3"
 SCHOOL_NAME = "ثانوية المجاهد بسجراري لخضر بوفاطيس"
 MINISTRY_NAME = "الجمهورية الجزائرية الديمقراطية الشعبية — وزارة التربية الوطنية"
 SERVER_PORT = 8765
 AUTO_LOCK_SECONDS = 600
-RECORD_KINDS = ("late", "absence_return", "exit_permit", "exit_return")
+RECORD_KINDS = ("late", "absence_return", "special_entry", "exit_permit", "exit_return")
 ABSENCE_CERTIFICATE_MAX_DURATION_DAYS = 2
 # Backward-compatible alias for integrations that referenced the earlier constant name.
 ABSENCE_CERTIFICATE_MAX_DATE_DIFFERENCE = ABSENCE_CERTIFICATE_MAX_DURATION_DAYS
@@ -810,7 +810,7 @@ def get_student(key: str) -> sqlite3.Row | None:
 
 
 # ----------------------------------------------------------------------------- records
-_PREFIXES = {"late": "SP", "absence_return": "SP", "exit_permit": "SP", "exit_return": "SP"}
+_PREFIXES = {"late": "SP", "absence_return": "SP", "special_entry": "SP", "exit_permit": "SP", "exit_return": "SP"}
 
 
 def next_record_no(kind: str, conn: sqlite3.Connection) -> str:
@@ -921,10 +921,57 @@ def monthly_late_count(student_key: str, month: str | None = None) -> int:
                                 (str(student_key), month)).fetchone()[0])
 
 
-def create_late_slip(student, user_id, reason: str) -> sqlite3.Row:
-    if not (reason or "").strip():
-        raise ValueError("أدخل سبب التأخر.")
-    return create_record("late", student, user_id, reason)
+LATE_REASON_LABELS = {
+    "consultation": "التواجد في الاستشارة",
+    "transport": "التأخر بسبب انعدام النقل",
+    "class_delay": "التأخر في الالتحاق بالقسم",
+}
+
+SPECIAL_ENTRY_LABELS = {
+    "class_expulsion": "الطرد من الحصة",
+    "administration_visit": "التواجد في الإدارة",
+}
+
+
+def create_late_slip(student, user_id, reason: str, note: str = "") -> sqlite3.Row:
+    """Create a late-entry permit with a structured reason and optional note."""
+    reason = str(reason or "").strip()
+    note = str(note or "").strip()
+    if not reason:
+        raise ValueError("اختر سبب التأخر.")
+    if len(note) > 200:
+        raise ValueError("ملاحظة التأخر طويلة جدًا (الحد الأقصى 200 حرف).")
+    reverse = {label: key for key, label in LATE_REASON_LABELS.items()}
+    code = reverse.get(reason, "other")
+    details = {"late_reason": code, "late_reason_label": reason}
+    if note:
+        details["note"] = note
+    return create_record("late", student, user_id, reason, details)
+
+
+def create_special_entry(student, user_id, entry_reason: str, teacher_name: str = "",
+                         subject: str = "", note: str = "") -> sqlite3.Row:
+    """Create a special entry permit without counting it as an ordinary absence."""
+    entry_reason = str(entry_reason or "").strip()
+    teacher_name, subject, note = str(teacher_name or "").strip(), str(subject or "").strip(), str(note or "").strip()
+    if entry_reason not in SPECIAL_ENTRY_LABELS:
+        raise ValueError("اختر سبب رخصة الدخول الخاصة.")
+    if len(note) > 200:
+        raise ValueError("الملاحظة طويلة جدًا (الحد الأقصى 200 حرف).")
+    details = {"entry_reason": entry_reason, "entry_reason_label": SPECIAL_ENTRY_LABELS[entry_reason]}
+    if entry_reason == "class_expulsion":
+        if not teacher_name or not subject:
+            raise ValueError("عند الطرد من الحصة يجب تسجيل اسم الأستاذ والمادة.")
+        if len(teacher_name) > 100 or len(subject) > 80:
+            raise ValueError("اسم الأستاذ أو المادة أطول من الحد المسموح.")
+        details.update({"expelling_teacher": teacher_name, "subject": subject})
+        reason = f"{SPECIAL_ENTRY_LABELS[entry_reason]} — الأستاذ: {teacher_name} — المادة: {subject}"
+    else:
+        # The timestamp is assigned by _insert_record; no start/end duration is collected.
+        reason = SPECIAL_ENTRY_LABELS[entry_reason]
+    if note:
+        details["note"] = note
+    return create_record("special_entry", student, user_id, reason, details)
 
 
 def absence_days(start: str, end: str) -> tuple[str, str, int]:
@@ -951,38 +998,43 @@ def absence_days(start: str, end: str) -> tuple[str, str, int]:
 def create_absence_return(student, user_id, start: str, end: str, note: str = "",
                           proof_method: str = "medical_certificate", certificate_present: bool = False,
                           guardian_name: str = "", relationship: str = "", national_id: str = "",
-                          guardian_present: bool = False) -> sqlite3.Row:
-    """Create a post-absence entry permit using date-only absence duration.
+                          guardian_present: bool = False, other_reason: str = "") -> sqlite3.Row:
+    """Create a post-absence entry permit with medical, guardian, combined, or other proof.
 
-    The return date is not counted as an absence day. A duration of 0-2 days allows
-    a verified medical certificate; more than 2 days requires the guardian in person,
-    even if a medical certificate exists. A guardian may attend voluntarily earlier.
+    The return date is excluded from absence days. More than two absence days always
+    requires the guardian's personal attendance; a medical certificate may be combined
+    with that attendance to describe split justification periods.
     """
     s, e, absence_count = absence_days(start, end)
-    note = (note or "").strip()
-    if len(note) > 200:
-        raise ValueError("الملاحظة طويلة جدًا (الحد الأقصى 200 حرف).")
-    date_difference_days = absence_count
-    if proof_method not in ("medical_certificate", "guardian"):
-        raise ValueError("اختر طريقة تبرير الغياب: شهادة طبية أو حضور ولي الأمر.")
-    if absence_count > ABSENCE_CERTIFICATE_MAX_DURATION_DAYS and proof_method != "guardian":
-        raise ValueError("عدد أيام الغياب قبل يوم العودة تجاوز يومين؛ حضور ولي الأمر شخصيًا إلزامي حتى مع وجود شهادة طبية.")
-
+    note, other_reason = str(note or "").strip(), str(other_reason or "").strip()
+    if len(note) > 200 or len(other_reason) > 200:
+        raise ValueError("الملاحظة أو التبرير الآخر طويل جدًا (الحد الأقصى 200 حرف).")
+    allowed = {"medical_certificate", "guardian", "medical_and_guardian", "other"}
+    if proof_method not in allowed:
+        raise ValueError("اختر طريقة تبرير صحيحة للغياب.")
+    has_medical = proof_method in ("medical_certificate", "medical_and_guardian")
+    has_guardian = proof_method in ("guardian", "medical_and_guardian")
+    if proof_method == "other" and not other_reason:
+        raise ValueError("اكتب سبب التبرير الآخر.")
+    if absence_count > ABSENCE_CERTIFICATE_MAX_DURATION_DAYS and proof_method not in ("guardian", "medical_and_guardian"):
+        raise ValueError("تجاوزت مدة الغياب يومين؛ يجب اختيار حضور ولي الأمر شخصيًا أو شهادة طبية مع حضور ولي الأمر.")
     details = {
         "absence_start": s, "return_date": e, "days_count": absence_count,
-        "date_difference_days": date_difference_days, "proof_method": proof_method,
+        "date_difference_days": absence_count, "proof_method": proof_method,
     }
-    if proof_method == "medical_certificate":
+    if has_medical:
         if not certificate_present:
-            raise ValueError("يجب تأكيد استلام الشهادة الطبية والتحقق منها قبل إصدار الرخصة.")
+            raise ValueError("يجب تأكيد استلام الشهادة الطبية والتحقق منها.")
         details["medical_certificate_confirmed"] = True
         details["medical_certificate_verified_at"] = now_iso()
-    else:
-        guardian_name, relationship = guardian_name.strip(), relationship.strip()
+    if proof_method == "other":
+        details["other_proof_reason"] = other_reason
+    if has_guardian:
+        guardian_name, relationship = str(guardian_name or "").strip(), str(relationship or "").strip()
         if not guardian_present:
             raise ValueError("يجب تأكيد حضور ولي الأمر شخصيًا إلى الإدارة.")
-        if not (guardian_name and relationship and national_id.strip()):
-            raise ValueError("عند حضور ولي الأمر، يجب إدخال اسمه الكامل وصلته ورقم بطاقة هويته.")
+        if not (guardian_name and relationship and str(national_id or "").strip()):
+            raise ValueError("عند حضور الولي، أدخل اسمه الكامل وصلته ورقم بطاقة هويته.")
         if len(guardian_name) > 80 or len(relationship) > 80:
             raise ValueError("اسم ولي الأمر أو صلته طويل جدًا (الحد الأقصى 80 حرفًا).")
         nid = validate_national_id(national_id)
@@ -994,7 +1046,6 @@ def create_absence_return(student, user_id, start: str, end: str, note: str = ""
                         "national_id_enc": encrypted, "national_id_last4": nid[-4:],
                         "national_id_length": len(nid), "guardian_present": True,
                         "guardian_verified_at": now_iso()})
-
     user = require_user(user_id)
     with db_connect() as conn:
         conn.execute("BEGIN IMMEDIATE")
@@ -1002,11 +1053,8 @@ def create_absence_return(student, user_id, start: str, end: str, note: str = ""
                               (student["student_key"],)).fetchall():
             d = json.loads(r["details_json"] or "{}")
             old_start, old_return = d.get("absence_start", ""), d.get("return_date", "")
-            # Both periods are half-open [absence_start, return_date): the return
-            # date itself is present at school and is not an absence day.
             if old_start and s < e and old_start < old_return and s < old_return and e > old_start:
-                raise ValueError(f"هذه الفترة تتداخل مع فترة غياب مسجلة سابقًا ({r['record_no']}: من {old_start} إلى ما قبل {old_return}). "
-                                 "ألغِ السجل القديم أولًا إن كان خاطئًا.")
+                raise ValueError(f"هذه الفترة تتداخل مع فترة غياب مسجلة سابقًا ({r['record_no']}: من {old_start} إلى ما قبل {old_return}). ألغِ السجل القديم أولًا إن كان خاطئًا.")
         row = _insert_record(conn, "absence_return", student["student_key"], student_name(student), student["class_name"], user["id"],
                              note, details)
         conn.execute("INSERT INTO audit_logs(happened_at,user_id,action,target_type,target_id,description) VALUES(?,?,?,?,?,?)",
@@ -1117,6 +1165,7 @@ def record_by_id(record_id: int) -> sqlite3.Row | None:
 
 def kind_label(kind: str) -> str:
     return {"late": "رخصة الدخول — تأخر", "absence_return": "رخصة الدخول — عودة بعد الغياب",
+            "special_entry": "رخصة الدخول — حالة خاصة",
             "exit_permit": "رخصة خروج استثنائي", "exit_return": "إثبات عودة من خروج استثنائي"}.get(kind, kind)
 
 
@@ -1152,9 +1201,9 @@ def compute_stats(today: date | None = None) -> dict:
         out["month_total"] = int(conn.execute(
             f"SELECT COUNT(*) FROM records WHERE substr({issue},1,7)=? AND status<>'cancelled'", (month,)).fetchone()[0])
         out["today_unique_students"] = int(conn.execute(
-            f"SELECT COUNT(DISTINCT student_key) FROM records WHERE substr({issue},1,10)=? AND kind IN ('late','absence_return','exit_permit','exit_return') AND status<>'cancelled'", (day,)).fetchone()[0])
+            f"SELECT COUNT(DISTINCT student_key) FROM records WHERE substr({issue},1,10)=? AND kind IN ('late','absence_return','special_entry','exit_permit','exit_return') AND status<>'cancelled'", (day,)).fetchone()[0])
         out["today_entry_students"] = int(conn.execute(
-            f"SELECT COUNT(DISTINCT student_key) FROM records WHERE substr({issue},1,10)=? AND kind IN ('late','absence_return','exit_return') AND status<>'cancelled'", (day,)).fetchone()[0])
+            f"SELECT COUNT(DISTINCT student_key) FROM records WHERE substr({issue},1,10)=? AND kind IN ('late','absence_return','special_entry','exit_return') AND status<>'cancelled'", (day,)).fetchone()[0])
         out["today_late_students"] = int(conn.execute(
             f"SELECT COUNT(DISTINCT student_key) FROM records WHERE substr({issue},1,10)=? AND kind='late' AND status<>'cancelled'", (day,)).fetchone()[0])
         out["today_absence_students"] = int(conn.execute(
@@ -1162,9 +1211,9 @@ def compute_stats(today: date | None = None) -> dict:
         out["today_exit_students"] = int(conn.execute(
             f"SELECT COUNT(DISTINCT student_key) FROM records WHERE substr({issue},1,10)=? AND kind='exit_permit' AND status<>'cancelled'", (day,)).fetchone()[0])
         out["week_unique_students"] = int(conn.execute(
-            f"SELECT COUNT(DISTINCT student_key) FROM records WHERE substr({issue},1,10)>=? AND substr({issue},1,10)<=? AND kind IN ('late','absence_return','exit_permit','exit_return') AND status<>'cancelled'", (week_start, day)).fetchone()[0])
+            f"SELECT COUNT(DISTINCT student_key) FROM records WHERE substr({issue},1,10)>=? AND substr({issue},1,10)<=? AND kind IN ('late','absence_return','special_entry','exit_permit','exit_return') AND status<>'cancelled'", (week_start, day)).fetchone()[0])
         out["month_unique_students"] = int(conn.execute(
-            f"SELECT COUNT(DISTINCT student_key) FROM records WHERE substr({issue},1,7)=? AND kind IN ('late','absence_return','exit_permit','exit_return') AND status<>'cancelled'", (month,)).fetchone()[0])
+            f"SELECT COUNT(DISTINCT student_key) FROM records WHERE substr({issue},1,7)=? AND kind IN ('late','absence_return','special_entry','exit_permit','exit_return') AND status<>'cancelled'", (month,)).fetchone()[0])
         out["by_day"] = q(
             f"SELECT substr({issue},1,10) d,kind,COUNT(*) n FROM records WHERE substr({issue},1,7)=? AND status<>'cancelled' GROUP BY d,kind ORDER BY d", month)
         out["by_class"] = q(
@@ -1178,6 +1227,26 @@ def compute_stats(today: date | None = None) -> dict:
         rows = conn.execute("SELECT student_key,student_name,class_name,details_json FROM records WHERE kind='absence_return' AND status<>'cancelled'").fetchall()
         out["active_students"] = int(conn.execute("SELECT COUNT(*) FROM students WHERE active=1").fetchone()[0])
         out["open_exits"] = int(conn.execute("SELECT COUNT(DISTINCT student_key) FROM records WHERE kind='exit_permit' AND status='valid'").fetchone()[0])
+        expulsion_rows = conn.execute("SELECT r.student_key,r.student_name,r.class_name,r.details_json FROM records r "
+                                      "WHERE r.kind='special_entry' AND r.status<>'cancelled' "
+                                      "AND substr(COALESCE(NULLIF(r.issued_at,''),r.created_at),1,7)=?", (month,)).fetchall()
+    by_teacher: dict[str, dict] = {}
+    for item in expulsion_rows:
+        try:
+            detail = json.loads(item["details_json"] or "{}")
+        except (TypeError, json.JSONDecodeError):
+            detail = {}
+        if detail.get("entry_reason") != "class_expulsion":
+            continue
+        teacher = str(detail.get("expelling_teacher", "غير محدد")).strip() or "غير محدد"
+        bucket = by_teacher.setdefault(teacher, {"teacher": teacher, "count": 0, "student_keys": set(), "students": set()})
+        bucket["count"] += 1
+        bucket["student_keys"].add(item["student_key"])
+        bucket["students"].add(item["student_name"])
+    out["expulsion_by_teacher"] = sorted(
+        [{"teacher": value["teacher"], "count": value["count"],
+          "student_count": len(value["student_keys"]), "students": sorted(value["students"])}
+         for value in by_teacher.values()], key=lambda x: (-x["count"], x["teacher"]))
     totals: dict[str, dict] = {}
     for r in rows:
         t = totals.setdefault(r["student_key"], {"student_name": r["student_name"], "class_name": r["class_name"], "n": 0, "days": 0})
@@ -1226,6 +1295,124 @@ def export_students_csv(path: str, user_id) -> int:
 
 
 
+
+def get_expulsion_report(start_date: str, end_date: str, teacher: str | None = None) -> dict:
+    """Return expulsion records and per-teacher counts for a validated date interval."""
+    start_date, end_date = normalize_digits(start_date).strip(), normalize_digits(end_date).strip()
+    try:
+        date.fromisoformat(start_date)
+        date.fromisoformat(end_date)
+    except ValueError as exc:
+        raise ValueError("حدد تاريخ بداية ونهاية صحيحين من التقويم.") from exc
+    if start_date > end_date:
+        raise ValueError("تاريخ البداية يجب ألا يتجاوز تاريخ النهاية.")
+    issue = "COALESCE(NULLIF(r.issued_at,''),r.created_at)"
+    with db_connect() as conn:
+        raw = conn.execute(f"""SELECT r.*,u.display_name supervisor FROM records r
+            LEFT JOIN users u ON u.id=r.user_id
+            WHERE r.kind='special_entry' AND r.status<>'cancelled'
+              AND substr({issue},1,10)>=? AND substr({issue},1,10)<=?
+            ORDER BY {issue},r.id""", (start_date, end_date)).fetchall()
+    rows = []
+    for record in raw:
+        item = dict(record)
+        try:
+            details = json.loads(item.get("details_json") or "{}")
+        except (TypeError, json.JSONDecodeError):
+            details = {}
+        if details.get("entry_reason") != "class_expulsion":
+            continue
+        teacher_name = str(details.get("expelling_teacher", "غير محدد")).strip() or "غير محدد"
+        if teacher and teacher != "الكل" and teacher_name != teacher:
+            continue
+        item.update({"expelling_teacher": teacher_name, "subject": str(details.get("subject", "—")),
+                     "issued_at_text": item.get("issued_at") or item.get("created_at")})
+        rows.append(item)
+    counts: dict[str, dict] = {}
+    for item in rows:
+        name = item["expelling_teacher"]
+        bucket = counts.setdefault(name, {"teacher": name, "count": 0, "student_keys": set(), "students": set(), "classes": set()})
+        bucket["count"] += 1
+        bucket["student_keys"].add(item["student_key"])
+        bucket["students"].add(item["student_name"])
+        bucket["classes"].add(item["class_name"])
+    by_teacher = [{"teacher": value["teacher"], "count": value["count"],
+                   "student_count": len(value["student_keys"]), "students": sorted(value["students"]),
+                   "classes": sorted(value["classes"])} for value in counts.values()]
+    by_teacher.sort(key=lambda x: (-x["count"], x["teacher"]))
+    return {"start_date": start_date, "end_date": end_date, "teacher": teacher or "الكل",
+            "total": len(rows), "by_teacher": by_teacher, "records": rows}
+
+
+def create_expulsion_report_pdf(dest_path, start_date: str, end_date: str, teacher: str | None, user_id) -> Path:
+    """Create a paginated A4-landscape report listing expulsion counts and records."""
+    require_user(user_id)
+    report = get_expulsion_report(start_date, end_date, teacher)
+    from reportlab.pdfgen import canvas
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib.units import mm
+    out = Path(dest_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    page_w, page_h = landscape(A4)
+    c = canvas.Canvas(str(out), pagesize=(page_w, page_h), pageCompression=1)
+    font, margin = _font_setup(), 12 * mm
+
+    def header():
+        c.setFont(font, 12)
+        c.drawRightString(page_w-margin, page_h-14*mm, _arabic_visual("تقرير حالات الطرد من الحصة حسب الأستاذ"))
+        c.setFont(font, 8)
+        c.drawRightString(page_w-margin, page_h-21*mm, _arabic_visual(
+            f"الفترة: {report['start_date']} إلى {report['end_date']} — الأستاذ: {report['teacher']}"))
+        c.drawString(margin, page_h-21*mm, _arabic_visual(f"عدد حالات الطرد: {report['total']}"))
+        c.setStrokeColorRGB(.22, .35, .42)
+        c.line(margin, page_h-25*mm, page_w-margin, page_h-25*mm)
+        return page_h-32*mm
+
+    def section_title(y, title):
+        c.setFont(font, 8.5)
+        c.drawRightString(page_w-margin, y, _arabic_visual(title))
+        return y - 6*mm
+
+    y = section_title(header(), "ملخص حسب الأستاذ")
+    for item in report["by_teacher"]:
+        line = (f"{item['teacher']}: {item['count']} حالة طرد — "
+                f"{item['student_count']} تلميذًا مختلفًا — الأقسام: {', '.join(item['classes']) or '—'}")
+        lines = _wrap_to_width(line, font, 7.6, page_w-2*margin)
+        needed = len(lines) * 4.5*mm + 1.0*mm
+        if y-needed < 14*mm:
+            c.showPage()
+            y = section_title(header(), "ملخص حسب الأستاذ — تابع")
+        c.setFont(font, 7.6)
+        for line_part in lines:
+            c.drawRightString(page_w-margin, y, _arabic_visual(line_part))
+            y -= 4.5*mm
+        y -= 1.0*mm
+
+    if not report["by_teacher"]:
+        c.setFont(font, 8)
+        c.drawRightString(page_w-margin, y, _arabic_visual("لا توجد حالات طرد خلال الفترة المحددة."))
+        y -= 7*mm
+
+    y = section_title(y-2*mm, "تفاصيل حالات الطرد")
+    for idx, item in enumerate(report["records"], 1):
+        text = (f"{idx}. {item['issued_at_text']} | الأستاذ: {item['expelling_teacher']} | المادة: {item['subject']} | "
+                f"التلميذ: {item['student_name']} | القسم: {item['class_name']} | المشرف: {item.get('supervisor') or '—'}")
+        lines = _wrap_to_width(text, font, 7.2, page_w-2*margin)
+        needed = max(5*mm, len(lines)*4.4*mm) + 1.5*mm
+        if y-needed < 12*mm:
+            c.showPage()
+            y = section_title(header(), "تفاصيل حالات الطرد — تابع")
+        c.setFont(font, 7.2)
+        for line_part in lines:
+            c.drawRightString(page_w-margin, y, _arabic_visual(line_part))
+            y -= 4.4*mm
+        y -= 1.5*mm
+    c.save()
+    audit(user_id, "إنشاء تقرير حالات الطرد حسب الأستاذ", "report", out.name,
+          f"{report['start_date']} إلى {report['end_date']}؛ العدد: {report['total']}")
+    return out
+
+
 def dashboard_series(period: str = "week", today: date | None = None) -> dict:
     """Return chronological chart buckets for today, the last 7 days, or the last 30 days.
 
@@ -1259,7 +1446,7 @@ def dashboard_series(period: str = "week", today: date | None = None) -> dict:
                     AND status<>'cancelled' GROUP BY d,kind"""
         params = (first.strftime("%Y-%m-%d"), today.strftime("%Y-%m-%d"))
         index = {(first + timedelta(days=i)).strftime("%Y-%m-%d"): i for i in range(days)}
-    data = {kind: [0] * len(labels) for kind in ("late", "absence_return", "exit_permit", "exit_return")}
+    data = {kind: [0] * len(labels) for kind in ("late", "absence_return", "special_entry", "exit_permit", "exit_return")}
     with db_connect() as conn:
         rows = conn.execute(sql, params).fetchall()
     for row in rows:
@@ -1282,12 +1469,12 @@ def dashboard_metrics(today: date | None = None) -> dict:
         row = conn.execute(f"""SELECT
             COUNT(*) AS permits,
             COUNT(DISTINCT student_key) AS students,
-            COUNT(DISTINCT CASE WHEN kind IN ('late','absence_return','exit_return') THEN student_key END) AS entry_students,
+            COUNT(DISTINCT CASE WHEN kind IN ('late','absence_return','special_entry','exit_return') THEN student_key END) AS entry_students,
             COUNT(DISTINCT CASE WHEN kind='late' THEN student_key END) AS late_students,
             COUNT(DISTINCT CASE WHEN kind='absence_return' THEN student_key END) AS absence_students,
             COUNT(DISTINCT CASE WHEN kind='exit_permit' THEN student_key END) AS exit_students
             FROM records WHERE substr({issue},1,10)>=? AND substr({issue},1,10)<=?
-              AND kind IN ('late','absence_return','exit_permit','exit_return') AND status<>'cancelled'""", (start, end)).fetchone()
+              AND kind IN ('late','absence_return','special_entry','exit_permit','exit_return') AND status<>'cancelled'""", (start, end)).fetchone()
         return {k: int(row[k] or 0) for k in row.keys()}
     with db_connect() as conn:
         today_data = aggregate(conn, day, day)
@@ -1307,13 +1494,13 @@ def dashboard_detail_records(key: str, today: date | None = None) -> list[dict]:
     month_start = today.replace(day=1).strftime("%Y-%m-%d")
     issue = "COALESCE(NULLIF(r.issued_at,''),r.created_at)"
     mapping = {
-        "today_entry": (day, day, ("late", "absence_return", "exit_return"), "active"),
+        "today_entry": (day, day, ("late", "absence_return", "special_entry", "exit_return"), "active"),
         "today_late": (day, day, ("late",), "active"),
         "today_absence": (day, day, ("absence_return",), "active"),
         "today_exit": (day, day, ("exit_permit",), "active"),
-        "today_all": (day, day, ("late", "absence_return", "exit_permit", "exit_return"), "active"),
-        "week_all": (week_start, day, ("late", "absence_return", "exit_permit", "exit_return"), "active"),
-        "month_all": (month_start, day, ("late", "absence_return", "exit_permit", "exit_return"), "active"),
+        "today_all": (day, day, ("late", "absence_return", "special_entry", "exit_permit", "exit_return"), "active"),
+        "week_all": (week_start, day, ("late", "absence_return", "special_entry", "exit_permit", "exit_return"), "active"),
+        "month_all": (month_start, day, ("late", "absence_return", "special_entry", "exit_permit", "exit_return"), "active"),
         "open_exits": ("", "", ("exit_permit",), "open"),
     }
     if key not in mapping:
@@ -1777,12 +1964,23 @@ def _font_setup() -> str:
 
 
 def _arabic_visual(text: str) -> str:
+    """Shape logical Arabic once for PDF rendering; never reshape presentation forms."""
+    value = str(text if text is not None else "")
+    if not value:
+        return value
+    # Presentation-form glyphs indicate that another rendering layer already
+    # shaped this string. Leave it intact to avoid double joining/reordering.
+    if any(0xFB50 <= ord(ch) <= 0xFDFF or 0xFE70 <= ord(ch) <= 0xFEFF for ch in value):
+        return value
+    if not any(0x0600 <= ord(ch) <= 0x06FF or 0x0750 <= ord(ch) <= 0x077F or
+               0x08A0 <= ord(ch) <= 0x08FF for ch in value):
+        return value
     import arabic_reshaper  # raises ImportError if missing: better than printing broken Arabic
     try:
         from bidi.algorithm import get_display
     except ImportError:  # pragma: no cover
         from bidi import get_display
-    return get_display(arabic_reshaper.reshape(str(text)), base_dir="R")
+    return get_display(arabic_reshaper.reshape(value), base_dir="R")
 
 
 def _text_width(text: str, font: str, size: float) -> float:
@@ -1839,6 +2037,7 @@ def _draw_entry_page(c, row, details: dict, reprint: bool, font: str, school: st
     usable = W - 2 * margin
     cancelled = row["status"] == "cancelled"
     is_absence = row["kind"] == "absence_return"
+    is_special = row["kind"] == "special_entry"
     issued = str(row["issued_at"] if "issued_at" in row.keys() and row["issued_at"] else row["created_at"])
     try:
         stamp = datetime.strptime(issued[:19], "%Y-%m-%d %H:%M:%S")
@@ -1850,7 +2049,9 @@ def _draw_entry_page(c, row, details: dict, reprint: bool, font: str, school: st
 
     title = "رخصة الدخول"
     subtitle = "تأخر عن الدخول" if row["kind"] == "late" else (
-        "عودة إلى المؤسسة بعد الغياب" if is_absence else "إثبات عودة من خروج استثنائي"
+        "عودة إلى المؤسسة بعد الغياب" if is_absence else
+        str(details.get("entry_reason_label", "رخصة دخول لحالة خاصة")) if is_special else
+        "إثبات عودة من خروج استثنائي"
     )
     signature = hashlib.sha256(str(row["qr_token"]).encode("utf-8")).hexdigest()[:12].upper()
     issuer = "الإدارة"
@@ -1960,16 +2161,25 @@ def _draw_entry_page(c, row, details: dict, reprint: bool, font: str, school: st
     if is_absence:
         rows.append(("بداية الغياب", str(details.get("absence_start", "—")),
                      "تاريخ العودة", str(details.get("return_date", issue_date))))
+        proof_labels = {"guardian": "حضور ولي الأمر شخصيًا", "medical_certificate": "شهادة طبية",
+                        "medical_and_guardian": "شهادة طبية + حضور ولي الأمر", "other": "تبرير آخر"}
         rows.append(("مدة الغياب", f"{details.get('days_count', '—')} يومًا",
-                     "طريقة التبرير", "حضور ولي الأمر" if details.get("proof_method") == "guardian" else "شهادة طبية"))
-        if details.get("proof_method") == "guardian":
-            guardian = str(details.get("guardian_name", "—"))
-            relation = str(details.get("relationship", "—"))
+                     "طريقة التبرير", proof_labels.get(details.get("proof_method"), "—")))
+        if details.get("proof_method") == "other":
+            rows.append(("التبرير الآخر", str(details.get("other_proof_reason", "—")), "", ""))
+        if details.get("medical_certificate_confirmed"):
+            rows.append(("حالة الشهادة", "تم الاستلام والتحقق", "", ""))
+        if details.get("guardian_present"):
+            guardian = str(details.get("guardian_name", "—")); relation = str(details.get("relationship", "—"))
             rows.append(("بيانات ولي الأمر", f"{guardian} — {relation}", "", ""))
             rows.append(("رقم الهوية", mask_national_id(details), "تأكيد الحضور", str(details.get("guardian_verified_at", "—"))[:16]))
-        else:
-            rows.append(("حالة الشهادة", "تم الاستلام والتحقق", "أصدرها", issuer))
-            rows.append(("ملاحظة", str(row["reason"] or "—"), "", ""))
+        rows.append(("ملاحظة", str(row["reason"] or "—"), "أصدرها", issuer))
+    elif is_special:
+        rows.append(("سبب الدخول", str(details.get("entry_reason_label", "حالة خاصة")), "أصدرها", issuer))
+        if details.get("entry_reason") == "class_expulsion":
+            rows.append(("الأستاذ", str(details.get("expelling_teacher", "—")), "المادة", str(details.get("subject", "—"))))
+        if details.get("note"):
+            rows.append(("ملاحظة", str(details.get("note")), "", ""))
     else:
         try:
             session_label = "صباحية" if int(issue_time.split(":")[0]) < 12 else "مسائية"
@@ -2248,6 +2458,16 @@ def _draw_page(c, row, details: dict, copy_type: str | None, reprint: bool, font
         c.restoreState()
 
 
+
+
+def _render_record_page(c, row, details: dict, copy_type: str | None, reprint: bool, font: str, school: str, reprint_at: str = "") -> None:
+    """Route special entry slips to the dedicated A6 entry renderer without modifying the approved exit artwork."""
+    if row["kind"] == "special_entry":
+        _draw_entry_page(c, row, details, reprint, font, school, reprint_at)
+    else:
+        _draw_page(c, row, details, copy_type, reprint, font, school, reprint_at)
+
+
 def create_pdf(record_id: int, copy_types: list[str | None] | None = None, reprint: bool | None = None, reprint_at: str = "") -> Path:
     """One A6 (105x148 mm) PDF; an exit permit yields TWO pages (gate copy + student copy), same number & QR."""
     from reportlab.pdfgen import canvas
@@ -2265,7 +2485,7 @@ def create_pdf(record_id: int, copy_types: list[str | None] | None = None, repri
     c.setTitle(f"{row['record_no']}")
     c.setAuthor(APP_NAME)
     for ct in copy_types:
-        _draw_page(c, row, details, ct, reprint, font, school, reprint_at)
+        _render_record_page(c, row, details, ct, reprint, font, school, reprint_at)
         c.showPage()
     c.save()
     return out
@@ -2533,7 +2753,7 @@ def create_daily_report_pdf(dest_path, report_date: date | str, user_id) -> Path
             LEFT JOIN users cu ON cu.id=r.cancelled_by
             LEFT JOIN students s ON s.student_key=r.student_key
             LEFT JOIN records pr ON pr.id=r.related_record_id
-            WHERE substr({issue},1,10)=? AND r.kind IN ('late','absence_return','exit_permit','exit_return')
+            WHERE substr({issue},1,10)=? AND r.kind IN ('late','absence_return','special_entry','exit_permit','exit_return')
             ORDER BY {issue},r.record_no""", (day,)).fetchall()
     out = Path(dest_path)
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -2611,7 +2831,7 @@ def create_daily_report_pdf(dest_path, report_date: date | str, user_id) -> Path
         if first:
             summary = (f"إجمالي السجلات: {len(rows)}  |  غير الملغاة: {len(active_rows)}  |  "
                        f"عدد التلاميذ أصحاب الرخص غير الملغاة: {distinct_students}  |  "
-                       f"تأخر: {counts.get('late', 0)}  |  عودة بعد الغياب: {counts.get('absence_return', 0)}  |  "
+                       f"تأخر: {counts.get('late', 0)}  |  عودة بعد الغياب: {counts.get('absence_return', 0)}  |  دخول خاص: {counts.get('special_entry', 0)}  |  "
                        f"خروج استثنائي: {counts.get('exit_permit', 0)}  |  إثبات عودة: {counts.get('exit_return', 0)}  |  ملغاة: {cancelled_count}")
             summary_lines = _wrap_to_width(summary, font, 7.0, usable_w - 12)
             summary_h = max(10 * mm, len(summary_lines) * 9 + 14)
@@ -2667,9 +2887,22 @@ def create_daily_report_pdf(dest_path, report_date: date | str, user_id) -> Path
             proof_label = {
                 "medical_certificate": "شهادة طبية",
                 "guardian": "حضور ولي الأمر شخصيًا",
+                "medical_and_guardian": "شهادة طبية + حضور ولي الأمر شخصيًا",
+                "other": f"تبرير آخر: {details.get('other_proof_reason', '—')}",
             }.get(proof_method, "طريقة التبرير غير محددة")
             note = str(row["reason"] or "").strip()
             reason_text = f"{proof_label} — {note}" if note else proof_label
+            if row["status"] == "cancelled" and row["cancelled_reason"]:
+                reason_text += f" — سبب الإلغاء: {row['cancelled_reason']}"
+        if row["kind"] == "special_entry":
+            reason_parts = [str(details.get("entry_reason_label") or row["reason"] or "دخول خاص")]
+            if details.get("expelling_teacher"):
+                reason_parts.append(f"الأستاذ: {details['expelling_teacher']}")
+            if details.get("subject"):
+                reason_parts.append(f"المادة: {details['subject']}")
+            if details.get("note"):
+                reason_parts.append(f"ملاحظة: {details['note']}")
+            reason_text = " — ".join(reason_parts)
             if row["status"] == "cancelled" and row["cancelled_reason"]:
                 reason_text += f" — سبب الإلغاء: {row['cancelled_reason']}"
         absence_start = details.get("absence_start", "—") if row["kind"] == "absence_return" else "—"
@@ -2996,7 +3229,7 @@ def create_a4_two_record_sheet(record_ids: list[int]) -> Path:
         c.rotate(90)
         c.scale(scale, scale)
         c.translate(-PAGE_W / 2, -PAGE_H / 2)
-        _draw_page(c, row, details, None, reprint, font, school, "")
+        _render_record_page(c, row, details, None, reprint, font, school, "")
         c.restoreState()
     c.saveState()
     c.setStrokeColorRGB(0.72, 0.76, 0.74)

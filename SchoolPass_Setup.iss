@@ -1,5 +1,5 @@
 #define MyAppName "SchoolPass"
-#define MyAppVersion "2.5.2"
+#define MyAppVersion "2.5.3"
 #define MyAppPublisher "SchoolPass"
 
 [Setup]
@@ -7,7 +7,8 @@ AppId={{9A793D9C-9A32-4F09-8B72-6CE5BA2D61F4}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
-AppPublisherURL=https://github.com
+AppPublisherURL=https://github.com/boufatis-school-pass/SchoolPass
+SetupIconFile=app.ico
 DefaultDirName={localappdata}\Programs\SchoolPass
 DefaultGroupName=SchoolPass
 DisableProgramGroupPage=yes
@@ -25,8 +26,8 @@ CloseApplications=yes
 RestartApplications=no
 Uninstallable=yes
 ChangesAssociations=no
-VersionInfoVersion=2.5.2.0
-VersionInfoProductVersion=2.5.2
+VersionInfoVersion=2.5.3.0
+VersionInfoProductVersion=2.5.3
 VersionInfoProductName=SchoolPass
 VersionInfoCompany=SchoolPass
 
@@ -35,14 +36,15 @@ Name: "desktopicon"; Description: "إنشاء اختصار على سطح الم�
 
 [Files]
 Source: "dist\SchoolPass\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "app.ico"; DestDir: "{app}"; Flags: ignoreversion
 Source: "VERSION.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "قالب_قائمة_التلاميذ.csv"; DestDir: "{app}"; Flags: ignoreversion
 Source: "دليل_الاستخدام.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "فتح_المنفذ_لرموز_QR_(كمدير).bat"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{autoprograms}\SchoolPass"; Filename: "{app}\SchoolPass.exe"
-Name: "{autodesktop}\SchoolPass"; Filename: "{app}\SchoolPass.exe"; Tasks: desktopicon
+Name: "{autoprograms}\SchoolPass"; Filename: "{app}\SchoolPass.exe"; IconFilename: "{app}\app.ico"
+Name: "{autodesktop}\SchoolPass"; Filename: "{app}\SchoolPass.exe"; IconFilename: "{app}\app.ico"; Tasks: desktopicon
 Name: "{autoprograms}\دليل استخدام SchoolPass"; Filename: "{app}\دليل_الاستخدام.txt"
 
 [Run]
