@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """Headless GUI smoke test: runs app.py with a FAKE Tk so that NameError/TypeError/wrong-signature bugs in the
 GUI code are caught without a display. It does NOT check how widgets look; that needs a real Windows session."""
 from __future__ import annotations
@@ -54,10 +54,30 @@ class Widget:
     def get(self):
         var = self.kw.get('textvariable')
         return var.get() if var is not None else getattr(self, '_value', '')
-    def set(self, value):
-        self._value = value
-        var = self.kw.get('textvariable')
-        if var is not None: var.set(value)
+    def set(self, *args):
+        # Entry/Combobox uses set(value); Treeview uses set(iid, column[, value]).
+        if len(args) == 1:
+            value = args[0]
+            self._value = value
+            var = self.kw.get('textvariable')
+            if var is not None: var.set(value)
+            return value
+        if len(args) == 2:
+            iid, column = args
+            values = self.rows.get(str(iid), ())
+            columns = tuple(self.kw.get('columns', ()))
+            try: return values[columns.index(column)]
+            except (ValueError, IndexError): return ''
+        if len(args) == 3:
+            iid, column, value = args
+            columns = tuple(self.kw.get('columns', ()))
+            values = list(self.rows.get(str(iid), ()))
+            try:
+                values[columns.index(column)] = value
+                self.rows[str(iid)] = tuple(values)
+            except (ValueError, IndexError): pass
+            return value
+        raise TypeError('set expects 1, 2, or 3 arguments')
     def current(self, index):
         values = self.kw.get('values', ())
         if 0 <= index < len(values): self.set(values[index])
@@ -92,6 +112,8 @@ def fake_tk():
     m.StringVar = StrVar; m.BooleanVar = StrVar
     class MB:
         def __getattr__(self, name):
+            if name.startswith('_schoolpass_') or name.startswith('_original_'):
+                raise AttributeError(name)
             def f(*a, **k):
                 CALLS.append((name, a[:2])); return True
             return f
@@ -119,6 +141,15 @@ def load_app():
         sys.modules["tkinter"] = tk  # for `import tkinter` inside show_stats
         sys.modules["tkinter.ttk"] = tk.ttk
         mod._tk = tk
+        def headless_message_dialog(kind, title=None, message=None, **options):
+            CALLS.append((kind, (title, message)))
+            return {
+                'showinfo': 'ok', 'showwarning': 'ok', 'showerror': 'ok',
+                'askyesno': False, 'askokcancel': False, 'askretrycancel': False,
+                'askyesnocancel': None, 'askquestion': 'no',
+            }.get(kind, 'ok')
+        mod._custom_message_dialog_gui = mod._custom_message_dialog
+        mod._custom_message_dialog = headless_message_dialog
         return mod
 
 
@@ -172,6 +203,48 @@ class TestGuiSmoke(unittest.TestCase):
             with mock.patch.object(self.app, "ask_text", return_value="سبب تجريبي"), mock.patch.object(self.app, "ask_password", return_value="NewPassword456!"):
                 self.press_all(f"main uid={uid}")
             a.refresh_records(); a.poll_qr_events(); a.check_inactivity()
+
+    def test_custom_arabic_dialog_preserves_messagebox_default_results(self):
+        owner = self.app._tk.Tk()
+        self.assertEqual(self.app._custom_message_dialog('showinfo', 'عنوان', 'رسالة', parent=owner), 'ok')
+        self.assertFalse(self.app._custom_message_dialog('askyesno', 'تأكيد', 'متابعة؟', parent=owner))
+        self.assertIsNone(self.app._custom_message_dialog('askyesnocancel', 'تأكيد', 'متابعة؟', parent=owner))
+
+    def test_custom_dialog_shapes_title_and_body_for_arabic_rtl(self):
+        owner = self.app._tk.Tk()
+        Widget.registry.clear()
+        with mock.patch.object(self.app, 'rtl_display', side_effect=lambda value: f'<RTL>{value}</RTL>') as shape:
+            self.app._custom_message_dialog_gui('showinfo', 'عنوان عربي', 'رسالة عربية 2.5.3', parent=owner)
+        labels = {w.kw.get('style'): w.kw.get('text') for w in Widget.registry
+                  if w.kw.get('style') in ('DialogTitle.TLabel', 'DialogMessage.TLabel')}
+        self.assertEqual(labels.get('DialogTitle.TLabel'), '<RTL>عنوان عربي</RTL>')
+        self.assertEqual(labels.get('DialogMessage.TLabel'), '<RTL>رسالة عربية 2.5.3</RTL>')
+        self.assertGreaterEqual(shape.call_count, 3)
+
+    def test_arabic_messagebox_wrappers_keep_standard_return_contracts(self):
+        wrappers = self.app.messagebox
+        expected = {
+            'showinfo': 'ok', 'showwarning': 'ok', 'showerror': 'ok',
+            'askyesno': False, 'askokcancel': False, 'askretrycancel': False,
+            'askyesnocancel': None, 'askquestion': 'no',
+        }
+        for name, value in expected.items():
+            with self.subTest(name=name), mock.patch.object(self.app, '_custom_message_dialog', return_value=value) as dialog:
+                self.assertEqual(getattr(wrappers, name)('عنوان عربي', 'نص عربي', parent='owner'), value)
+                dialog.assert_called_once_with(name, 'عنوان عربي', 'نص عربي', parent='owner')
+
+    def test_student_profile_exposes_pdf_print_action(self):
+        a = self.make_app(self.admin)
+        start = len(COMMANDS)
+        a.show_student_profile(self.s1['id'])
+        new_commands = COMMANDS[start:]
+        print_command = next((cmd for cmd in new_commands if getattr(cmd, '__name__', '') == 'print_student_profile'), None)
+        self.assertIsNotNone(print_command)
+        with mock.patch.object(core, 'create_student_history_report_pdf', return_value=Path('student.pdf')) as create, \
+             mock.patch.object(a, '_show_print_options') as show_print:
+            print_command()
+        create.assert_called_once()
+        show_print.assert_called_once_with(Path('student.pdf'), mock.ANY, title='الملف التاريخي للتلميذ — معاينة وطباعة')
 
     def test_forms_create_each_record_kind_through_core(self):
         a = self.make_app(self.sup)
@@ -269,6 +342,26 @@ class TestGuiSmoke(unittest.TestCase):
         a.open_expulsion_report()  # constructs date pickers, teacher filter, table, and initial query
         self.assertEqual(core.get_expulsion_report(core.date_today(), core.date_today(), "أستاذ الواجهة")["total"], 1)
 
+    def test_expulsion_report_pdf_export_and_print_actions_reach_shared_print_dialog(self):
+        a = self.make_app(self.sup)
+        core.create_special_entry(self.s1, self.sup, "class_expulsion", "أستاذ للطباعة", "علوم")
+        COMMANDS.clear()
+        a.open_expulsion_report()
+        actions = {getattr(cmd, '__name__', ''): cmd for cmd in COMMANDS}
+        self.assertIn('export_pdf', actions)
+        self.assertIn('print_expulsion_report', actions)
+        target = TEST_ROOT / 'expulsions.pdf'
+        FD = type(self.app._tk.filedialog)
+        with mock.patch.object(core, 'create_expulsion_report_pdf', return_value=target) as create, \
+             mock.patch.object(a, '_show_print_options') as show_print:
+            FD.answer = str(target)
+            actions['export_pdf']()
+            actions['print_expulsion_report']()
+        self.assertEqual(create.call_count, 2)
+        self.assertEqual(show_print.call_count, 2)
+        self.assertEqual(show_print.call_args.kwargs['title'], 'تقرير الطرد حسب الأستاذ')
+        FD.answer = ''
+
     def test_long_absence_ui_offers_combined_medical_and_guardian_choice(self):
         a = self.make_app(self.sup)
         form = self.app.RecordForm(a, "absence_return")
@@ -295,6 +388,26 @@ class TestGuiSmoke(unittest.TestCase):
         variable.set('ملغى')
         self.assertEqual(variable.get(), 'ملغى')
         self.assertEqual(variable._display_to_logical[variable._logical_to_display['ساري']], 'ساري')
+
+    def test_combobox_runtime_values_are_shaped_and_keep_logical_values(self):
+        owner = self.app._tk.Tk()
+        combo = self.app.ttk.Combobox(owner, values=('شهادة طبية', 'حضور ولي الأمر شخصيًا'), state='readonly')
+        initial = tuple(combo.kw['values'])
+        self.assertEqual(initial, tuple(self.app.rtl_display(v) for v in ('شهادة طبية', 'حضور ولي الأمر شخصيًا')))
+        combo.configure(values=('حضور ولي الأمر شخصيًا', 'شهادة طبية + حضور ولي الأمر شخصيًا'))
+        self.assertEqual(tuple(combo.kw['values']), tuple(self.app.rtl_display(v) for v in ('حضور ولي الأمر شخصيًا', 'شهادة طبية + حضور ولي الأمر شخصيًا')))
+        combo.set('شهادة طبية + حضور ولي الأمر شخصيًا')
+        self.assertEqual(combo.get(), 'شهادة طبية + حضور ولي الأمر شخصيًا')
+
+    def test_treeview_displays_rtl_but_returns_logical_values_for_sorting(self):
+        owner = self.app._tk.Tk()
+        tree = self.app.ttk.Treeview(owner, columns=('student', 'class_name'), show='headings')
+        tree.heading('student', text='اسم التلميذ')
+        tree.insert('', 'end', iid='1', values=('أحمد بن علي', 'أولى علوم'))
+        self.assertEqual(tree.rows['1'][0], self.app.rtl_display('أحمد بن علي'))
+        self.assertEqual(tree.set('1', 'student'), 'أحمد بن علي')
+        tree.set('1', 'student', 'سارة محمد')
+        self.assertEqual(tree.set('1', 'student'), 'سارة محمد')
 
     def test_arabic_display_shaping_is_idempotent_and_preserves_latin(self):
         displayed = self.app.rtl_display('رخصة الدخول — SchoolPass 2.5.1')

@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """Focused regression tests for SchoolPass current-release dashboard metrics and daily handover report."""
 from __future__ import annotations
 import sys
@@ -40,6 +40,7 @@ class TestReleaseCurrent(unittest.TestCase):
         self.assertEqual(SchoolPassApp._version_parts('v2.5.2'), (2, 5, 2))
         self.assertEqual(SchoolPassApp._version_parts('v2.5.3'), (2, 5, 3))
         self.assertEqual(SchoolPassApp._version_parts('2.6.1'), (2, 6, 1))
+        self.assertEqual(SchoolPassApp._version_parts('v3.0.0'), (3, 0, 0))
         with self.assertRaises(ValueError):
             SchoolPassApp._version_parts('latest-release')
 
@@ -79,6 +80,20 @@ class TestReleaseCurrent(unittest.TestCase):
         self.assertTrue('week_by_kind' in stats)
 
 
+    def test_expulsion_by_teacher_is_reported_and_cancelled_records_are_excluded(self):
+        first = core.create_special_entry(self.s1, self.supervisor, 'class_expulsion', 'الأستاذ أحمد', 'رياضيات')
+        second = core.create_special_entry(self.s2, self.supervisor, 'class_expulsion', 'الأستاذ أحمد', 'رياضيات')
+        core.create_special_entry(self.s1, self.supervisor, 'class_expulsion', 'الأستاذة سارة', 'علوم')
+        core.cancel_record(second['id'], self.supervisor, 'سجل تجريبي ملغى')
+        stats = core.compute_stats()
+        by_teacher = {item['teacher']: item for item in stats['expulsion_by_teacher']}
+        self.assertEqual(by_teacher['الأستاذ أحمد']['count'], 1)
+        self.assertEqual(by_teacher['الأستاذ أحمد']['student_count'], 1)
+        self.assertEqual(by_teacher['الأستاذة سارة']['count'], 1)
+        report = core.get_expulsion_report(core.date.today().replace(day=1).isoformat(), core.date.today().isoformat(), 'الأستاذ أحمد')
+        self.assertEqual(report['total'], 1)
+        self.assertEqual(report['records'][0]['id'], first['id'])
+
     def test_approved_exit_permit_renderer_is_unchanged(self):
         import ast, hashlib
         source = (HERE / 'schoolpass_core.py').read_text(encoding='utf-8')
@@ -86,6 +101,25 @@ class TestReleaseCurrent(unittest.TestCase):
         node = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == '_draw_page')
         digest = hashlib.sha256(ast.dump(node, include_attributes=False).encode('utf-8')).hexdigest()
         self.assertEqual(digest, '50206f4c1545ff7f401cd3c2291fe43061021898c1b5959ed82540c0b080576f')
+
+    def test_expulsion_by_teacher_pdf_is_generated_and_contains_filtered_teacher_rows(self):
+        core.create_special_entry(self.s1, self.supervisor, 'class_expulsion', 'TeacherA', 'Mathematics')
+        core.create_special_entry(self.s2, self.supervisor, 'class_expulsion', 'TeacherB', 'Science')
+        target = Path(tempfile.mkdtemp(dir=testenv.ROOT)) / 'expulsion-by-teacher.pdf'
+        def ascii_visual(value):
+            return ''.join(ch if ord(ch) < 128 else 'X' for ch in str(value))
+        with mock.patch.object(core, '_font_setup', return_value='Helvetica'), \
+             mock.patch.object(core, '_arabic_visual', side_effect=ascii_visual):
+            out = core.create_expulsion_report_pdf(
+                target, core.date.today().replace(day=1).isoformat(), core.date.today().isoformat(),
+                'TeacherA', self.supervisor)
+        self.assertTrue(out.exists())
+        self.assertGreater(out.stat().st_size, 600)
+        from pypdf import PdfReader
+        text = '\n'.join(page.extract_text() or '' for page in PdfReader(str(out)).pages)
+        self.assertIn('TeacherA', text)
+        self.assertIn('Mathematics', text)
+        self.assertNotIn('TeacherB', text)
 
     def test_daily_report_pdf_created_on_a4_landscape_and_contains_all_record_types(self):
         report_day = core.date.today()

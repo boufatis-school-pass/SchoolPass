@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 APP_NAME = "SchoolPass"
-APP_VERSION = "2.5.3"
+APP_VERSION = "3.0.0"
 SCHOOL_NAME = "ثانوية المجاهد بسجراري لخضر بوفاطيس"
 MINISTRY_NAME = "الجمهورية الجزائرية الديمقراطية الشعبية — وزارة التربية الوطنية"
 SERVER_PORT = 8765
@@ -1258,6 +1258,313 @@ def compute_stats(today: date | None = None) -> dict:
     out["absence_totals"] = sorted(totals.values(), key=lambda t: (-t["days"], t["student_name"]))[:30]
     return out
 
+
+
+def create_statistics_report_pdf(dest_path, user_id) -> Path:
+    """Create a paginated A4-landscape statistical report, including expulsions by teacher.
+
+    The report deliberately contains operational counts only; it excludes guardian
+    national-ID values and other sensitive identity data.
+    """
+    actor = require_user(user_id)
+    stats = compute_stats()
+    from reportlab.pdfgen import canvas
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib.units import mm
+    from reportlab.lib import colors
+
+    out = Path(dest_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    page_w, page_h = landscape(A4)
+    margin = 13 * mm
+    font = _font_setup()
+    report = canvas.Canvas(str(out), pagesize=(page_w, page_h), pageCompression=1)
+    report.setTitle(f"SchoolPass Statistics {stats['day']}")
+    report.setAuthor(APP_NAME)
+    generated_at = now_iso()
+    page_number = 0
+    y = 0.0
+
+    def visual(value):
+        return _arabic_visual(str(value if value is not None else '—'))
+
+    def footer():
+        report.setStrokeColor(colors.HexColor('#CAD5D2'))
+        report.setLineWidth(0.4)
+        report.line(margin, 9 * mm, page_w - margin, 9 * mm)
+        report.setFillColor(colors.HexColor('#647875'))
+        report.setFont(font, 7)
+        report.drawString(margin, 5 * mm, visual(f"صفحة {page_number}"))
+        report.drawRightString(page_w - margin, 5 * mm, visual(f"تاريخ الإنشاء: {generated_at}"))
+
+    def page_header():
+        nonlocal page_number, y
+        page_number += 1
+        report.setFillColor(colors.HexColor('#173D39'))
+        report.setFont(font, 14)
+        report.drawRightString(page_w - margin, page_h - 15 * mm, visual(setting('school_name', SCHOOL_NAME)))
+        report.setFillColor(colors.HexColor('#1B655C'))
+        report.setFont(font, 11)
+        report.drawRightString(page_w - margin, page_h - 22 * mm, visual('التقرير الإحصائي الشامل — SchoolPass 3.0.0'))
+        report.setFillColor(colors.HexColor('#647875'))
+        report.setFont(font, 8)
+        report.drawRightString(page_w - margin, page_h - 28 * mm,
+                               visual(f"اليوم: {stats['day']} | الشهر: {stats['month']} | آخر 7 أيام تبدأ: {stats['week_start']}"))
+        report.setStrokeColor(colors.HexColor('#78A9A0'))
+        report.setLineWidth(0.8)
+        report.line(margin, page_h - 32 * mm, page_w - margin, page_h - 32 * mm)
+        y = page_h - 39 * mm
+
+    def section(title):
+        nonlocal y
+        if y < 22 * mm:
+            footer()
+            report.showPage()
+            page_header()
+        report.setFillColor(colors.HexColor('#E8F1EF'))
+        report.roundRect(margin, y - 6.5 * mm, page_w - 2 * margin, 7 * mm, 2 * mm, stroke=0, fill=1)
+        report.setFillColor(colors.HexColor('#174E48'))
+        report.setFont(font, 9)
+        report.drawRightString(page_w - margin - 3 * mm, y - 4.5 * mm, visual(title))
+        y -= 11 * mm
+
+    def line(text, size=7.6, indent=0):
+        nonlocal y
+        parts = _wrap_to_width(str(text), font, size, page_w - 2 * margin - 6 * mm - indent)
+        line_gap = 4.7 * mm
+        for part in parts:
+            if y < 13 * mm + line_gap:
+                footer()
+                report.showPage()
+                page_header()
+            report.setFillColor(colors.HexColor('#263B39'))
+            report.setFont(font, size)
+            report.drawRightString(page_w - margin - 3 * mm - indent, y, visual(part))
+            y -= line_gap
+        y -= 1.0 * mm
+
+    page_header()
+    section('المؤشرات الرئيسية')
+    metrics = [
+        f"التلاميذ النشطون: {stats['active_students']}",
+        f"عمليات اليوم: {stats['today_total']} — تلاميذ مختلفون: {stats['today_unique_students']}",
+        f"عمليات آخر 7 أيام: {stats['week_total']} — تلاميذ مختلفون: {stats['week_unique_students']}",
+        f"عمليات الشهر: {stats['month_total']} — تلاميذ مختلفون: {stats['month_unique_students']}",
+        f"رخص الخروج المفتوحة التي لم تُسجل عودتها: {stats['open_exits']}",
+    ]
+    for item in metrics:
+        line(item, 8.2)
+
+    section('حالات الطرد من الحصة حسب الأستاذ — الشهر الحالي')
+    if stats['expulsion_by_teacher']:
+        for item in stats['expulsion_by_teacher']:
+            line(f"{item['teacher']} — {item['count']} حالة طرد — {item['student_count']} تلميذًا مختلفًا — الأسماء: {', '.join(item['students']) or '—'}")
+    else:
+        line('لا توجد حالات طرد مسجلة خلال الشهر الحالي.')
+
+    sections = [
+        ('عمليات الشهر حسب القسم', [f"{item['class_name']} — {kind_label(item['kind'])}: {item['n']}" for item in stats['by_class']]),
+        ('عمليات الشهر حسب المشرف', [f"{item['supervisor']} — {kind_label(item['kind'])}: {item['n']}" for item in stats['by_supervisor']]),
+        ('عمليات اليوم حسب النوع والحالة', [f"{kind_label(item['kind'])} — {status_label(item['status'])}: {item['n']}" for item in stats['today_by_kind']]),
+        ('عمليات آخر 7 أيام حسب النوع والحالة', [f"{kind_label(item['kind'])} — {status_label(item['status'])}: {item['n']}" for item in stats['week_by_kind']]),
+        ('عمليات الشهر حسب النوع والحالة', [f"{kind_label(item['kind'])} — {status_label(item['status'])}: {item['n']}" for item in stats['month_by_kind']]),
+        ('أكثر أسباب العمليات المسجلة', [f"{kind_label(item['kind'])} — {item['reason']}: {item['n']}" for item in stats['by_reason']]),
+        ('فترات الغياب التراكمية المدخلة يدويًا', [f"{item['student_name']} — {item['class_name']}: {item['n']} فترة، {item['days']} يومًا" for item in stats['absence_totals']]),
+        ('السجلات الملغاة خلال الشهر', [f"{item['record_no']} — {item['student_name']} — {item['class_name']} — {item['cancelled_at'] or '—'} — السبب: {item['cancelled_reason'] or '—'} — ألغاه: {item['cancelled_by'] or '—'}" for item in stats['cancellations']]),
+    ]
+    for title, values in sections:
+        section(title)
+        if values:
+            for value in values:
+                line(value)
+        else:
+            line('لا توجد بيانات في هذا القسم.')
+
+    if y < 22 * mm:
+        footer()
+        report.showPage()
+        page_header()
+    report.setFillColor(colors.HexColor('#647875'))
+    report.setFont(font, 7)
+    report.drawRightString(page_w - margin, y - 2 * mm,
+                           visual(f"أُعد التقرير بواسطة: {actor.get('display_name', '—')} — استنادًا إلى سجلات SchoolPass."))
+    footer()
+    report.save()
+    audit(actor['id'], 'إنشاء التقرير الإحصائي الشامل PDF', 'report', out.name,
+          f"اليوم {stats['day']}؛ الشهر {stats['month']}؛ حالات الطرد حسب الأستاذ: {sum(x['count'] for x in stats['expulsion_by_teacher'])}")
+    return out
+
+
+
+def create_student_history_report_pdf(dest_path, student_id: int, user_id) -> Path:
+    """Create a printable A4-landscape student history report without full guardian IDs."""
+    actor = require_user(user_id)
+    with db_connect() as conn:
+        student_row = conn.execute("SELECT * FROM students WHERE id=?", (int(student_id),)).fetchone()
+        if not student_row:
+            raise ValueError("التلميذ غير موجود أو تم حذفه من القائمة.")
+        student = dict(student_row)
+        records = [dict(row) for row in conn.execute(
+            "SELECT r.*,u.display_name AS supervisor FROM records r "
+            "LEFT JOIN users u ON u.id=r.user_id WHERE r.student_key=? "
+            "ORDER BY COALESCE(NULLIF(r.issued_at,''),r.created_at),r.id",
+            (student["student_key"],)).fetchall()]
+
+    from reportlab.pdfgen import canvas
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib.units import mm
+    from reportlab.lib import colors
+
+    out = Path(dest_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    page_w, page_h = landscape(A4)
+    margin = 14 * mm
+    font = _font_setup()
+    report = canvas.Canvas(str(out), pagesize=(page_w, page_h), pageCompression=1)
+    report.setTitle(f"SchoolPass Student History {student['student_key']}")
+    report.setAuthor(APP_NAME)
+    page_number = 0
+    y = 0.0
+    generated_at = now_iso()
+    name = student_name(student)
+    active_records = [r for r in records if r["status"] != "cancelled"]
+    late_count = sum(r["kind"] == "late" for r in active_records)
+    absence_rows = [r for r in active_records if r["kind"] == "absence_return"]
+    absence_days_total = 0
+    for row in absence_rows:
+        try:
+            absence_days_total += max(0, int(json.loads(row.get("details_json") or "{}").get("days_count", 0) or 0))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            pass
+    exit_rows = [r for r in active_records if r["kind"] == "exit_permit"]
+    open_exits = sum(r["status"] == "valid" for r in exit_rows)
+    expulsion_count = 0
+    for row in active_records:
+        if row["kind"] != "special_entry":
+            continue
+        try:
+            if json.loads(row.get("details_json") or "{}").get("entry_reason") == "class_expulsion":
+                expulsion_count += 1
+        except (TypeError, json.JSONDecodeError):
+            pass
+
+    def visual(value):
+        return _arabic_visual(str(value if value is not None else "—"))
+
+    def footer():
+        report.setStrokeColor(colors.HexColor("#CAD5D2"))
+        report.setLineWidth(0.4)
+        report.line(margin, 9 * mm, page_w - margin, 9 * mm)
+        report.setFillColor(colors.HexColor("#647875"))
+        report.setFont(font, 7)
+        report.drawString(margin, 5 * mm, visual(f"صفحة {page_number}"))
+        report.drawRightString(page_w - margin, 5 * mm, visual(f"تاريخ الإنشاء: {generated_at}"))
+
+    def page_header():
+        nonlocal page_number, y
+        page_number += 1
+        report.setFillColor(colors.HexColor("#173D39"))
+        report.setFont(font, 14)
+        report.drawRightString(page_w - margin, page_h - 14 * mm, visual(setting("school_name", SCHOOL_NAME)))
+        report.setFillColor(colors.HexColor("#1B655C"))
+        report.setFont(font, 11)
+        report.drawRightString(page_w - margin, page_h - 21 * mm, visual("الملف التاريخي الشامل للتلميذ"))
+        report.setFillColor(colors.HexColor("#263B39"))
+        report.setFont(font, 8.5)
+        info_lines = _wrap_to_width(f"التلميذ: {name}", font, 8.5, page_w - 2 * margin)
+        info_lines.extend(_wrap_to_width(
+            f"رقم التعريف: {student['student_key']} | القسم: {student['class_name']} | الحالة: {'نشط' if student['active'] else 'غير نشط'}",
+            font, 8.5, page_w - 2 * margin))
+        info_y = page_h - 29 * mm
+        for info_line in info_lines:
+            report.drawRightString(page_w - margin, info_y, visual(info_line))
+            info_y -= 4.5 * mm
+        rule_y = info_y - 1.5 * mm
+        report.setStrokeColor(colors.HexColor("#78A9A0"))
+        report.setLineWidth(0.8)
+        report.line(margin, rule_y, page_w - margin, rule_y)
+        y = rule_y - 8 * mm
+
+    def ensure_space(required=6 * mm):
+        nonlocal y
+        if y - required < 13 * mm:
+            footer()
+            report.showPage()
+            page_header()
+
+    def write_line(text, size=7.5, indent=0):
+        nonlocal y
+        lines = _wrap_to_width(str(text), font, size, page_w - 2 * margin - indent)
+        for part in lines:
+            ensure_space(5 * mm)
+            report.setFillColor(colors.HexColor("#263B39"))
+            report.setFont(font, size)
+            report.drawRightString(page_w - margin - indent, y, visual(part))
+            y -= 4.7 * mm
+
+    page_header()
+    report.setFillColor(colors.HexColor("#E8F1EF"))
+    report.roundRect(margin, y - 7 * mm, page_w - 2 * margin, 8 * mm, 2 * mm, stroke=0, fill=1)
+    report.setFillColor(colors.HexColor("#174E48"))
+    report.setFont(font, 9)
+    report.drawRightString(page_w - margin - 3 * mm, y - 4.5 * mm, visual("ملخص الملف"))
+    y -= 14 * mm
+    for metric in (
+        f"إجمالي العمليات: {len(records)} — العمليات غير الملغاة: {len(active_records)}",
+        f"مرات التأخر: {late_count} — مرات العودة بعد الغياب: {len(absence_rows)} — أيام الغياب المدخلة: {absence_days_total}",
+        f"حالات الدخول الخاص/الطرد: {sum(r['kind'] == 'special_entry' for r in active_records)} — حالات الطرد المسجلة: {expulsion_count}",
+        f"تصاريح الخروج: {len(exit_rows)} — تصاريح خروج لم تُسجل عودتها: {open_exits}",
+    ):
+        write_line(metric, 8)
+
+    ensure_space(12 * mm)
+    report.setFillColor(colors.HexColor("#E8F1EF"))
+    report.roundRect(margin, y - 7 * mm, page_w - 2 * margin, 8 * mm, 2 * mm, stroke=0, fill=1)
+    report.setFillColor(colors.HexColor("#174E48"))
+    report.setFont(font, 9)
+    report.drawRightString(page_w - margin - 3 * mm, y - 4.5 * mm, visual("السجل الزمني الكامل"))
+    y -= 14 * mm
+
+    if not records:
+        write_line("لا توجد عمليات مسجلة لهذا التلميذ.", 8)
+    for index, row in enumerate(records, 1):
+        try:
+            details = json.loads(row.get("details_json") or "{}")
+        except (TypeError, json.JSONDecodeError):
+            details = {}
+        record_title = f"{index}. {row.get('record_no') or '—'} — {kind_label(row['kind'])} — {status_label(row['status'])}"
+        base_lines = [
+            record_title,
+            f"التاريخ والوقت: {row.get('issued_at') or row.get('created_at') or '—'} | المشرف: {row.get('supervisor') or '—'}",
+            f"السبب: {row.get('reason') or '—'}",
+        ]
+        if row["kind"] == "absence_return":
+            base_lines.append(f"بداية الغياب: {details.get('absence_start', '—')} | تاريخ العودة: {details.get('return_date', '—')} | أيام الغياب (دون يوم العودة): {details.get('days_count', '—')}")
+        if row["kind"] == "special_entry" and details.get("entry_reason") == "class_expulsion":
+            base_lines.append(f"الأستاذ الذي قام بالطرد: {details.get('expelling_teacher', '—')} | المادة: {details.get('subject', '—')}")
+        if row["kind"] == "exit_permit":
+            base_lines.append(f"ولي الأمر: {details.get('guardian_name', '—')} | صلة القرابة: {details.get('relationship', '—')} | آخر أربعة أرقام من الهوية: {details.get('national_id_last4', '—')}")
+        if row["kind"] == "exit_return":
+            base_lines.append(f"مرجع تصريح الخروج: {details.get('permit_no', '—')}")
+        if row["status"] == "cancelled":
+            base_lines.append(f"سبب الإلغاء: {row.get('cancelled_reason') or '—'} | تاريخ الإلغاء: {row.get('cancelled_at') or '—'}")
+        ensure_space(9 * mm)
+        report.setFillColor(colors.HexColor("#F0F5F3" if row["status"] != "cancelled" else "#F9EEEE"))
+        report.roundRect(margin, y - 3 * mm, page_w - 2 * margin, 5 * mm, 1.5 * mm, stroke=0, fill=1)
+        y -= 1.5 * mm
+        for text in base_lines:
+            write_line(text, 7.2, indent=2 * mm)
+        y -= 2 * mm
+
+    ensure_space(8 * mm)
+    report.setFillColor(colors.HexColor("#647875"))
+    report.setFont(font, 7)
+    report.drawRightString(page_w - margin, y, visual(f"أُعد التقرير بواسطة: {actor.get('display_name', '—')} — لا يتضمن أرقام الهوية الوطنية كاملة."))
+    footer()
+    report.save()
+    audit(actor["id"], "إنشاء الملف التاريخي للتلميذ PDF", "student", student["student_key"],
+          f"{len(records)} عملية؛ {absence_days_total} يوم غياب مدخل يدويًا")
+    return out
 
 def csv_safe(value):
     """Neutralise spreadsheet formulas (CSV injection) in exported text."""

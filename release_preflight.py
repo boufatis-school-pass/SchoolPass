@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """Validate release metadata and ensure repository contents are release-safe."""
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-EXPECTED = "2.5.3"
+EXPECTED = "3.0.0"
 
 
 def main() -> int:
@@ -22,6 +22,20 @@ def main() -> int:
         errors.append(f"APP_VERSION mismatch: {app_version.group(1)}")
     if version_file != EXPECTED:
         errors.append(f"VERSION.txt mismatch: {version_file}")
+    requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8") if (ROOT / "requirements.txt").exists() else ""
+    if "ttkbootstrap==2.2.6" not in requirements:
+        errors.append("requirements.txt must pin the reviewed ttkbootstrap 2.2.6 release")
+    build_script = (ROOT / "build_windows.ps1").read_text(encoding="utf-8-sig") if (ROOT / "build_windows.ps1").exists() else ""
+    workflow = (ROOT / ".github/workflows/release-windows.yml").read_text(encoding="utf-8") if (ROOT / ".github/workflows/release-windows.yml").exists() else ""
+    if "$PythonVersion = '3.14.10'" not in build_script:
+        errors.append("Windows fallback Python must be pinned to the available 3.14.10 installer")
+    if "python-version: '3.14'" not in workflow:
+        errors.append("GitHub Actions must build with Python 3.14 to match the supported Windows toolchain")
+    if "pyinstaller==6.22.3" not in (ROOT / "requirements_dev.txt").read_text(encoding="utf-8"):
+        errors.append("requirements_dev.txt must pin the reviewed PyInstaller 6.22.3 release")
+    schema = re.search(r"^SCHEMA_VERSION\s*=\s*[\"\']?(\d+)[\"\']?", core, re.M)
+    if not schema or schema.group(1) != "6":
+        errors.append("The 3.0.0 release must preserve database schema version 6 for 2.5.3 data compatibility")
     if not setup_version:
         errors.append("MyAppVersion is missing from SchoolPass_Setup.iss")
     elif setup_version.group(1) != EXPECTED:
@@ -36,6 +50,13 @@ def main() -> int:
         if not (ROOT / name).is_file():
             errors.append(f"Required release file is missing: {name}")
 
+    # Windows PowerShell 5.1 misreads UTF-8 Arabic source without a BOM.
+    # Validate both scripts before GitHub Actions reaches the child process.
+    for name in ("build_windows.ps1", "build_installer_only.ps1"):
+        path = ROOT / name
+        if path.is_file() and not path.read_bytes().startswith(b"\xef\xbb\xbf"):
+            errors.append(f"{name} must be UTF-8 with BOM for Windows PowerShell 5.1")
+
     for path in ROOT.rglob("*"):
         if ".git" in path.parts:
             continue  # Git metadata is expected in a GitHub Actions checkout.
@@ -48,7 +69,6 @@ def main() -> int:
         if pattern not in ignore_text:
             errors.append(f".gitignore does not exclude {pattern}")
 
-    workflow = (ROOT / ".github/workflows/release-windows.yml").read_text(encoding="utf-8") if (ROOT / ".github/workflows/release-windows.yml").exists() else ""
     if "dist/SchoolPass_Setup.exe" not in workflow:
         errors.append("GitHub release workflow does not publish SchoolPass_Setup.exe")
     if "schoolpass_setup.exe" not in (ROOT / "app.py").read_text(encoding="utf-8").lower():
@@ -57,6 +77,17 @@ def main() -> int:
         errors.append("Windows build does not embed app.ico in SchoolPass.exe")
     if "--add-data" not in (ROOT / "build_windows.ps1").read_text(encoding="utf-8"):
         errors.append("Windows build does not package the runtime app.ico asset")
+    app_source = (ROOT / "app.py").read_text(encoding="utf-8-sig")
+    for marker, description in (
+        ("def _schoolpass_map_values", "dynamic Arabic combobox values"),
+        ("def _schoolpass_save_logical_values", "logical Treeview value preservation"),
+        ("original_text_insert", "centralized RTL Text insertion"),
+        ("original_canvas_create_text", "RTL canvas labels"),
+        ("self.chart_period_var = ComboStringVar", "logical dashboard period selection"),
+    ):
+        if marker not in app_source:
+            errors.append(f"Arabic UI regression guard missing: {description}")
+
     if "SetupIconFile=app.ico" not in setup:
         errors.append("Inno Setup wizard icon is not configured")
     if 'IconFilename: "{app}\\app.ico"' not in setup:

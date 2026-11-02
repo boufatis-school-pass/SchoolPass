@@ -1,5 +1,5 @@
-# -*- coding: utf-8 -*-
-"""Regression coverage for the combined SchoolPass 2.5.3 features."""
+﻿# -*- coding: utf-8 -*-
+"""Regression coverage for the preserved SchoolPass 2.x business rules in 3.0.0."""
 from __future__ import annotations
 
 import json

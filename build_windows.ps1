@@ -3,7 +3,7 @@ $ProgressPreference = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $Root
-$PythonVersion = '3.13.18'
+$PythonVersion = '3.14.10'
 $PythonUrl = "https://www.python.org/ftp/python/$PythonVersion/python-$PythonVersion-amd64.exe"
 
 function Say([string]$Message) { Write-Host "`n=== $Message ===" -ForegroundColor Cyan }
@@ -22,23 +22,23 @@ function Find-Python {
     if ($pythonCommand -and $pythonCommand.Source) {
         try {
             $candidate = $pythonCommand.Source
-            $is64 = & $candidate -c "import struct; print(struct.calcsize('P')==8)" 2>$null
-            if ($is64 -eq 'True') { return $candidate }
+            $identity = & $candidate -c "import sys,struct; print('{}.{} {}'.format(sys.version_info.major,sys.version_info.minor,struct.calcsize('P')*8))" 2>$null
+            if ($identity -match '^3\.(13|14) 64$') { return $candidate }
         } catch {}
     }
-    foreach ($v in @('3.13','3.12','3.11')) {
+    foreach ($v in @('3.14','3.13')) {
         try {
-            $p = (& py "-$v" -c "import sys,struct; print(sys.executable if struct.calcsize('P')==8 else '')" 2>$null | Select-Object -Last 1)
+            $p = (& py "-$v" -c "import sys,struct; print(sys.executable if struct.calcsize('P')==8 and sys.version_info[:2] in ((3,14),(3,13)) else '')" 2>$null | Select-Object -Last 1)
             if ($LASTEXITCODE -eq 0 -and $p -and (Test-Path $p.Trim())) { return $p.Trim() }
         } catch {}
     }
     $base = Join-Path $env:LOCALAPPDATA 'Programs\Python'
     if (Test-Path $base) {
         $candidate = Get-ChildItem -Path $base -Filter python.exe -Recurse -ErrorAction SilentlyContinue |
-            Where-Object { $_.FullName -match 'Python31[123]\\python\.exe$' } | Select-Object -First 1
+            Where-Object { $_.FullName -match 'Python31[34]\\python\.exe$' } | Select-Object -First 1
         if ($candidate) {
-            $is64 = & $candidate.FullName -c "import struct; print(struct.calcsize('P')==8)"
-            if ($is64 -eq 'True') { return $candidate.FullName }
+            $identity = & $candidate.FullName -c "import sys,struct; print('{}.{} {}'.format(sys.version_info.major,sys.version_info.minor,struct.calcsize('P')*8))"
+            if ($identity -match '^3\.(13|14) 64$') { return $candidate.FullName }
         }
     }
     return $null
@@ -86,7 +86,7 @@ try {
     }
     $args = @('-m','PyInstaller','--noconfirm','--clean','--onedir','--windowed','--name','SchoolPass',
         '--icon',(Join-Path $Root 'app.ico'),'--add-data',((Join-Path $Root 'app.ico') + ';.'),
-        '--collect-all','qrcode','--collect-all','reportlab','--collect-all','arabic_reshaper',
+        '--collect-all','qrcode','--collect-all','reportlab','--collect-all','ttkbootstrap','--collect-all','PIL','--collect-all','arabic_reshaper',
         '--collect-all','bidi','--collect-all','openpyxl','--hidden-import','xlrd','--hidden-import','schoolpass_core','app.py')
     Invoke-NativeChecked $Python $args 'فشل بناء SchoolPass.exe.'
     $portable = Join-Path $Root 'dist\SchoolPass\SchoolPass.exe'
@@ -94,13 +94,22 @@ try {
         throw 'لم ينتج PyInstaller ملف SchoolPass.exe صالحًا.'
     }
 
+    Say 'التحقق من تحليل سكريبت المثبّت قبل تشغيله'
+    $InstallerScript = Join-Path $Root 'build_installer_only.ps1'
+    $tokens = $null; $parseErrors = $null
+    [void][System.Management.Automation.Language.Parser]::ParseFile($InstallerScript, [ref]$tokens, [ref]$parseErrors)
+    if ($parseErrors.Count -gt 0) {
+        $details = ($parseErrors | ForEach-Object { $_.Message + ' (line ' + $_.Extent.StartLineNumber + ')' }) -join '; '
+        throw "Installer PowerShell parse check failed: $details"
+    }
+
     Say 'إنشاء المثبّت والتحقق منه'
-    & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Root 'build_installer_only.ps1')
+    & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $InstallerScript
     if ($LASTEXITCODE -ne 0) { throw 'فشلت مرحلة إنشاء المثبّت. احتفظ بمخرجات الخطأ وأرسلها للمراجعة.' }
     $setup = Join-Path $Root 'dist\SchoolPass_Setup.exe'
     if (-not (Test-Path $setup) -or (Get-Item $setup).Length -lt 1000000) { throw 'لم يتم العثور على مثبت Windows صالح.' }
 
-    Write-Host "`nاكتمل بناء SchoolPass 2.5.3." -ForegroundColor Green
+    Write-Host "`nاكتمل بناء SchoolPass 3.0.0." -ForegroundColor Green
     Write-Host "ملف التثبيت: $setup" -ForegroundColor Green
     Write-Host 'لم يجر لمس مجلد بيانات المستخدم %LOCALAPPDATA%\SchoolPass.'
     Start-Process explorer.exe -ArgumentList (Join-Path $Root 'dist')

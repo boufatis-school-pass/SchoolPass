@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """PDF / A6 / QR tests. Needs reportlab, qrcode, arabic-reshaper, python-bidi (installed by the build script)."""
 from __future__ import annotations
 
@@ -66,6 +66,36 @@ class TestPdf(unittest.TestCase):
         import pypdf
         r = pypdf.PdfReader(str(path))
         return [(float(p.mediabox.width), float(p.mediabox.height)) for p in r.pages]
+
+    def test_statistics_report_includes_teacher_expulsions_and_is_landscape(self):
+        core.create_special_entry(self.student, self.sup, 'class_expulsion', 'الأستاذ أحمد', 'رياضيات')
+        target = Path(tempfile.mkdtemp(dir=TEST_ROOT)) / 'statistics.pdf'
+        out = core.create_statistics_report_pdf(target, self.admin)
+        self.assertTrue(out.exists())
+        self.assertGreater(out.stat().st_size, 500)
+        self.assertEqual(out.read_bytes()[:4], b'%PDF')
+        sizes = self.pages(out)
+        self.assertTrue(all(w > h for w, h in sizes))
+        from pypdf import PdfReader
+        reader = PdfReader(str(out))
+        self.assertIn('SchoolPass Statistics', reader.metadata.title)
+
+    def test_student_history_report_is_printable_and_masks_guardian_identity(self):
+        with mock.patch.object(core, 'protect_sensitive_text', lambda value: 'DPAPI1:' + value[::-1]):
+            permit = core.create_exit_permit(self.student, self.sup, 'موعد طبي', 'ولي الأمر', 'الأب', NID)
+        core.create_special_entry(self.student, self.sup, 'class_expulsion', 'الأستاذ أحمد', 'رياضيات')
+        target = Path(tempfile.mkdtemp(dir=TEST_ROOT)) / 'student-history.pdf'
+        out = core.create_student_history_report_pdf(target, self.student['id'], self.admin)
+        self.assertTrue(out.exists())
+        self.assertEqual(out.read_bytes()[:4], b'%PDF')
+        sizes = self.pages(out)
+        self.assertTrue(all(w > h for w, h in sizes))
+        from pypdf import PdfReader
+        text = '\n'.join(page.extract_text() or '' for page in PdfReader(str(out)).pages)
+        self.assertNotIn(NID, text)
+        self.assertEqual(permit['kind'], 'exit_permit')
+        with core.db_connect() as conn:
+            self.assertGreaterEqual(conn.execute("SELECT COUNT(*) FROM audit_logs WHERE action='إنشاء الملف التاريخي للتلميذ PDF'").fetchone()[0], 1)
 
     def test_monthly_report_pdf_is_created_for_selected_month(self):
         from datetime import date

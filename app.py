@@ -1,5 +1,5 @@
 ﻿# -*- coding: utf-8 -*-
-"""SchoolPass — Windows GUI (Tkinter). All business rules and permission checks live in schoolpass_core.py."""
+"""SchoolPass 3.0.0 — modern Arabic-first Windows GUI. Business rules and permission checks live in schoolpass_core.py."""
 from __future__ import annotations
 
 import json
@@ -18,6 +18,7 @@ from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
 from datetime import datetime, date
 from pathlib import Path
+import tkinter as tk
 from tkinter import (
     Tk, Toplevel, StringVar, BooleanVar, messagebox, filedialog, colorchooser,
     END, BOTH, LEFT, RIGHT, X, Y, E, Canvas
@@ -154,13 +155,39 @@ def _install_toplevel_background():
 _install_toplevel_background()
 
 
+class _ThemeState:
+    registered = False
+
+
+_ttkbootstrap_theme_state = _ThemeState()
+
+
 def make_style(root: Tk, primary: str | None = None, secondary: str | None = None):
     """Apply the institutional light/dark visual system using readable contrast."""
-    style = ttk.Style(root)
+    # ttkbootstrap is a styling layer over the standard ttk widgets, so the
+    # existing widget tree and callbacks remain intact while controls get a
+    # modern, consistent visual system. A clam fallback keeps recovery possible
+    # if the theme package cannot be loaded for any reason.
     try:
-        style.theme_use('clam')
+        import ttkbootstrap as ttkb
+        if not getattr(_ttkbootstrap_theme_state, 'registered', False):
+            ttkb.Theme(
+                name='schoolpass', primary='#126B61', success='#16856C',
+                info='#3977A9', warning='#C18B37', danger='#B64747',
+                light={'background': '#F3F7F6', 'foreground': '#19312F'},
+                dark={'background': '#142422', 'foreground': '#EAF2F0'},
+            ).register()
+            _ttkbootstrap_theme_state.registered = True
+        style = ttkb.Style(root, theme='schoolpass-dark' if core.setting('theme', 'light') == 'dark' else 'schoolpass-light')
+        target_theme = 'schoolpass-dark' if core.setting('theme', 'light') == 'dark' else 'schoolpass-light'
+        if style.theme_use() != target_theme:
+            style.theme_use(target_theme)
     except Exception:
-        pass
+        style = ttk.Style(root)
+        try:
+            style.theme_use('clam')
+        except Exception:
+            pass
     try:
         dark = core.setting('theme', 'light') == 'dark'
         saved_primary, saved_secondary = core.get_theme_colors()
@@ -197,13 +224,17 @@ def make_style(root: Tk, primary: str | None = None, secondary: str | None = Non
     root.configure(background=bg)
     style.configure('.', font=('Segoe UI', 10), foreground=ink)
     style.configure('TFrame', background=bg)
-    style.configure('Surface.TFrame', background=surface, relief='flat')
+    style.configure('Surface.TFrame', background=surface, relief='flat', borderwidth=0)
     style.configure('Sidebar.TFrame', background=green)
     style.configure('TLabel', background=bg, foreground=ink, font=('Segoe UI', 9), anchor='e')
-    style.configure('Title.TLabel', background=bg, foreground=green2 if dark else green, font=('Segoe UI', 18, 'bold'))
+    style.configure('Title.TLabel', background=bg, foreground=green2 if dark else green, font=('Segoe UI', 21, 'bold'))
     style.configure('Subtitle.TLabel', background=bg, foreground=muted, font=('Segoe UI', 10))
+    style.configure('Dialog.TFrame', background=surface)
+    style.configure('DialogTitle.TLabel', background=surface, foreground=green, font=('Segoe UI', 14, 'bold'))
+    style.configure('DialogMessage.TLabel', background=surface, foreground=ink, font=('Segoe UI', 10), padding=(4, 8))
+    style.configure('DialogIcon.TLabel', background=palette['green_soft'], foreground=green, font=('Segoe UI', 20, 'bold'), padding=(10, 8))
     style.configure('Badge.TLabel', background=palette['green_soft'], foreground=palette['sidebar_text'] if dark else green,
-                    padding=(9, 6), font=('Segoe UI', 9, 'bold'))
+                    padding=(12, 8), font=('Segoe UI', 10, 'bold'))
     style.configure('Hint.TLabel', background=surface, foreground=muted, font=('Segoe UI', 9))
     style.configure('Status.TLabel', background=palette['green_soft'], foreground=ink, anchor='e', padding=(12, 6))
     style.configure('Section.TLabel', background=surface, foreground=green2 if dark else green, font=('Segoe UI', 13, 'bold'))
@@ -212,23 +243,23 @@ def make_style(root: Tk, primary: str | None = None, secondary: str | None = Non
     style.configure('SidebarTitle.TLabel', background=green, foreground=palette['sidebar_text'], font=('Segoe UI', 18, 'bold'))
     style.configure('SidebarSub.TLabel', background=green, foreground=palette['sidebar_muted'], font=('Segoe UI', 9))
     style.configure('Nav.TButton', background=green, foreground='#EAF3EF', borderwidth=0,
-                    focusthickness=0, padding=(10, 8), anchor='e', font=('Segoe UI', 9, 'bold'))
+                    focusthickness=0, padding=(14, 10), anchor='e', font=('Segoe UI', 10, 'bold'))
     style.map('Nav.TButton', background=[('active', '#28624E' if dark else '#1B5B4A'), ('pressed', '#0B3028')],
               foreground=[('active', '#FFFFFF')])
     style.configure('TButton', background=palette['heading'], foreground=ink, borderwidth=0,
-                    focusthickness=0, padding=(9, 6), font=('Segoe UI', 9, 'bold'))
+                    focusthickness=0, padding=(12, 8), font=('Segoe UI', 10, 'bold'))
     style.map('TButton', background=[('active', palette['selected']), ('pressed', palette['selected'])])
     style.configure('Accent.TButton', background=green2, foreground='#FFFFFF', borderwidth=0,
-                    focusthickness=0, padding=(11, 7), font=('Segoe UI', 9, 'bold'))
+                    focusthickness=0, padding=(15, 13), font=('Segoe UI', 9, 'bold'))
     style.map('Accent.TButton', background=[('active', '#23775B'), ('pressed', '#14523E')],
               foreground=[('disabled', '#D6E2DD')])
     style.configure('Gold.TButton', background=gold, foreground='#27372F', borderwidth=0,
                     padding=(10, 7), font=('Segoe UI', 9, 'bold'))
     style.map('Gold.TButton', background=[('active', '#CDA849'), ('pressed', '#B99036')])
-    style.configure('Treeview', font=('Segoe UI', 10), rowheight=32, background=surface,
+    style.configure('Treeview', font=('Segoe UI', 10), rowheight=36, background=surface,
                     fieldbackground=surface, foreground=ink, borderwidth=0, relief='flat')
     style.configure('Treeview.Heading', font=('Segoe UI', 9, 'bold'), background=palette['heading'],
-                    foreground=ink, padding=(8, 8), relief='flat')
+                    foreground=ink, padding=(10, 10), relief='flat')
     style.map('Treeview', background=[('selected', palette['selected'])], foreground=[('selected', ink)])
     style.configure('TEntry', padding=6, fieldbackground=palette['field'], foreground=ink)
     style.configure('TCombobox', padding=6, fieldbackground=palette['field'], foreground=ink)
@@ -243,8 +274,8 @@ def make_style(root: Tk, primary: str | None = None, secondary: str | None = Non
               foreground=[('readonly', ink)])
     style.map('TNotebook.Tab', background=[('selected', surface), ('active', palette['selected'])],
               foreground=[('selected', green if not dark else palette['sidebar_text'])])
-    style.configure('Alert.TLabel', background=palette['alert_bg'], foreground=palette['alert_fg'], padding=(9, 6), font=('Segoe UI', 9, 'bold'))
-    style.configure('Good.TLabel', background=palette['good_bg'], foreground=palette['good_fg'], padding=(9, 6), font=('Segoe UI', 9, 'bold'))
+    style.configure('Alert.TLabel', background=palette['alert_bg'], foreground=palette['alert_fg'], padding=(12, 8), font=('Segoe UI', 10, 'bold'))
+    style.configure('Good.TLabel', background=palette['good_bg'], foreground=palette['good_fg'], padding=(12, 8), font=('Segoe UI', 10, 'bold'))
 
 
 RTL_SHAPING_ENABLED = True
@@ -267,22 +298,147 @@ def rtl_display(value) -> str:
     except (ImportError, RuntimeError, ValueError):
         return text
 
+def _custom_message_dialog(kind: str, title=None, message=None, **options):
+    """Render native-looking, fully themed modal dialogs with Arabic RTL content.
+
+    Windows messagebox dialogs use a separate native rendering path and were
+    still displaying some Arabic text in the wrong visual order. These dialogs
+    use the same Tk/ttk rendering path as the main application and preserve the
+    standard messagebox return contracts.
+    """
+    parent = options.pop('parent', None)
+    title_text = str(title or 'SchoolPass')
+    message_text = str(message or '')
+    choices = {
+        'showinfo': [('حسنًا', 'ok')],
+        'showwarning': [('حسنًا', 'ok')],
+        'showerror': [('حسنًا', 'ok')],
+        'askyesno': [('نعم', True), ('لا', False)],
+        'askokcancel': [('متابعة', True), ('إلغاء', False)],
+        'askretrycancel': [('إعادة المحاولة', True), ('إلغاء', False)],
+        'askyesnocancel': [('نعم', True), ('لا', False), ('إلغاء', None)],
+        'askquestion': [('نعم', 'yes'), ('لا', 'no')],
+    }
+    buttons = choices.get(kind, choices['showinfo'])
+    default_value = False if kind in ('askyesno', 'askokcancel', 'askretrycancel') else (None if kind == 'askyesnocancel' else ('no' if kind == 'askquestion' else 'ok'))
+    result = {'value': default_value}
+    owner = parent if parent is not None else getattr(tk, '_default_root', None)
+    temporary_root = None
+    try:
+        if owner is None:
+            try:
+                temporary_root = Tk()
+                temporary_root.withdraw()
+                owner = temporary_root
+            except Exception:
+                owner = None
+        dialog = Toplevel(owner) if owner is not None else Toplevel()
+        dialog.title(rtl_display(title_text))
+        dialog.resizable(False, False)
+        try:
+            dialog.configure(background=_window_background())
+            apply_application_icon(dialog)
+        except Exception:
+            pass
+        if owner is not None:
+            try:
+                dialog.transient(owner)
+            except Exception:
+                pass
+
+        outer = ttk.Frame(dialog, style='Dialog.TFrame', padding=(22, 18))
+        outer.pack(fill=BOTH, expand=True)
+        heading = ttk.Label(outer, text=title_text, style='DialogTitle.TLabel', anchor='e', justify='right')
+        heading.pack(fill=X, pady=(0, 8))
+
+        body = ttk.Frame(outer, style='Dialog.TFrame')
+        body.pack(fill=BOTH, expand=True)
+        symbol = {'showinfo': 'i', 'showwarning': '!', 'showerror': '×',
+                  'askyesno': '?', 'askokcancel': '?', 'askretrycancel': '?',
+                  'askyesnocancel': '?', 'askquestion': '?'}[kind]
+        icon = ttk.Label(body, text=symbol, style='DialogIcon.TLabel', anchor='center')
+        icon.pack(side=LEFT, padx=(0, 14), anchor='n')
+        text_label = ttk.Label(body, text=message_text, style='DialogMessage.TLabel',
+                               justify='right', anchor='e', wraplength=520)
+        text_label.pack(side=RIGHT, fill=BOTH, expand=True, anchor='e')
+
+        bar = ttk.Frame(outer, style='Dialog.TFrame')
+        bar.pack(fill=X, pady=(18, 0))
+
+        def finish(value):
+            result['value'] = value
+            try:
+                dialog.grab_release()
+            except Exception:
+                pass
+            try:
+                dialog.destroy()
+            except Exception:
+                pass
+
+        for index, (label, value) in enumerate(buttons):
+            style_name = 'Accent.TButton' if index == 0 else 'TButton'
+            ttk.Button(bar, text=label, command=lambda v=value: finish(v), style=style_name).pack(
+                side=RIGHT, padx=(5, 0), ipadx=8, ipady=2)
+
+        dialog.bind('<Escape>', lambda _event: finish(default_value))
+        dialog.protocol('WM_DELETE_WINDOW', lambda: finish(default_value))
+        dialog.update_idletasks()
+        try:
+            width = max(420, min(640, dialog.winfo_reqwidth() + 10))
+            height = max(210, min(420, dialog.winfo_reqheight() + 10))
+            if owner is not None:
+                owner.update_idletasks()
+                px = owner.winfo_rootx() + max(0, (owner.winfo_width() - width) // 2)
+                py = owner.winfo_rooty() + max(0, (owner.winfo_height() - height) // 2)
+            else:
+                sw = int(dialog.winfo_screenwidth() or 1366)
+                sh = int(dialog.winfo_screenheight() or 768)
+                px, py = max(0, (sw-width)//2), max(0, (sh-height)//2)
+            dialog.geometry(f'{width}x{height}+{px}+{py}')
+        except Exception:
+            dialog.geometry('520x250')
+        try:
+            dialog.grab_set()
+            dialog.focus_force()
+        except Exception:
+            pass
+        dialog.wait_window()
+    except Exception:
+        # Last-resort native fallback if a widget cannot be constructed.
+        # The caller still receives the expected return type.
+        try:
+            fallback = getattr(messagebox, f'_original_{kind}', None)
+            if fallback:
+                return fallback(title_text, message_text, parent=parent)
+        except Exception:
+            pass
+    finally:
+        if temporary_root is not None:
+            try:
+                temporary_root.destroy()
+            except Exception:
+                pass
+    return result['value']
+
+
 def _wrap_messageboxes_once():
-    """Make every Tk message box use the same Arabic shaping path."""
+    """Route every standard messagebox function through the SchoolPass dialog renderer."""
     if getattr(messagebox, '_schoolpass_rtl_wrapped', False):
         return
-    for _name in ('showinfo','showwarning','showerror','askyesno','askokcancel','askretrycancel','askyesnocancel'):
-        _original = getattr(messagebox, _name)
-        def _make(original):
-            def _wrapped(title=None, message=None, *args, **kwargs):
-                return original(rtl_display(title) if title is not None else title,
-                                rtl_display(message) if message is not None else message, *args, **kwargs)
-            return _wrapped
-        setattr(messagebox, _name, _make(_original))
+    for _name in ('showinfo', 'showwarning', 'showerror', 'askyesno', 'askokcancel',
+                  'askretrycancel', 'askyesnocancel', 'askquestion'):
+        if hasattr(messagebox, _name):
+            try:
+                setattr(messagebox, f'_original_{_name}', getattr(messagebox, _name))
+            except Exception:
+                pass
+        setattr(messagebox, _name, (lambda name: lambda title=None, message=None, **kwargs:
+            _custom_message_dialog(name, title, message, **kwargs))(_name))
     messagebox._schoolpass_rtl_wrapped = True
 
-_wrap_messageboxes_once()
 
+_wrap_messageboxes_once()
 
 class DisplayStringVar(StringVar):
     """StringVar for read-only labels; input variables must remain logical/unmodified."""
@@ -352,14 +508,43 @@ def _install_rtl_widget_adapters():
     original_combo = ttk.Combobox
 
     class ArabicAwareCombobox(original_combo):
+        """RTL-aware combobox with a logical-value contract for application code.
+
+        Values may be replaced after construction (for example, when the allowed
+        absence-proof choices depend on the absence duration). Keep that update in
+        the same display/logical mapping as initial construction; otherwise Tk
+        would show unshaped Arabic in the newly supplied dropdown items.
+        """
+        def _schoolpass_map_values(self, values):
+            logical_values = tuple(values or ())
+            self._schoolpass_original_values = logical_values
+            self._schoolpass_display_to_logical = {}
+            self._schoolpass_logical_to_display = {}
+            display_values = []
+            for value in logical_values:
+                logical = str(value)
+                display = rtl_display(logical)
+                self._schoolpass_display_to_logical[display] = logical
+                self._schoolpass_logical_to_display[logical] = display
+                display_values.append(display)
+            return tuple(display_values)
+
         def __init__(self, master=None, *args, **kwargs):
             kwargs.setdefault('justify', 'right')
-            self._schoolpass_original_values = tuple(kwargs.get('values', ()))
-            self._schoolpass_display_to_logical = {rtl_display(v): str(v) for v in self._schoolpass_original_values}
-            self._schoolpass_logical_to_display = {str(v): rtl_display(v) for v in self._schoolpass_original_values}
-            if 'values' in kwargs:
-                kwargs['values'] = tuple(self._schoolpass_logical_to_display[str(v)] for v in self._schoolpass_original_values)
+            initial_values = kwargs.get('values', ())
+            kwargs['values'] = self._schoolpass_map_values(initial_values)
             super().__init__(master, *args, **kwargs)
+
+        def configure(self, cnf=None, **kwargs):
+            if isinstance(cnf, dict):
+                cnf = dict(cnf)
+                if 'values' in cnf:
+                    cnf['values'] = self._schoolpass_map_values(cnf['values'])
+            if 'values' in kwargs:
+                kwargs['values'] = self._schoolpass_map_values(kwargs['values'])
+            return super().configure(cnf, **kwargs)
+
+        config = configure
 
         def get(self):
             value = super().get()
@@ -371,25 +556,102 @@ def _install_rtl_widget_adapters():
     ttk.Combobox = ArabicAwareCombobox
 
     original_tree = ttk.Treeview
+    _TREE_VALUE_UNSET = object()
 
     class ArabicAwareTreeview(original_tree):
+        """Render shaped cells while returning original logical values to sorting."""
+        def __init__(self, master=None, *args, **kwargs):
+            self._schoolpass_tree_columns = tuple(kwargs.get('columns', ()))
+            self._schoolpass_logical_rows = {}
+            super().__init__(master, *args, **kwargs)
+
         def heading(self, column, option=None, **kwargs):
             if isinstance(kwargs.get('text'), str):
                 kwargs['text'] = rtl_display(kwargs['text'])
             base_method = getattr(super(), 'heading', None)
             return base_method(column, option, **kwargs) if base_method else None
 
+        def _schoolpass_save_logical_values(self, iid, values):
+            if iid is None:
+                return
+            try:
+                self._schoolpass_logical_rows[str(iid)] = {
+                    str(column): value for column, value in zip(self._schoolpass_tree_columns, tuple(values))
+                }
+            except (TypeError, ValueError):
+                pass
+
         def insert(self, parent, index, iid=None, **kwargs):
+            logical_values = kwargs.get('values', ())
             if 'values' in kwargs:
-                kwargs['values'] = tuple(rtl_display(v) if isinstance(v, str) else v for v in kwargs['values'])
-            return super().insert(parent, index, iid=iid, **kwargs)
+                kwargs['values'] = tuple(rtl_display(v) if isinstance(v, str) else v for v in logical_values)
+            created_iid = super().insert(parent, index, iid=iid, **kwargs)
+            self._schoolpass_save_logical_values(iid or created_iid, logical_values)
+            return created_iid
 
         def item(self, item, option=None, **kwargs):
             if 'values' in kwargs:
-                kwargs['values'] = tuple(rtl_display(v) if isinstance(v, str) else v for v in kwargs['values'])
+                logical_values = kwargs['values']
+                self._schoolpass_save_logical_values(item, logical_values)
+                kwargs['values'] = tuple(rtl_display(v) if isinstance(v, str) else v for v in logical_values)
             return super().item(item, option, **kwargs)
 
+        def set(self, item, column=None, value=_TREE_VALUE_UNSET):
+            key = str(item)
+            if value is _TREE_VALUE_UNSET:
+                if column is not None:
+                    row = self._schoolpass_logical_rows.get(key, {})
+                    if str(column) in row:
+                        return row[str(column)]
+                return super().set(item, column) if column is not None else super().set(item)
+            row = self._schoolpass_logical_rows.setdefault(key, {})
+            row[str(column)] = value
+            display_value = rtl_display(value) if isinstance(value, str) else value
+            return super().set(item, column, display_value)
+
+        def delete(self, *items):
+            for item in items:
+                self._schoolpass_logical_rows.pop(str(item), None)
+            return super().delete(*items)
+
     ttk.Treeview = ArabicAwareTreeview
+
+    # Tk Text is used for the statistics overview. Shape all inserted content at
+    # the widget boundary so future screens cannot accidentally bypass RTL rules.
+    original_text_insert = getattr(tk.Text, 'insert', None)
+    if callable(original_text_insert) and not getattr(tk.Text, '_schoolpass_rtl_insert', False):
+        def rtl_text_insert(self, index, chars, *args):
+            if isinstance(chars, str):
+                chars = rtl_display(chars)
+            return original_text_insert(self, index, chars, *args)
+        tk.Text.insert = rtl_text_insert
+        tk.Text._schoolpass_rtl_insert = True
+
+    # Canvas text includes Arabic chart legends and annotations. Keep this
+    # centralized just like ttk labels; presentation-form text is idempotent.
+    original_canvas_create_text = getattr(Canvas, 'create_text', None)
+    if callable(original_canvas_create_text) and not getattr(Canvas, '_schoolpass_rtl_text', False):
+        def rtl_canvas_create_text(self, *args, **kwargs):
+            if isinstance(kwargs.get('text'), str):
+                kwargs['text'] = rtl_display(kwargs['text'])
+            return original_canvas_create_text(self, *args, **kwargs)
+        Canvas.create_text = rtl_canvas_create_text
+
+        original_canvas_itemconfigure = getattr(Canvas, 'itemconfigure', None)
+        if callable(original_canvas_itemconfigure):
+            def rtl_canvas_itemconfigure(self, tag_or_id, cnf=None, **kwargs):
+                if isinstance(cnf, dict):
+                    cnf = dict(cnf)
+                    if isinstance(cnf.get('text'), str):
+                        cnf['text'] = rtl_display(cnf['text'])
+                if isinstance(kwargs.get('text'), str):
+                    kwargs['text'] = rtl_display(kwargs['text'])
+                return original_canvas_itemconfigure(self, tag_or_id, cnf, **kwargs)
+            Canvas.itemconfigure = rtl_canvas_itemconfigure
+            if hasattr(Canvas, 'itemconfig'):
+                Canvas.itemconfig = rtl_canvas_itemconfigure
+        Canvas._schoolpass_rtl_text = True
+
     ttk._schoolpass_rtl_installed = True
 
 
@@ -1501,9 +1763,9 @@ class SchoolPassApp:
 
         sidebar_scroll = ScrollableFrame(shell, inner_style='Sidebar.TFrame',
                                          canvas_background='#22312C' if core.setting('theme', 'light') == 'dark' else core.get_theme_colors()[0],
-                                         width=238)
+                                         width=252)
         sidebar_scroll.pack(side=RIGHT, fill=Y)
-        sidebar_scroll.configure(width=238)
+        sidebar_scroll.configure(width=252)
         self.sidebar_scroll = sidebar_scroll
         sidebar = sidebar_scroll.inner
         brand = ttk.Frame(sidebar, style='Sidebar.TFrame')
@@ -1545,7 +1807,7 @@ class SchoolPassApp:
         self.content_frame = content
         content.bind('<Configure>', lambda event: self._adapt_dashboard_layout(event.width))
         header = ttk.Frame(content)
-        header.pack(fill=X, padx=18, pady=(14, 7))
+        header.pack(fill=X, padx=18, pady=(18, 10))
         right_head = ttk.Frame(header)
         right_head.pack(fill=X, expand=True)
         ttk.Label(right_head, text=setting('school_name', SCHOOL_NAME), style='Title.TLabel').pack(anchor=E)
@@ -1580,9 +1842,9 @@ class SchoolPassApp:
         for col in range(3):
             cards.grid_columnconfigure(col, weight=1, uniform='kpi')
         for idx, (key, label) in enumerate(card_specs):
-            card = ttk.Frame(cards, style='Surface.TFrame', padding=(11, 7))
+            card = ttk.Frame(cards, style='Surface.TFrame', padding=(15, 13))
             self.kpi_cards.append(card)
-            card.grid(row=idx // 3, column=2 - (idx % 3), sticky='nsew', padx=4, pady=3)
+            card.grid(row=idx // 3, column=2 - (idx % 3), sticky='nsew', padx=6, pady=5)
             title_label = ttk.Label(card, text=label, style='CardTitle.TLabel', wraplength=260, justify='right')
             title_label.pack(anchor=E)
             value = ttk.Label(card, text='—', style='CardValue.TLabel')
@@ -1599,13 +1861,13 @@ class SchoolPassApp:
         # Chart and alerts share a row to keep the dashboard informative yet compact.
         overview = ttk.Frame(content)
         overview.pack(fill=X, padx=22, pady=(1, 8))
-        chart_panel = ttk.Frame(overview, style='Surface.TFrame', padding=(12, 8))
+        chart_panel = ttk.Frame(overview, style='Surface.TFrame', padding=(16, 14))
         self.chart_panel = chart_panel
         chart_panel.pack(side=LEFT, fill=BOTH, expand=True, padx=(0, 5))
         chart_head = ttk.Frame(chart_panel, style='Surface.TFrame')
         chart_head.pack(fill=X)
         ttk.Label(chart_head, text='حركة الرخص حسب الفترة', style='Section.TLabel').pack(side=RIGHT)
-        self.chart_period_var = StringVar(value='الأسبوع')
+        self.chart_period_var = ComboStringVar(('اليوم', 'الأسبوع', 'الشهر'), value='الأسبوع')
         chart_combo = ttk.Combobox(chart_head, textvariable=self.chart_period_var, state='readonly', width=10,
                                    values=('اليوم', 'الأسبوع', 'الشهر'), justify='right')
         chart_combo.pack(side=LEFT)
@@ -1621,7 +1883,7 @@ class SchoolPassApp:
         self.dashboard_chart = Canvas(chart_panel, height=145, background=('#22312C' if core.setting('theme', 'light') == 'dark' else '#FFFFFF'), highlightthickness=0)
         self.dashboard_chart.pack(fill=X, expand=True, pady=(3, 0))
 
-        alert_panel = ttk.Frame(overview, style='Surface.TFrame', padding=(13, 10))
+        alert_panel = ttk.Frame(overview, style='Surface.TFrame', padding=(16, 14))
         self.alert_panel = alert_panel
         alert_panel.pack(side=RIGHT, fill=Y, padx=(5, 0))
         ttk.Label(alert_panel, text='التنبيهات والمتابعة', style='Section.TLabel').pack(anchor=E, pady=(0, 8))
@@ -1647,7 +1909,7 @@ class SchoolPassApp:
             add_dashboard_action(action_row, 'التقرير اليومي التفصيلي A4', 'التقرير اليومي A4', self.daily_summary, 'Accent.TButton', LEFT)
         add_dashboard_action(action_row, 'التقرير الشهري', 'شهري', self.monthly_report, 'TButton', LEFT)
 
-        panel = ttk.Frame(content, style='Surface.TFrame', padding=(13, 10))
+        panel = ttk.Frame(content, style='Surface.TFrame', padding=(16, 14))
         panel.pack(fill=BOTH, expand=True, padx=22, pady=(0, 12))
         title_row = ttk.Frame(panel, style='Surface.TFrame')
         title_row.pack(fill=X, pady=(0, 7))
@@ -2352,6 +2614,17 @@ class SchoolPassApp:
         ttk.Label(win, text='مدة الغياب التراكمية محسوبة من فترات العودة بعد الغياب التي أدخلها المشرف يدويًا، وليست سجل غياب يوميًا تلقائيًا.', wraplength=1000).pack(pady=(4, 9))
         bar = ttk.Frame(win); bar.pack(fill=X, padx=12, pady=(0, 12))
         ttk.Button(bar, text='عرض تفاصيل العملية المحددة', command=lambda: self.show_record(int(tree.selection()[0])) if tree.selection() else messagebox.showinfo('اختيار', 'حدد عملية أولًا.', parent=win), style='Accent.TButton').pack(side=RIGHT, padx=4)
+        def print_student_profile():
+            stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            safe_key = re.sub(r'[^A-Za-z0-9_-]+', '_', str(student['student_key']))[:40] or 'student'
+            path = core.DATA_DIR / 'prints' / f"SchoolPass_Student_{safe_key}_{stamp}.pdf"
+            try:
+                out = core.create_student_history_report_pdf(path, student_id, self.current_user['id'])
+            except (USER_ERRORS + (ImportError,)) as exc:
+                show_error(win, 'تعذر إنشاء تقرير التلميذ', exc)
+                return
+            self._show_print_options(out, win, title='الملف التاريخي للتلميذ — معاينة وطباعة')
+        ttk.Button(bar, text='حفظ / طباعة الملف التاريخي', command=print_student_profile, style='Gold.TButton').pack(side=RIGHT, padx=4)
         ttk.Button(bar, text='إغلاق', command=win.destroy).pack(side=RIGHT, padx=4)
 
     # ------------------------------------------------------------ logs / stats
@@ -2452,7 +2725,7 @@ class SchoolPassApp:
             if not path:return
             try: out=core.create_filtered_records_report_pdf(path,current_filters(),self.current_user['id'])
             except Exception as exc: show_error(win,'تعذر إنشاء التقرير',exc); return
-            core.open_pdf(out)
+            self._show_print_options(out, win, title='تقرير سجل العمليات المصفّى')
         bar=ttk.Frame(win); bar.pack(fill=X,padx=14,pady=(0,12))
         ttk.Button(bar,text='عرض التفاصيل',command=selected_details,style='Accent.TButton').pack(side=RIGHT,padx=3)
         ttk.Button(bar,text='إعادة طباعة',command=lambda: self._reprint_by_id(int(tree.selection()[0]),win) if tree.selection() else messagebox.showinfo('اختيار','حدد رخصة أولًا.',parent=win)).pack(side=RIGHT,padx=3)
@@ -2485,8 +2758,7 @@ class SchoolPassApp:
         except Exception as exc:
             show_error(self.root, 'تعذر إنشاء التقرير', exc)
             return
-        core.open_pdf(out)
-        messagebox.showinfo('التقرير الشهري جاهز', f'تم إنشاء التقرير وحفظه في:\n{out}\n\nفُتح الملف للمعاينة والطباعة.', parent=self.root)
+        self._show_print_options(out, self.root, title='التقرير الشهري — معاينة وطباعة')
 
     def open_expulsion_report(self):
         """Browse and export class-expulsion records by teacher and date interval."""
@@ -2573,15 +2845,40 @@ class SchoolPassApp:
             except (USER_ERRORS + (ImportError,)) as exc:
                 show_error(win, 'تعذر إنشاء تقرير الطرد', exc)
                 return
-            core.open_pdf(out)
-            messagebox.showinfo('التقرير جاهز', f'تم إنشاء التقرير وحفظه في:\n{out}', parent=win)
+            self._show_print_options(out, win, title='تقرير حالات الطرد حسب الأستاذ — معاينة وطباعة')
+
+        def print_expulsion_report():
+            if not state['report']:
+                refresh()
+                if not state['report']:
+                    return
+            stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            path = core.DATA_DIR / 'prints' / f'SchoolPass_Expulsions_{start_var.get()}_{end_var.get()}_{stamp}.pdf'
+            try:
+                out = core.create_expulsion_report_pdf(path, start_var.get(), end_var.get(), teacher_var.get(), self.current_user['id'])
+            except (USER_ERRORS + (ImportError,)) as exc:
+                show_error(win, 'تعذر إنشاء تقرير الطرد', exc)
+                return
+            self._show_print_options(out, win, title='تقرير الطرد حسب الأستاذ')
 
         buttons = ttk.Frame(win)
         buttons.pack(fill=X, padx=14, pady=(0, 12))
         ttk.Button(buttons, text='عرض النتائج', command=refresh, style='Accent.TButton').pack(side=RIGHT, padx=4)
-        ttk.Button(buttons, text='إنشاء تقرير PDF', command=export_pdf).pack(side=RIGHT, padx=4)
+        ttk.Button(buttons, text='حفظ تقرير PDF', command=export_pdf).pack(side=RIGHT, padx=4)
+        ttk.Button(buttons, text='إنشاء وطباعة التقرير', command=print_expulsion_report, style='Gold.TButton').pack(side=RIGHT, padx=4)
         ttk.Button(buttons, text='إغلاق', command=win.destroy).pack(side=LEFT, padx=4)
         refresh()
+
+    def print_statistics_report(self):
+        # Create a comprehensive PDF from the same stats displayed in the dashboard.
+        stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        path = core.DATA_DIR / 'prints' / f'SchoolPass_Statistics_{date_today()}_{stamp}.pdf'
+        try:
+            out = core.create_statistics_report_pdf(path, self.current_user['id'])
+        except (USER_ERRORS + (ImportError,)) as exc:
+            show_error(self.root, 'تعذر إنشاء تقرير الإحصائيات', exc)
+            return
+        self._show_print_options(out, self.root, title='تقرير الإحصائيات الشامل — معاينة وطباعة')
 
     def show_stats(self):
         win = Toplevel(self.root)
@@ -2591,7 +2888,7 @@ class SchoolPassApp:
         win.transient(self.root)
         ttk.Label(win, text='لوحة الإحصائيات والتقارير', style='Title.TLabel').pack(pady=(14, 5))
         controls = ttk.Frame(win); controls.pack(fill=X,padx=18,pady=5)
-        period = StringVar(value='الأسبوع')
+        period = ComboStringVar(('اليوم', 'الأسبوع', 'الشهر'), value='الأسبوع')
         ttk.Label(controls,text='الفترة البيانية:').pack(side=RIGHT,padx=5)
         combo=ttk.Combobox(controls,textvariable=period,state='readonly',values=('اليوم','الأسبوع','الشهر'),width=12,justify='right')
         combo.pack(side=RIGHT,padx=5)
@@ -2638,7 +2935,8 @@ class SchoolPassApp:
         bar=ttk.Frame(win);bar.pack(fill=X,padx=18,pady=(0,12))
         ttk.Button(bar,text='تحديث الإحصائيات',command=refresh_text).pack(side=RIGHT,padx=4)
         ttk.Button(bar,text='تقرير الطرد حسب الأستاذ',command=self.open_expulsion_report).pack(side=RIGHT,padx=4)
-        ttk.Button(bar,text='إنشاء التقرير الشهري PDF',command=self.monthly_report,style='Accent.TButton').pack(side=RIGHT,padx=4)
+        ttk.Button(bar,text='إنشاء التقرير الشهري PDF',command=self.monthly_report,style='TButton').pack(side=RIGHT,padx=4)
+        ttk.Button(bar,text='طباعة تقرير الإحصائيات الكامل',command=self.print_statistics_report,style='Accent.TButton').pack(side=RIGHT,padx=4)
         draw_chart();refresh_text()
 
     # ------------------------------------------------------------ admin
