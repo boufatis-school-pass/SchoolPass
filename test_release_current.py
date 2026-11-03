@@ -41,6 +41,9 @@ class TestReleaseCurrent(unittest.TestCase):
         self.assertEqual(SchoolPassApp._version_parts('v2.5.3'), (2, 5, 3))
         self.assertEqual(SchoolPassApp._version_parts('2.6.1'), (2, 6, 1))
         self.assertEqual(SchoolPassApp._version_parts('v3.0.0'), (3, 0, 0))
+        self.assertEqual(SchoolPassApp._version_parts('v4.0.0'), (4, 0, 0))
+        self.assertEqual(SchoolPassApp._version_parts('v4.5.0'), (4, 5, 0))
+        self.assertEqual(SchoolPassApp._version_parts('v4.6.0'), (4, 6, 0))
         with self.assertRaises(ValueError):
             SchoolPassApp._version_parts('latest-release')
 
@@ -94,13 +97,19 @@ class TestReleaseCurrent(unittest.TestCase):
         self.assertEqual(report['total'], 1)
         self.assertEqual(report['records'][0]['id'], first['id'])
 
-    def test_approved_exit_permit_renderer_is_unchanged(self):
-        import ast, hashlib
+    def test_exit_permit_renderer_preserves_two_copy_safeguards_and_uses_admin_signature_box(self):
         source = (HERE / 'schoolpass_core.py').read_text(encoding='utf-8')
-        tree = ast.parse(source)
-        node = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == '_draw_page')
-        digest = hashlib.sha256(ast.dump(node, include_attributes=False).encode('utf-8')).hexdigest()
-        self.assertEqual(digest, '50206f4c1545ff7f401cd3c2291fe43061021898c1b5959ed82540c0b080576f')
+        start = source.index('def _draw_page(')
+        end = source.index('def _render_record_page(', start)
+        renderer = source[start:end]
+        self.assertIn('_draw_admin_signature_box(', renderer)
+        self.assertNotIn('ختم المؤسسة', renderer)
+        self.assertNotIn('إمضاء المسؤول', renderer)
+        self.assertIn('_WARN_GATE', renderer)
+        self.assertIn('_WARN_STUDENT', renderer)
+        self.assertIn('copy_type', renderer)
+        self.assertIn('mask_national_id(details)', renderer)
+        self.assertIn('box_bottom = 36 * MM', renderer)
 
     def test_expulsion_by_teacher_pdf_is_generated_and_contains_filtered_teacher_rows(self):
         core.create_special_entry(self.s1, self.supervisor, 'class_expulsion', 'TeacherA', 'Mathematics')

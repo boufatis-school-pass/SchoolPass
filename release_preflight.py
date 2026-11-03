@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-EXPECTED = "3.0.0"
+EXPECTED = "4.6.0"
 
 
 def main() -> int:
@@ -35,7 +35,7 @@ def main() -> int:
         errors.append("requirements_dev.txt must pin the reviewed PyInstaller 6.22.3 release")
     schema = re.search(r"^SCHEMA_VERSION\s*=\s*[\"\']?(\d+)[\"\']?", core, re.M)
     if not schema or schema.group(1) != "6":
-        errors.append("The 3.0.0 release must preserve database schema version 6 for 2.5.3 data compatibility")
+        errors.append("The 4.6.0 release must preserve database schema version 6 for existing SchoolPass data compatibility")
     if not setup_version:
         errors.append("MyAppVersion is missing from SchoolPass_Setup.iss")
     elif setup_version.group(1) != EXPECTED:
@@ -77,7 +77,37 @@ def main() -> int:
         errors.append("Windows build does not embed app.ico in SchoolPass.exe")
     if "--add-data" not in (ROOT / "build_windows.ps1").read_text(encoding="utf-8"):
         errors.append("Windows build does not package the runtime app.ico asset")
+    core_source = (ROOT / "schoolpass_core.py").read_text(encoding="utf-8")
+    if "def _draw_admin_signature_box(" not in core_source:
+        errors.append("The enlarged administration signature component is missing")
+    for removed_label in ("ختم المؤسسة", "إمضاء المسؤول", "توقيع رقمي"):
+        if removed_label in core_source:
+            errors.append(f"Removed receipt label reappeared: {removed_label}")
+    if core_source.count("_draw_admin_signature_box(") < 3:
+        errors.append("Both A6 receipt renderers must use the shared administration signature component")
+
     app_source = (ROOT / "app.py").read_text(encoding="utf-8-sig")
+    for marker, description in (
+        ("class LoginDialog:", "redesigned Arabic login dialog"),
+        ("class SetupDialog:", "redesigned first-run setup dialog"),
+        ("class RecoveryDialog:", "redesigned recovery dialog"),
+        ("LoginBrand.TFrame", "branded login identity panel"),
+        ("MetricCard.TFrame", "redesigned dashboard metric cards"),
+        ("SidebarProfile.TFrame", "current-user identity panel in navigation"),
+        ("PageHeader.TFrame", "professional dashboard header"),
+        ("UI_PALETTE", "centralized light/dark UI palette"),
+        ("primary_text", "contrast-aware primary button text"),
+        ("Hero.TFrame", "premium welcome hero surface"),
+        ("HeroTitle.TLabel", "hero typography hierarchy"),
+        ("MetricIcon.TLabel", "icon-led KPI card layout"),
+        ("def _tick_dashboard_clock(self):", "live dashboard date/time"),
+        ("hero_open_button", "direct open-exit follow-up action"),
+        ("def show_shortcuts(self):", "keyboard shortcuts help window"),
+        ("self.root.bind_all('<F1>'", "F1 keyboard help binding"),
+        ("self.shortcuts_button", "visible keyboard shortcut access"),
+    ):
+        if marker not in app_source:
+            errors.append(f"SchoolPass 4.6.0 visual design marker missing: {description}")
     for marker, description in (
         ("def _schoolpass_map_values", "dynamic Arabic combobox values"),
         ("def _schoolpass_save_logical_values", "logical Treeview value preservation"),

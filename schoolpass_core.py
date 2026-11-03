@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 APP_NAME = "SchoolPass"
-APP_VERSION = "3.0.0"
+APP_VERSION = "4.6.0"
 SCHOOL_NAME = "ثانوية المجاهد بسجراري لخضر بوفاطيس"
 MINISTRY_NAME = "الجمهورية الجزائرية الديمقراطية الشعبية — وزارة التربية الوطنية"
 SERVER_PORT = 8765
@@ -1305,7 +1305,7 @@ def create_statistics_report_pdf(dest_path, user_id) -> Path:
         report.drawRightString(page_w - margin, page_h - 15 * mm, visual(setting('school_name', SCHOOL_NAME)))
         report.setFillColor(colors.HexColor('#1B655C'))
         report.setFont(font, 11)
-        report.drawRightString(page_w - margin, page_h - 22 * mm, visual('التقرير الإحصائي الشامل — SchoolPass 3.0.0'))
+        report.drawRightString(page_w - margin, page_h - 22 * mm, visual('التقرير الإحصائي الشامل — SchoolPass 4.6.0'))
         report.setFillColor(colors.HexColor('#647875'))
         report.setFont(font, 8)
         report.drawRightString(page_w - margin, page_h - 28 * mm,
@@ -2329,11 +2329,32 @@ def _academic_year(value: datetime | None = None) -> str:
     return f"{start}/{start + 1}"
 
 
-def _draw_entry_page(c, row, details: dict, reprint: bool, font: str, school: str, reprint_at: str = "") -> None:
-    """Premium A6 entry permit; follows the approved exit-permit visual language.
+def _draw_admin_signature_box(c, x: float, y: float, font: str, border_color: tuple[float, float, float],
+                              line_color: tuple[float, float, float], *,
+                              width: float = 43.0 * MM, height: float = 29.0 * MM) -> None:
+    """Draw a generous blank area for a handwritten administration signature.
 
-    This renderer is intentionally isolated from the exit-permit renderer below:
-    the approved exceptional-exit design remains byte-for-byte untouched.
+    QR verification is kept elsewhere on the slip. This box is intentionally not
+    labelled as a stamp, digital signature, or cryptographic authenticity mark.
+    """
+    c.saveState()
+    c.setStrokeColorRGB(*border_color)
+    c.setLineWidth(0.7)
+    c.roundRect(x, y, width, height, 1.4 * MM, stroke=1, fill=0)
+    c.setFillColorRGB(*border_color)
+    c.setFont(font, 6.8)
+    c.drawCentredString(x + width / 2, y + height - 6.3 * MM, _arabic_visual("توقيع الإدارة"))
+    c.setStrokeColorRGB(*line_color)
+    c.setLineWidth(0.45)
+    c.line(x + 4.0 * MM, y + 5.2 * MM, x + width - 4.0 * MM, y + 5.2 * MM)
+    c.restoreState()
+
+
+def _draw_entry_page(c, row, details: dict, reprint: bool, font: str, school: str, reprint_at: str = "") -> None:
+    """Premium A6 entry permit with its dedicated information layout.
+
+    The shared administration signature component is used by both entry and exit
+    permits so the handwritten authorization area stays consistent.
     """
     from reportlab.lib.utils import ImageReader
 
@@ -2360,7 +2381,6 @@ def _draw_entry_page(c, row, details: dict, reprint: bool, font: str, school: st
         str(details.get("entry_reason_label", "رخصة دخول لحالة خاصة")) if is_special else
         "إثبات عودة من خروج استثنائي"
     )
-    signature = hashlib.sha256(str(row["qr_token"]).encode("utf-8")).hexdigest()[:12].upper()
     issuer = "الإدارة"
     if row["user_id"] is not None:
         user = get_user(row["user_id"])
@@ -2546,7 +2566,7 @@ def _draw_entry_page(c, row, details: dict, reprint: bool, font: str, school: st
             c.setFont(font, value_b_font)
             c.drawRightString(left_cell_right - 18.0 * mm, baseline, _arabic_visual(value_b))
 
-    # QR and signature/stamp area intentionally matches the approved exit slip.
+    # QR verification remains separate from the handwritten administration signature area.
     qr_x, qr_y, qr_size = margin + 1.0 * mm, 8.0 * mm, 23.0 * mm
     import qrcode
     qr = qrcode.QRCode(version=None, error_correction=qrcode.constants.ERROR_CORRECT_M, box_size=6, border=2)
@@ -2562,22 +2582,9 @@ def _draw_entry_page(c, row, details: dict, reprint: bool, font: str, school: st
     c.setFont(font, 5.1)
     c.drawCentredString(qr_x + qr_size / 2, qr_y - 2.0 * mm, _arabic_visual("امسح للتحقق"))
 
-    sx, sy = W - margin - 34 * mm, 9.0 * mm
-    c.setStrokeColorRGB(*green)
-    c.setLineWidth(0.6)
-    c.roundRect(sx, sy, 32 * mm, 22 * mm, 1.2 * mm, stroke=1, fill=0)
-    c.setFillColorRGB(*green)
-    c.setFont(font, 6.3)
-    c.drawCentredString(sx + 16 * mm, sy + 16.5 * mm, _arabic_visual("توقيع الإدارة"))
-    c.setStrokeColorRGB(*line)
-    c.line(sx + 3 * mm, sy + 6.7 * mm, sx + 29 * mm, sy + 6.7 * mm)
-    c.setFillColorRGB(*dark_muted)
-    c.setFont(font, 5.4)
-    c.drawCentredString(sx + 16 * mm, sy + 2.8 * mm, _arabic_visual("ختم المؤسسة"))
-
-    c.setFillColorRGB(*dark_muted)
-    c.setFont(font, 5.0)
-    c.drawRightString(right, 3.5 * mm, _arabic_visual(f"توقيع رقمي: {signature}"))
+    signature_w, signature_h = 43.0 * mm, 29.0 * mm
+    sx, sy = right - signature_w, 6.5 * mm
+    _draw_admin_signature_box(c, sx, sy, font, green, line, width=signature_w, height=signature_h)
     if cancelled:
         c.saveState()
         c.translate(W / 2, H / 2)
@@ -2670,7 +2677,7 @@ def _draw_page(c, row, details: dict, copy_type: str | None, reprint: bool, font
 
     # --- bottom zones
     qr_x, qr_y, qr_size = margin, 8 * MM, 24 * MM
-    box_bottom = 36 * MM  # warning box (permits) sits above QR/stamp
+    box_bottom = 36 * MM  # warning box is reserved above the QR and signature zones
     warn_lines: list[str] = []
     warn_gap = 3.15 * MM
     if row["kind"] == "exit_permit":
@@ -2723,18 +2730,13 @@ def _draw_page(c, row, details: dict, copy_type: str | None, reprint: bool, font
     c.setFont(font, 5.6)
     c.drawString(qr_x, qr_y - 2.6 * MM, "SchoolPass " + row["record_no"])
 
-    # --- stamp box
-    sx, sy = W - margin - 32 * MM, 9 * MM
-    c.setStrokeColorRGB(0.22, 0.48, 0.70)
-    c.setLineWidth(0.55)
-    c.roundRect(sx, sy, 30 * MM, 22 * MM, 1.2 * MM, stroke=1, fill=0)
-    c.setFillColorRGB(0.08, 0.25, 0.42)
-    c.setFont(font, 6.2)
-    c.drawCentredString(sx + 15 * MM, sy + 16.5 * MM, _arabic_visual("ختم المؤسسة"))
-    c.setStrokeColorRGB(0.55, 0.62, 0.69)
-    c.line(sx + 3 * MM, sy + 6 * MM, sx + 27 * MM, sy + 6 * MM)
-    c.setFont(font, 5.3)
-    c.drawCentredString(sx + 15 * MM, sy + 2.7 * MM, _arabic_visual("إمضاء المسؤول"))
+    # --- enlarged administration signature area; the school does not require a stamp field.
+    signature_w, signature_h = 43.0 * MM, 29.0 * MM
+    sx, sy = x_right - signature_w, 6.5 * MM
+    _draw_admin_signature_box(
+        c, sx, sy, font, (0.08, 0.25, 0.42), (0.55, 0.62, 0.69),
+        width=signature_w, height=signature_h,
+    )
     c.setFillColorRGB(0, 0, 0)
 
     # --- notice box (exit permit)
@@ -2768,7 +2770,7 @@ def _draw_page(c, row, details: dict, copy_type: str | None, reprint: bool, font
 
 
 def _render_record_page(c, row, details: dict, copy_type: str | None, reprint: bool, font: str, school: str, reprint_at: str = "") -> None:
-    """Route special entry slips to the dedicated A6 entry renderer without modifying the approved exit artwork."""
+    """Route entry slips to their dedicated layout; exit permits retain the required two-copy flow."""
     if row["kind"] == "special_entry":
         _draw_entry_page(c, row, details, reprint, font, school, reprint_at)
     else:

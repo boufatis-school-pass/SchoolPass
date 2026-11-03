@@ -2,7 +2,7 @@
 chcp 65001 >nul
 setlocal
 cd /d "%~dp0"
-title SchoolPass 3.0.0 - Build Windows installer
+title SchoolPass 4.6.0 - Build Windows installer
 where powershell.exe >nul 2>&1
 if errorlevel 1 (
   echo PowerShell was not found. Windows 10 or later is required.
@@ -18,6 +18,6 @@ if errorlevel 1 (
   exit /b 1
 )
 echo.
-echo DONE: SchoolPass 3.0.0 installer was created and checked.
+echo DONE: SchoolPass 4.6.0 installer was created and checked.
 echo File: %CD%\dist\SchoolPass_Setup.exe
 pause

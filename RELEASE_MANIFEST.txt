@@ -1,0 +1,10 @@
+SchoolPass 4.6.0 — SOURCE RELEASE
+Version: 4.6.0
+Database schema: 6 (unchanged)
+Runtime data directory: %LOCALAPPDATA%\SchoolPass
+Target: Windows 10/11 x64
+Main source: app.py, schoolpass_core.py
+Build command: powershell -ExecutionPolicy Bypass -File .\build_windows.ps1
+Expected Windows output: dist\SchoolPass_Setup.exe
+
+This archive contains source code and test/build instructions. It does not contain a built installer.
