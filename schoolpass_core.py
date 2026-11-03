@@ -951,7 +951,7 @@ def _read_teacher_rows(path: str) -> list[dict]:
     def key(value):
         return re.sub(r"[\s_\-]+", "", _norm_header(value)).lower()
     headers = [key(value) for value in rows[0]]
-    name_keys = {"اسمالأستاذ", "اسمالاستاذ", "الأستاذ", "الاستاذ", "الاسم واللقب", "teachername", "fullname", "name"}
+    name_keys = {"اسمالأستاذ", "اسمالاستاذ", "الأستاذ", "الاستاذ", "الاسمواللقب", "teachername", "fullname", "name"}
     subject_keys = {"المادة", "المادةالدراسية", "التخصص", "subject", "discipline"}
     class_keys = {"الأقسام", "القسم", "الأقسامالمسندة", "classes", "class", "sections"}
     def index_for(choices):
@@ -2684,14 +2684,26 @@ def _draw_entry_page(c, row, details: dict, reprint: bool, font: str, school: st
     c.setFont(font, 6.8)
     c.drawRightString(right - 2.2 * mm, student_top - 3.8 * mm, _arabic_visual("اسم التلميذ"))
     c.setFillColorRGB(*ink)
-    c.setFont(font, 12.0)
-    name_lines = _wrap_to_width(str(row["student_name"] or "—"), font, 12.0, usable - 5.0 * mm)
+    name_size = 13.4
+    name_text = str(row["student_name"] or "—")
+    while name_size > 10.8 and _text_width(name_text, font, name_size) > usable - 8.0 * mm:
+        name_size -= 0.3
+    name_lines = _wrap_to_width(name_text, font, name_size, usable - 8.0 * mm)
+    # Use the same centered name position on every entry permit, with a subtle
+    # text overprint to produce a bold effect even when only the regular Arabic
+    # font is bundled with the Windows installer.
+    def draw_student_name(value, baseline, size):
+        visual = _arabic_visual(value)
+        c.setFont(font, size)
+        c.drawCentredString(W / 2 - 0.10 * mm, baseline, visual)
+        c.drawCentredString(W / 2 + 0.10 * mm, baseline, visual)
+        c.drawCentredString(W / 2, baseline, visual)
     if len(name_lines) == 1:
-        c.drawRightString(right - 2.2 * mm, student_bottom + 2.4 * mm, _arabic_visual(name_lines[0]))
+        draw_student_name(name_lines[0], student_bottom + 2.4 * mm, name_size)
     else:
-        c.setFont(font, 9.8)
-        c.drawRightString(right - 2.2 * mm, student_bottom + 1.8 * mm, _arabic_visual(name_lines[0]))
-        c.drawRightString(right - 2.2 * mm, student_bottom + 5.4 * mm, _arabic_visual(name_lines[1]))
+        two_line_size = min(10.8, name_size)
+        draw_student_name(name_lines[0], student_bottom + 1.8 * mm, two_line_size)
+        draw_student_name(name_lines[1], student_bottom + 5.4 * mm, two_line_size)
 
     # Two equal information tiles; entry time is deliberately larger and dominant.
     tile_y = student_bottom - 3.0 * mm
@@ -2707,8 +2719,11 @@ def _draw_entry_page(c, row, details: dict, reprint: bool, font: str, school: st
     c.setFont(font, 7.0)
     c.drawCentredString(right_x + tile_w / 2, tile_y - 3.3 * mm, _arabic_visual("وقت الدخول"))
     c.setFillColorRGB(*green)
-    c.setFont(font, 13.0)
-    c.drawCentredString(right_x + tile_w / 2, tile_y - 9.0 * mm, _arabic_visual(issue_time))
+    c.setFont(font, 15.2)
+    time_visual = _arabic_visual(issue_time)
+    c.drawCentredString(right_x + tile_w / 2 - 0.10 * mm, tile_y - 9.2 * mm, time_visual)
+    c.drawCentredString(right_x + tile_w / 2 + 0.10 * mm, tile_y - 9.2 * mm, time_visual)
+    c.drawCentredString(right_x + tile_w / 2, tile_y - 9.2 * mm, time_visual)
     c.setFillColorRGB(*dark_muted)
     c.setFont(font, 7.0)
     c.drawCentredString(left_x + tile_w / 2, tile_y - 3.3 * mm, _arabic_visual("القسم"))
