@@ -1197,7 +1197,7 @@ def create_special_entry(student, user_id, entry_reason: str, teacher_name: str 
             teacher_name, subject = str(teacher["full_name"]), str(teacher["subject"])
             details["expelling_teacher_id"] = int(teacher["id"])
         if not teacher_name or not subject:
-            raise ValueError("عند الطرد من الحصة يجب اختيار الأستاذ والمادة.")
+            raise ValueError("عند الطرد من الحصة يجب إدخال اسم الأستاذ والمادة واختيارهما من قائمة الأساتذة.")
         if len(teacher_name) > 120 or len(subject) > 100:
             raise ValueError("اسم الأستاذ أو المادة أطول من الحد المسموح.")
         details.update({"expelling_teacher": teacher_name, "subject": subject})
