@@ -329,7 +329,7 @@ class TestGuiSmoke(unittest.TestCase):
         form.student_var.set("اسم غير مطابق")
         form._refresh_student_suggestions()
         self.assertIsNone(form.student)
-        self.assertEqual(form.student_label.get(), "لم يتم اختيار التلميذ")
+        self.assertEqual(form.student_label.get(), self.app.rtl_display("لم يتم اختيار التلميذ"))
 
     def test_special_entry_form_creates_expulsion_with_teacher_and_subject(self):
         a = self.make_app(self.sup)
