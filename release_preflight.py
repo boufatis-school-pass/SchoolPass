@@ -131,7 +131,11 @@ def main() -> int:
         errors.append("Safe teacher Excel preview/import functions are missing")
     if "def search_students(" not in core:
         errors.append("Student autocomplete query is missing")
-    if "draw_student_name(" not in core or "c.setFont(font, 15.2)" not in core:
+    if (
+        "def draw_student_name(value, baseline, size):" not in core
+        or "c.setFont(font, 17.0)" not in core
+        or "c.drawCentredString(W / 2" not in core
+    ):
         errors.append("Centered bold student name and prominent entry time markers are missing")
 
     if "SetupIconFile=app.ico" not in setup:
