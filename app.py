@@ -510,7 +510,7 @@ def _custom_message_dialog(kind: str, title=None, message=None, **options):
             except Exception:
                 pass
 
-        outer = ttk.Frame(dialog, style='Dialog.TFrame', padding=(19, 14))
+        outer = ttk.Frame(dialog, style='Dialog.TFrame', padding=(17, 15))
         outer.pack(fill=BOTH, expand=True)
         heading = ttk.Label(outer, text=title_text, style='DialogTitle.TLabel', anchor='e', justify='right')
         heading.pack(fill=X, pady=(0, 8))
