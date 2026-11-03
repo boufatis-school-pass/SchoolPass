@@ -1536,6 +1536,12 @@ class RecordForm:
         if not hasattr(self, 'student_combo'):
             return
         query = self.student_var.get().strip()
+        selected_label = getattr(self, '_selected_student_label', '')
+        if self.student is not None and query != selected_label:
+            # Never let a changed search string silently retain a different student.
+            self.student = None
+            self.student_label.set('لم يتم اختيار التلميذ')
+            self._selected_student_label = ''
         if not query:
             self.student_combo.configure(values=())
             self.student_option_map = {}
@@ -1606,6 +1612,7 @@ class RecordForm:
         self.student = row
         label = f"{student_name(row)} — {row['class_name']} — {row['student_key']}"
         self.student_label.set(label)
+        self._selected_student_label = label
         if hasattr(self, 'student_var'):
             self.student_var.set(label)
 
