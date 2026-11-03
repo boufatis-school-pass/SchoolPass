@@ -1387,7 +1387,7 @@ def create_statistics_report_pdf(dest_path, user_id) -> Path:
     report.setFillColor(colors.HexColor('#647875'))
     report.setFont(font, 7)
     report.drawRightString(page_w - margin, y - 2 * mm,
-                           visual(f"أُعد التقرير بواسطة: {actor.get('display_name', '—')} — استنادًا إلى سجلات SchoolPass."))
+                           visual(f"أُعد التقرير بواسطة: {actor['display_name']} — استنادًا إلى سجلات SchoolPass."))
     footer()
     report.save()
     audit(actor['id'], 'إنشاء التقرير الإحصائي الشامل PDF', 'report', out.name,
@@ -1559,7 +1559,7 @@ def create_student_history_report_pdf(dest_path, student_id: int, user_id) -> Pa
     ensure_space(8 * mm)
     report.setFillColor(colors.HexColor("#647875"))
     report.setFont(font, 7)
-    report.drawRightString(page_w - margin, y, visual(f"أُعد التقرير بواسطة: {actor.get('display_name', '—')} — لا يتضمن أرقام الهوية الوطنية كاملة."))
+    report.drawRightString(page_w - margin, y, visual(f"أُعد التقرير بواسطة: {actor['display_name']} — لا يتضمن أرقام الهوية الوطنية كاملة."))
     footer()
     report.save()
     audit(actor["id"], "إنشاء الملف التاريخي للتلميذ PDF", "student", student["student_key"],
