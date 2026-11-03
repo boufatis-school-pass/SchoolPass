@@ -2926,7 +2926,7 @@ class SchoolPassApp:
     # ------------------------------------------------------------ students
     def manage_teachers(self):
         """Administer the reusable teacher/subject directory and preview Excel imports safely."""
-        if self.current_user.get('role') != 'admin':
+        if self.current_user['role'] != 'admin':
             messagebox.showwarning('صلاحيات غير كافية', 'إدارة بيانات الأساتذة متاحة لمدير النظام فقط.', parent=self.root)
             return
         win = Toplevel(self.root)
