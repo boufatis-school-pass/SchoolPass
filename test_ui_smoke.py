@@ -321,6 +321,16 @@ class TestGuiSmoke(unittest.TestCase):
         COMMANDS.clear(); self.app.SetupDialog(root); self.press_all("setup")     # empty fields -> error message, no crash
         self.assertFalse(core.has_admin())
 
+    def test_student_autocomplete_clears_selection_when_query_changes(self):
+        a = self.make_app(self.sup)
+        form = self.app.RecordForm(a, "late")
+        form.set_student(self.s1)
+        self.assertIsNotNone(form.student)
+        form.student_var.set("اسم غير مطابق")
+        form._refresh_student_suggestions()
+        self.assertIsNone(form.student)
+        self.assertEqual(form.student_label.get(), "لم يتم اختيار التلميذ")
+
     def test_special_entry_form_creates_expulsion_with_teacher_and_subject(self):
         a = self.make_app(self.sup)
         form = self.app.RecordForm(a, "special_entry")
