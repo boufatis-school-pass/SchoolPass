@@ -1,5 +1,5 @@
 ﻿# -*- coding: utf-8 -*-
-"""SchoolPass 4.6.0 — premium Arabic-first school operations interface. Business rules and permission checks live in schoolpass_core.py."""
+"""SchoolPass 4.6.1 — premium Arabic-first school operations interface. Business rules and permission checks live in schoolpass_core.py."""
 from __future__ import annotations
 
 import json
