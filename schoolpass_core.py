@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 APP_NAME = "SchoolPass"
-APP_VERSION = "4.6.1"
+APP_VERSION = "4.7.0"
 SCHOOL_NAME = "ثانوية المجاهد بسجراري لخضر بوفاطيس"
 MINISTRY_NAME = "الجمهورية الجزائرية الديمقراطية الشعبية — وزارة التربية الوطنية"
 SERVER_PORT = 8765
@@ -198,7 +198,7 @@ def db_connect() -> sqlite3.Connection:
     return conn
 
 
-SCHEMA_VERSION = "6"
+SCHEMA_VERSION = "7"
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -226,6 +226,22 @@ CREATE TABLE IF NOT EXISTS students (
     active INTEGER NOT NULL DEFAULT 1,
     imported_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS teachers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    full_name TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    classes TEXT NOT NULL DEFAULT '',
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    created_by INTEGER,
+    updated_by INTEGER,
+    FOREIGN KEY(created_by) REFERENCES users(id),
+    FOREIGN KEY(updated_by) REFERENCES users(id)
+);
+CREATE INDEX IF NOT EXISTS idx_teachers_active_name ON teachers(active, full_name);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_teachers_name_subject
+    ON teachers(lower(trim(full_name)), lower(trim(subject)));
 CREATE TABLE IF NOT EXISTS records (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     record_no TEXT NOT NULL UNIQUE,
@@ -813,6 +829,220 @@ def get_student(key: str) -> sqlite3.Row | None:
 _PREFIXES = {"late": "SP", "absence_return": "SP", "special_entry": "SP", "exit_permit": "SP", "exit_return": "SP"}
 
 
+
+
+def _teacher_text(value: str, label: str, limit: int) -> str:
+    value = re.sub(r"\s+", " ", str(value or "")).strip()
+    if not value:
+        raise ValueError(f"أدخل {label}.")
+    if len(value) > limit:
+        raise ValueError(f"{label} طويل جدًا (الحد الأقصى {limit} حرفًا).")
+    return value
+
+
+def list_teachers(active_only: bool = True) -> list[sqlite3.Row]:
+    query = "SELECT * FROM teachers"
+    if active_only:
+        query += " WHERE active=1"
+    query += " ORDER BY full_name COLLATE NOCASE, subject COLLATE NOCASE, id"
+    with db_connect() as conn:
+        return conn.execute(query).fetchall()
+
+
+def search_teachers(query: str = "", limit: int = 15) -> list[sqlite3.Row]:
+    q = re.sub(r"\s+", " ", str(query or "")).strip()
+    with db_connect() as conn:
+        return conn.execute(
+            "SELECT * FROM teachers WHERE active=1 AND (full_name LIKE ? OR subject LIKE ? OR classes LIKE ?) "
+            "ORDER BY full_name COLLATE NOCASE, subject COLLATE NOCASE LIMIT ?",
+            (f"%{q}%", f"%{q}%", f"%{q}%", max(1, min(int(limit), 50))),
+        ).fetchall()
+
+
+def get_teacher(teacher_id: int, active_only: bool = False) -> sqlite3.Row | None:
+    with db_connect() as conn:
+        query = "SELECT * FROM teachers WHERE id=?" + (" AND active=1" if active_only else "")
+        return conn.execute(query, (int(teacher_id),)).fetchone()
+
+
+def create_teacher_as(actor, full_name: str, subject: str, classes: str = "") -> sqlite3.Row:
+    admin = require_admin(actor)
+    name = _teacher_text(full_name, "اسم الأستاذ", 120)
+    subject_text = _teacher_text(subject, "المادة", 100)
+    classes_text = re.sub(r"\s+", " ", str(classes or "")).strip()
+    if len(classes_text) > 240:
+        raise ValueError("قائمة الأقسام طويلة جدًا (الحد الأقصى 240 حرفًا).")
+    timestamp = now_iso()
+    try:
+        with db_connect() as conn:
+            cur = conn.execute(
+                "INSERT INTO teachers(full_name,subject,classes,active,created_at,updated_at,created_by,updated_by) "
+                "VALUES(?,?,?,1,?,?,?,?)",
+                (name, subject_text, classes_text, timestamp, timestamp, admin["id"], admin["id"]),
+            )
+            teacher_id = cur.lastrowid
+            conn.execute(
+                "INSERT INTO audit_logs(happened_at,user_id,action,target_type,target_id,description) VALUES(?,?,?,?,?,?)",
+                (timestamp, admin["id"], "إضافة أستاذ", "teacher", str(teacher_id), f"{name} — {subject_text}"),
+            )
+            return conn.execute("SELECT * FROM teachers WHERE id=?", (teacher_id,)).fetchone()
+    except sqlite3.IntegrityError as exc:
+        raise ValueError("هذا الأستاذ مسجل مسبقًا بالمادة نفسها.") from exc
+
+
+def update_teacher_as(actor, teacher_id: int, full_name: str, subject: str, classes: str = "") -> sqlite3.Row:
+    admin = require_admin(actor)
+    name = _teacher_text(full_name, "اسم الأستاذ", 120)
+    subject_text = _teacher_text(subject, "المادة", 100)
+    classes_text = re.sub(r"\s+", " ", str(classes or "")).strip()
+    if len(classes_text) > 240:
+        raise ValueError("قائمة الأقسام طويلة جدًا (الحد الأقصى 240 حرفًا).")
+    timestamp = now_iso()
+    try:
+        with db_connect() as conn:
+            old = conn.execute("SELECT * FROM teachers WHERE id=?", (int(teacher_id),)).fetchone()
+            if not old:
+                raise ValueError("الأستاذ غير موجود.")
+            conn.execute(
+                "UPDATE teachers SET full_name=?,subject=?,classes=?,updated_at=?,updated_by=? WHERE id=?",
+                (name, subject_text, classes_text, timestamp, admin["id"], int(teacher_id)),
+            )
+            conn.execute(
+                "INSERT INTO audit_logs(happened_at,user_id,action,target_type,target_id,description) VALUES(?,?,?,?,?,?)",
+                (timestamp, admin["id"], "تعديل بيانات أستاذ", "teacher", str(teacher_id),
+                 f"{old['full_name']} — {old['subject']} ← {name} — {subject_text}"),
+            )
+            return conn.execute("SELECT * FROM teachers WHERE id=?", (int(teacher_id),)).fetchone()
+    except sqlite3.IntegrityError as exc:
+        raise ValueError("يوجد أستاذ مسجل بالاسم والمادة نفسيهما.") from exc
+
+
+def set_teacher_active_as(actor, teacher_id: int, active: bool) -> None:
+    admin = require_admin(actor)
+    with db_connect() as conn:
+        row = conn.execute("SELECT * FROM teachers WHERE id=?", (int(teacher_id),)).fetchone()
+        if not row:
+            raise ValueError("الأستاذ غير موجود.")
+        conn.execute("UPDATE teachers SET active=?,updated_at=?,updated_by=? WHERE id=?",
+                     (1 if active else 0, now_iso(), admin["id"], int(teacher_id)))
+        conn.execute(
+            "INSERT INTO audit_logs(happened_at,user_id,action,target_type,target_id,description) VALUES(?,?,?,?,?,?)",
+            (now_iso(), admin["id"], "تفعيل أستاذ" if active else "إيقاف أستاذ", "teacher",
+             str(teacher_id), f"{row['full_name']} — {row['subject']}"),
+        )
+
+
+def _read_teacher_rows(path: str) -> list[dict]:
+    suffix = Path(path).suffix.lower()
+    if suffix in (".xlsx", ".xlsm"):
+        from openpyxl import load_workbook
+        workbook = load_workbook(path, read_only=True, data_only=True)
+        try:
+            rows = [list(row) for row in workbook.active.iter_rows(values_only=True)]
+        finally:
+            workbook.close()
+    elif suffix == ".csv":
+        with open(path, "r", encoding="utf-8-sig", newline="") as stream:
+            rows = list(csv.reader(stream))
+    else:
+        raise ValueError("استعمل ملف Excel بصيغة .xlsx أو .xlsm أو ملف CSV.")
+    if not rows:
+        raise ValueError("الملف فارغ.")
+    def key(value):
+        return re.sub(r"[\s_\-]+", "", _norm_header(value)).lower()
+    headers = [key(value) for value in rows[0]]
+    name_keys = {"اسمالأستاذ", "اسمالاستاذ", "الأستاذ", "الاستاذ", "الاسم واللقب", "teachername", "fullname", "name"}
+    subject_keys = {"المادة", "المادةالدراسية", "التخصص", "subject", "discipline"}
+    class_keys = {"الأقسام", "القسم", "الأقسامالمسندة", "classes", "class", "sections"}
+    def index_for(choices):
+        return next((i for i, item in enumerate(headers) if item in choices), None)
+    ni, si, ci = index_for(name_keys), index_for(subject_keys), index_for(class_keys)
+    if ni is None or si is None:
+        raise ValueError("يجب أن يحتوي الصف الأول على عمودَي اسم الأستاذ والمادة، ويمكن إضافة عمود الأقسام.")
+    prepared = []
+    for row_no, values in enumerate(rows[1:], start=2):
+        def cell(i):
+            return "" if i is None or i >= len(values) or values[i] is None else str(values[i]).strip()
+        name, subject, classes = cell(ni), cell(si), cell(ci)
+        if name or subject or classes:
+            prepared.append({"row": row_no, "full_name": name, "subject": subject, "classes": classes})
+    return prepared
+
+
+def preview_teacher_import(path: str) -> dict:
+    source = _read_teacher_rows(path)
+    with db_connect() as conn:
+        existing_rows = conn.execute("SELECT full_name,subject FROM teachers").fetchall()
+    existing = {(re.sub(r"\s+", " ", r["full_name"]).strip().casefold(),
+                  re.sub(r"\s+", " ", r["subject"]).strip().casefold()) for r in existing_rows}
+    seen, preview = set(), []
+    counts = {"ready": 0, "existing": 0, "duplicate_file": 0, "invalid": 0}
+    for item in source:
+        name = re.sub(r"\s+", " ", item["full_name"]).strip()
+        subject = re.sub(r"\s+", " ", item["subject"]).strip()
+        key = (name.casefold(), subject.casefold())
+        status, message = "ready", "جاهز للإضافة"
+        if not name or not subject or len(name) > 120 or len(subject) > 100 or len(item["classes"]) > 240:
+            status, message = "invalid", "بيانات ناقصة أو أطول من الحد المسموح"
+        elif key in existing:
+            status, message = "existing", "مسجل مسبقًا — لن تتغير بياناته"
+        elif key in seen:
+            status, message = "duplicate_file", "مكرر داخل الملف — ستُضاف نسخة واحدة فقط"
+        else:
+            seen.add(key)
+        counts[status] += 1
+        preview.append({**item, "full_name": name, "subject": subject, "status": status, "message": message})
+    return {"rows": preview, "counts": counts, "total": len(preview)}
+
+
+def import_teachers_as(path: str, actor) -> dict:
+    admin = require_admin(actor)
+    preview = preview_teacher_import(path)
+    added = 0
+    timestamp = now_iso()
+    with db_connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        for item in preview["rows"]:
+            if item["status"] != "ready":
+                continue
+            try:
+                conn.execute(
+                    "INSERT INTO teachers(full_name,subject,classes,active,created_at,updated_at,created_by,updated_by) "
+                    "VALUES(?,?,?,1,?,?,?,?)",
+                    (item["full_name"], item["subject"], item["classes"], timestamp, timestamp, admin["id"], admin["id"]),
+                )
+                added += 1
+            except sqlite3.IntegrityError:
+                pass
+        conn.execute(
+            "INSERT INTO audit_logs(happened_at,user_id,action,target_type,target_id,description) VALUES(?,?,?,?,?,?)",
+            (timestamp, admin["id"], "استيراد قائمة الأساتذة", "teacher", "",
+             f"أضيف {added} أستاذًا؛ لم تُستبدل أو تُحذف أي بيانات موجودة."),
+        )
+    return {"added": added, "preview": preview}
+
+
+def list_active_accounts() -> list[sqlite3.Row]:
+    with db_connect() as conn:
+        return conn.execute(
+            "SELECT id,username,display_name,role FROM users WHERE active=1 "
+            "ORDER BY CASE role WHEN 'admin' THEN 0 ELSE 1 END, display_name COLLATE NOCASE"
+        ).fetchall()
+
+
+def search_students(query: str = "", limit: int = 20) -> list[sqlite3.Row]:
+    q = re.sub(r"\s+", " ", str(query or "")).strip()
+    p = f"%{q}%"
+    with db_connect() as conn:
+        return conn.execute(
+            "SELECT * FROM students WHERE active=1 AND "
+            "(student_key LIKE ? OR last_name LIKE ? OR first_name LIKE ? OR "
+            "(last_name||' '||first_name) LIKE ? OR (first_name||' '||last_name) LIKE ? OR class_name LIKE ?) "
+            "ORDER BY last_name COLLATE NOCASE, first_name COLLATE NOCASE LIMIT ?",
+            (p, p, p, p, p, p, max(1, min(int(limit), 50))),
+        ).fetchall()
+
+
 def next_record_no(kind: str, conn: sqlite3.Connection) -> str:
     prefix, year = _PREFIXES.get(kind, "SP"), date.today().year
     stem = f"{prefix}-{year}-"
@@ -950,7 +1180,7 @@ def create_late_slip(student, user_id, reason: str, note: str = "") -> sqlite3.R
 
 
 def create_special_entry(student, user_id, entry_reason: str, teacher_name: str = "",
-                         subject: str = "", note: str = "") -> sqlite3.Row:
+                          subject: str = "", note: str = "", teacher_id: int | None = None) -> sqlite3.Row:
     """Create a special entry permit without counting it as an ordinary absence."""
     entry_reason = str(entry_reason or "").strip()
     teacher_name, subject, note = str(teacher_name or "").strip(), str(subject or "").strip(), str(note or "").strip()
@@ -960,9 +1190,15 @@ def create_special_entry(student, user_id, entry_reason: str, teacher_name: str 
         raise ValueError("الملاحظة طويلة جدًا (الحد الأقصى 200 حرف).")
     details = {"entry_reason": entry_reason, "entry_reason_label": SPECIAL_ENTRY_LABELS[entry_reason]}
     if entry_reason == "class_expulsion":
+        if teacher_id is not None:
+            teacher = get_teacher(int(teacher_id), active_only=True)
+            if not teacher:
+                raise ValueError("الأستاذ المحدد غير موجود أو غير نشط. حدّث القائمة واختر أستاذًا نشطًا.")
+            teacher_name, subject = str(teacher["full_name"]), str(teacher["subject"])
+            details["expelling_teacher_id"] = int(teacher["id"])
         if not teacher_name or not subject:
-            raise ValueError("عند الطرد من الحصة يجب تسجيل اسم الأستاذ والمادة.")
-        if len(teacher_name) > 100 or len(subject) > 80:
+            raise ValueError("عند الطرد من الحصة يجب اختيار الأستاذ والمادة.")
+        if len(teacher_name) > 120 or len(subject) > 100:
             raise ValueError("اسم الأستاذ أو المادة أطول من الحد المسموح.")
         details.update({"expelling_teacher": teacher_name, "subject": subject})
         reason = f"{SPECIAL_ENTRY_LABELS[entry_reason]} — الأستاذ: {teacher_name} — المادة: {subject}"
