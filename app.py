@@ -1079,24 +1079,23 @@ class RecoveryDialog:
 
 
 class LoginDialog:
-    """Branded split-panel login; authentication and recovery behavior are unchanged."""
+    """Accessible login with an account selector and optional password visibility."""
     def __init__(self, root: Tk, lock_mode: bool = False, prefill: str = ''):
         self.user = None
         win = Toplevel(root)
         title = 'فتح الجلسة — SchoolPass' if lock_mode else 'تسجيل الدخول — SchoolPass'
-        configure_window(win, title, '850x560')
-        win.minsize(740, 510)
+        configure_window(win, title, '820x540')
+        win.minsize(700, 480)
         win.transient(root)
         win.grab_set()
         win.protocol('WM_DELETE_WINDOW', win.destroy)
         win.configure(background=UI_PALETTE.get('bg', '#F3F6FB'))
 
-        # Main form on the left, identity panel on the right (natural RTL reading order).
         body = ttk.Frame(win, style='LoginSurface.TFrame')
         body.pack(fill=BOTH, expand=True, padx=14, pady=14)
-        form_panel = ttk.Frame(body, style='LoginSurface.TFrame', padding=(34, 34))
+        form_panel = ttk.Frame(body, style='LoginSurface.TFrame', padding=(30, 28))
         form_panel.pack(side=LEFT, fill=BOTH, expand=True)
-        brand_panel = ttk.Frame(body, style='LoginBrand.TFrame', padding=(25, 28), width=285)
+        brand_panel = ttk.Frame(body, style='LoginBrand.TFrame', padding=(24, 26), width=270)
         brand_panel.pack(side=RIGHT, fill=Y)
         brand_panel.pack_propagate(False)
 
@@ -1110,27 +1109,53 @@ class LoginDialog:
             ttk.Label(brand_panel, text='•  ' + line, style='LoginBrandSub.TLabel', justify='right').pack(anchor=E, fill=X, pady=5)
         ttk.Frame(brand_panel, style='LoginBrand.TFrame').pack(fill=BOTH, expand=True)
         ttk.Label(brand_panel, text=f'الإصدار {APP_VERSION}\n{setting("school_name", SCHOOL_NAME)}',
-                  style='LoginBrandFoot.TLabel', justify='right', wraplength=230).pack(anchor=E, pady=(14, 0))
+                  style='LoginBrandFoot.TLabel', justify='right', wraplength=220).pack(anchor=E, pady=(14, 0))
 
-        ttk.Label(form_panel, text='بوابة الدخول الآمن', style='Eyebrow.TLabel').pack(anchor=E, pady=(16, 7))
+        ttk.Label(form_panel, text='بوابة الدخول الآمن', style='Eyebrow.TLabel').pack(anchor=E, pady=(12, 7))
         ttk.Label(form_panel, text='مرحبًا بعودتك', style='LoginTitle.TLabel').pack(anchor=E, pady=(0, 6))
         school_name = setting('school_name', SCHOOL_NAME)
-        ttk.Label(form_panel, text=school_name, style='LoginSubtitle.TLabel', wraplength=450,
-                  justify='right').pack(anchor=E, fill=X, pady=(0, 28))
+        ttk.Label(form_panel, text=school_name, style='LoginSubtitle.TLabel', wraplength=420,
+                  justify='right').pack(anchor=E, fill=X, pady=(0, 22))
 
+        accounts = core.list_active_accounts()
+        self.account_map = {}
+        account_labels = []
+        for account in accounts:
+            role = 'مدير النظام' if account['role'] == 'admin' else 'مشرف تربوي'
+            label = f"{account['display_name']}  —  {role}  ({account['username']})"
+            account_labels.append(label)
+            self.account_map[label] = account['username']
         self.username = StringVar(value=prefill or setting('last_username', ''))
+        account_var = StringVar(value='')
+        selected = next((label for label, username in self.account_map.items()
+                         if username.casefold() == self.username.get().casefold()), '')
+        if not selected and account_labels:
+            selected = account_labels[0]
+            self.username.set(self.account_map[selected])
+        account_var.set(selected)
+        ttk.Label(form_panel, text='اختيار الحساب', style='FieldLabel.TLabel').pack(anchor=E, pady=(0, 5))
+        account_combo = ttk.Combobox(form_panel, textvariable=account_var, state='readonly',
+                                     values=account_labels, justify='right')
+        account_combo.pack(fill=X, ipady=3, pady=(0, 16))
+        def account_selected(_event=None):
+            username = self.account_map.get(account_var.get())
+            if username:
+                self.username.set(username)
+        account_combo.bind('<<ComboboxSelected>>', account_selected)
+
         self.password = StringVar()
-        ttk.Label(form_panel, text='اسم المستخدم', style='FieldLabel.TLabel').pack(anchor=E, pady=(0, 5))
-        user_entry = ttk.Entry(form_panel, textvariable=self.username, justify='right')
-        user_entry.pack(fill=X, ipady=3, pady=(0, 17))
         ttk.Label(form_panel, text='كلمة المرور', style='FieldLabel.TLabel').pack(anchor=E, pady=(0, 5))
         pass_entry = ttk.Entry(form_panel, textvariable=self.password, show='●', justify='right')
-        pass_entry.pack(fill=X, ipady=3, pady=(0, 8))
+        pass_entry.pack(fill=X, ipady=3, pady=(0, 4))
+        show_password = BooleanVar(value=False)
+        ttk.Checkbutton(form_panel, text='إظهار كلمة المرور', variable=show_password,
+                        command=lambda: pass_entry.configure(show='' if show_password.get() else '●')).pack(anchor=E, pady=(0, 5))
         err = DisplayStringVar()
-        ttk.Label(form_panel, textvariable=err, style='Error.TLabel', wraplength=460,
+        ttk.Label(form_panel, textvariable=err, style='Error.TLabel', wraplength=430,
                   justify='right').pack(fill=X, pady=(2, 5))
 
         def login():
+            account_selected()
             user, msg = core.authenticate(self.username.get(), self.password.get())
             if not user:
                 err.set(msg)
@@ -1143,12 +1168,13 @@ class LoginDialog:
                   'user', user['id'], user['username'])
             win.destroy()
 
-        ttk.Button(form_panel, text='دخول إلى النظام', command=login, style='Accent.TButton').pack(fill=X, pady=(13, 9), ipady=2)
+        ttk.Button(form_panel, text='دخول إلى النظام', command=login, style='Accent.TButton').pack(fill=X, pady=(12, 8), ipady=2)
         ttk.Button(form_panel, text='نسيت كلمة مرور المدير؟', command=lambda: RecoveryDialog(win),
                    style='Link.TButton').pack(anchor=E, pady=(1, 0))
-        ttk.Label(form_panel, text='استخدم بيانات حسابك المصرّح به فقط.', style='Hint.TLabel').pack(anchor=E, pady=(24, 0))
+        ttk.Label(form_panel, text='استخدم بيانات حسابك المصرّح به فقط.', style='Hint.TLabel').pack(anchor=E, pady=(18, 0))
         pass_entry.bind('<Return>', lambda _e: login())
-        (pass_entry if self.username.get() else user_entry).focus_set()
+        account_combo.bind('<Return>', lambda _e: pass_entry.focus_set())
+        pass_entry.focus_set()
         root.wait_window(win)
 
 
@@ -1306,8 +1332,8 @@ class RecordForm:
         self.title = titles[kind]
         self.win = Toplevel(app.root)
         self.win.title(self.title)
-        self.win.geometry('780x760' if kind == 'absence_return' else '700x640')
-        self.win.minsize(640, 560)
+        self.win.geometry('720x690' if kind == 'absence_return' else '660x570')
+        self.win.minsize(580, 500)
         self.win.transient(app.root)
         self.win.grab_set()
         ttk.Label(self.win, text=self.title, style='Title.TLabel').pack(pady=(12, 6))
@@ -1343,8 +1369,14 @@ class RecordForm:
         student_row.pack(fill=X, pady=6)
         ttk.Label(student_row, text='التلميذ', width=29, anchor=E).pack(side=RIGHT, padx=(4, 8))
         self.student_label = DisplayStringVar(value='لم يتم اختيار التلميذ')
-        ttk.Label(student_row, textvariable=self.student_label, relief='sunken', anchor=E, padding=7).pack(side=RIGHT, fill=X, expand=True)
-        ttk.Button(student_row, text='اختيار...', command=self.pick_student).pack(side=RIGHT, padx=6)
+        self.student_var = StringVar(value='')
+        self.student_combo = ttk.Combobox(student_row, textvariable=self.student_var, state='normal', justify='right')
+        self.student_combo.pack(side=RIGHT, fill=X, expand=True)
+        self.student_option_map = {}
+        self.student_combo.bind('<KeyRelease>', self._refresh_student_suggestions)
+        self.student_combo.bind('<<ComboboxSelected>>', self._student_suggestion_selected)
+        self.student_combo.bind('<Return>', self._student_suggestion_selected)
+        ttk.Button(student_row, text='بحث...', command=self.pick_student).pack(side=RIGHT, padx=6)
 
         if kind == 'late':
             ttk.Label(form, text='سبب التأخر', anchor=E).pack(fill=X, pady=(9, 3))
@@ -1409,8 +1441,19 @@ class RecordForm:
             self.special_combo.pack(side=RIGHT, fill=X, expand=True)
             self.expulsion_frame = ttk.Frame(form, relief='groove', borderwidth=1)
             ttk.Label(self.expulsion_frame, text='معلومات الطرد من الحصة', font=('Segoe UI', 9, 'bold')).pack(anchor=E, padx=6, pady=4)
-            add_row(self.expulsion_frame, 'teacher_name', 'اسم الأستاذ الذي طرد التلميذ')
-            add_row(self.expulsion_frame, 'subject', 'المادة الدراسية')
+            self.teacher_var = StringVar(value='')
+            self.selected_teacher_id = None
+            self.teacher_option_map = {}
+            teacher_row = ttk.Frame(self.expulsion_frame); teacher_row.pack(fill=X, pady=5)
+            ttk.Label(teacher_row, text='اسم الأستاذ', width=29, anchor=E).pack(side=RIGHT, padx=(4, 8))
+            self.teacher_combo = ttk.Combobox(teacher_row, textvariable=self.teacher_var, state='normal', justify='right')
+            self.teacher_combo.pack(side=RIGHT, fill=X, expand=True)
+            self.teacher_combo.bind('<KeyRelease>', self._refresh_teacher_suggestions)
+            self.teacher_combo.bind('<<ComboboxSelected>>', self._teacher_suggestion_selected)
+            self.subject_var = StringVar(value='')
+            subject_row = ttk.Frame(self.expulsion_frame); subject_row.pack(fill=X, pady=5)
+            ttk.Label(subject_row, text='المادة الدراسية', width=29, anchor=E).pack(side=RIGHT, padx=(4, 8))
+            ttk.Entry(subject_row, textvariable=self.subject_var, state='readonly', justify='right').pack(side=RIGHT, fill=X, expand=True)
             self.special_note = add_row(form, 'special_note', 'ملاحظة (اختياري)')
             self.special_combo.bind('<<ComboboxSelected>>', lambda _e: self._refresh_special_reason())
             self._refresh_special_reason()
@@ -1476,6 +1519,68 @@ class RecordForm:
         else:
             self.expulsion_frame.pack_forget()
 
+    def _refresh_student_suggestions(self, _event=None):
+        if not hasattr(self, 'student_combo'):
+            return
+        query = self.student_var.get().strip()
+        if not query:
+            self.student_combo.configure(values=())
+            self.student_option_map = {}
+            return
+        try:
+            rows = core.search_students(query, 18)
+            options = {}
+            for row in rows:
+                label = f"{student_name(row)} — {row['class_name']} — {row['student_key']}"
+                options[label] = row
+            self.student_option_map = options
+            self.student_combo.configure(values=tuple(options))
+            # Open the native dropdown immediately after typing without changing the query text.
+            if options:
+                try:
+                    self.student_combo.event_generate('<Down>')
+                except Exception:
+                    pass
+        except Exception:
+            self.student_option_map = {}
+
+    def _student_suggestion_selected(self, _event=None):
+        row = self.student_option_map.get(self.student_var.get())
+        if row:
+            self.set_student(row)
+        return 'break'
+
+    def _refresh_teacher_suggestions(self, _event=None):
+        if not hasattr(self, 'teacher_combo'):
+            return
+        query = self.teacher_var.get().strip()
+        self.selected_teacher_id = None
+        self.subject_var.set('')
+        try:
+            rows = core.search_teachers(query, 20) if query else core.list_teachers(active_only=True)
+            options = {}
+            for row in rows:
+                classes = f" — {row['classes']}" if row['classes'] else ''
+                label = f"{row['full_name']} — {row['subject']}{classes}"
+                options[label] = row
+            self.teacher_option_map = options
+            self.teacher_combo.configure(values=tuple(options))
+            if query and options:
+                try:
+                    self.teacher_combo.event_generate('<Down>')
+                except Exception:
+                    pass
+        except Exception:
+            self.teacher_option_map = {}
+
+    def _teacher_suggestion_selected(self, _event=None):
+        row = self.teacher_option_map.get(self.teacher_var.get())
+        if row:
+            self.selected_teacher_id = int(row['id'])
+            self.teacher_var.set(f"{row['full_name']} — {row['subject']}")
+            self.subject_var.set(row['subject'])
+        return 'break'
+
     def pick_student(self):
         with db_connect() as conn:
             count = conn.execute('SELECT COUNT(*) FROM students WHERE active=1').fetchone()[0]
@@ -1486,7 +1591,10 @@ class RecordForm:
 
     def set_student(self, row):
         self.student = row
-        self.student_label.set(f"{student_name(row)} — {row['class_name']} — {row['student_key']}")
+        label = f"{student_name(row)} — {row['class_name']} — {row['student_key']}"
+        self.student_label.set(label)
+        if hasattr(self, 'student_var'):
+            self.student_var.set(label)
 
     def save(self):
         if self._saving:
@@ -1537,7 +1645,11 @@ class RecordForm:
                     guardian_present=self.check_vars['guardian_present'].get(), other_reason=g('other_reason'))
             elif self.kind == 'special_entry':
                 entry_reason = self.special_options[self.special_reason.get()]
-                row = core.create_special_entry(self.student, uid, entry_reason, g('teacher_name'), g('subject'), g('special_note'))
+                if entry_reason == 'class_expulsion' and not self.selected_teacher_id:
+                    raise ValueError('اختر الأستاذ من القائمة. أضف بياناته أولًا من قسم إدارة الأساتذة إن لم يكن مسجلًا.')
+                row = core.create_special_entry(
+                    self.student, uid, entry_reason, g('teacher_name'), g('subject'), g('special_note'),
+                    teacher_id=getattr(self, 'selected_teacher_id', None))
             else:
                 row = core.create_exit_permit(self.student, uid, g('reason'), g('guardian_name'), g('relationship'), g('national_id'))
         except USER_ERRORS as exc:
