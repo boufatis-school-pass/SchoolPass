@@ -16,7 +16,7 @@ def test_release_version_is_470():
 
 
 def test_database_schema_is_additively_migrated():
-    assert re.search(r'^SCHEMA_VERSION\s*=\s*["\']6["\']', CORE, re.M)
+    assert re.search(r'^SCHEMA_VERSION\s*=\s*["\']7["\']', CORE, re.M)
 
 
 def test_branded_login_and_first_run_dialogs_exist():
