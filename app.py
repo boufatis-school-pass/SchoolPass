@@ -848,7 +848,7 @@ class ScrollableFrame(ttk.Frame):
         for sequence, binding_id in getattr(self, '_wheel_bindings', []):
             if binding_id:
                 try:
-                    self._unbind(('bind', 'all'), sequence, binding_id)
+                    self._unbind(('bind', 'all', sequence), binding_id)
                 except Exception:
                     pass
         self._wheel_bindings = []
