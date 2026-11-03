@@ -1,5 +1,5 @@
 ﻿# -*- coding: utf-8 -*-
-"""Static regression guards for the SchoolPass 4.6.1 premium UI corrective release."""
+"""Static regression guards for the SchoolPass 4.7.0 premium UI corrective release."""
 from pathlib import Path
 import re
 
@@ -8,15 +8,15 @@ APP = (ROOT / "app.py").read_text(encoding="utf-8-sig")
 CORE = (ROOT / "schoolpass_core.py").read_text(encoding="utf-8")
 
 
-def test_release_version_is_461():
-    assert re.search(r'^APP_VERSION\s*=\s*["\']4\.6\.1["\']', CORE, re.M)
-    assert (ROOT / "VERSION.txt").read_text(encoding="ascii").strip() == "4.6.1"
+def test_release_version_is_470():
+    assert re.search(r'^APP_VERSION\s*=\s*["\']4\.7\.0["\']', CORE, re.M)
+    assert (ROOT / "VERSION.txt").read_text(encoding="ascii").strip() == "4.7.0"
     setup = (ROOT / "SchoolPass_Setup.iss").read_text(encoding="utf-8-sig")
-    assert '#define MyAppVersion "4.6.1"' in setup
+    assert '#define MyAppVersion "4.7.0"' in setup
 
 
-def test_database_schema_is_preserved():
-    assert re.search(r'^SCHEMA_VERSION\s*=\s*["\']6["\']', CORE, re.M)
+def test_database_schema_is_additively_migrated():
+    assert re.search(r'^SCHEMA_VERSION\s*=\s*["\']7["\']', CORE, re.M)
 
 
 def test_branded_login_and_first_run_dialogs_exist():

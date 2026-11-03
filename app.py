@@ -1,5 +1,5 @@
 ﻿# -*- coding: utf-8 -*-
-"""SchoolPass 4.6.1 — premium Arabic-first school operations interface. Business rules and permission checks live in schoolpass_core.py."""
+"""SchoolPass 4.7.0 — premium Arabic-first school operations interface. Business rules and permission checks live in schoolpass_core.py."""
 from __future__ import annotations
 
 import json
@@ -346,7 +346,7 @@ def make_style(root: Tk, primary: str | None = None, secondary: str | None = Non
     style.configure('CardTitle.TLabel', background=surface, foreground=muted,
                     font=('Segoe UI', 9, 'bold'), anchor='e')
     style.configure('CardValue.TLabel', background=surface, foreground=primary_color,
-                    font=('Segoe UI', 25, 'bold'), anchor='e')
+                    font=('Segoe UI', 21, 'bold'), anchor='e')
     style.configure('Badge.TLabel', background=palette['primary_soft'], foreground=primary_color,
                     padding=(13, 8), font=('Segoe UI', 9, 'bold'))
     style.configure('Status.TLabel', background=palette['surface_alt'], foreground=muted,
@@ -510,7 +510,7 @@ def _custom_message_dialog(kind: str, title=None, message=None, **options):
             except Exception:
                 pass
 
-        outer = ttk.Frame(dialog, style='Dialog.TFrame', padding=(22, 18))
+        outer = ttk.Frame(dialog, style='Dialog.TFrame', padding=(17, 15))
         outer.pack(fill=BOTH, expand=True)
         heading = ttk.Label(outer, text=title_text, style='DialogTitle.TLabel', anchor='e', justify='right')
         heading.pack(fill=X, pady=(0, 8))
@@ -836,9 +836,22 @@ class ScrollableFrame(ttk.Frame):
         self._window_id = self.canvas.create_window((0, 0), window=self.inner, anchor='nw')
         self.inner.bind('<Configure>', self._update_scroll_region)
         self.canvas.bind('<Configure>', self._fit_inner_width)
-        self.bind_all('<MouseWheel>', self._on_mousewheel, add='+')
-        self.bind_all('<Button-4>', self._on_mousewheel, add='+')
-        self.bind_all('<Button-5>', self._on_mousewheel, add='+')
+        self._wheel_bindings = []
+        for sequence in ('<MouseWheel>', '<Button-4>', '<Button-5>'):
+            binding_id = self.bind_all(sequence, self._on_mousewheel, add='+')
+            self._wheel_bindings.append((sequence, binding_id))
+        self.bind('<Destroy>', self._cleanup_mousewheel_bindings, add='+')
+
+    def _cleanup_mousewheel_bindings(self, event=None):
+        if event is not None and getattr(event, 'widget', self) is not self:
+            return
+        for sequence, binding_id in getattr(self, '_wheel_bindings', []):
+            if binding_id:
+                try:
+                    self._unbind(('bind', 'all', sequence), binding_id)
+                except Exception:
+                    pass
+        self._wheel_bindings = []
 
     def _update_scroll_region(self, _event=None):
         try:
@@ -1079,24 +1092,23 @@ class RecoveryDialog:
 
 
 class LoginDialog:
-    """Branded split-panel login; authentication and recovery behavior are unchanged."""
+    """Accessible login with an account selector and optional password visibility."""
     def __init__(self, root: Tk, lock_mode: bool = False, prefill: str = ''):
         self.user = None
         win = Toplevel(root)
         title = 'فتح الجلسة — SchoolPass' if lock_mode else 'تسجيل الدخول — SchoolPass'
-        configure_window(win, title, '850x560')
-        win.minsize(740, 510)
+        configure_window(win, title, '820x540')
+        win.minsize(700, 480)
         win.transient(root)
         win.grab_set()
         win.protocol('WM_DELETE_WINDOW', win.destroy)
         win.configure(background=UI_PALETTE.get('bg', '#F3F6FB'))
 
-        # Main form on the left, identity panel on the right (natural RTL reading order).
         body = ttk.Frame(win, style='LoginSurface.TFrame')
         body.pack(fill=BOTH, expand=True, padx=14, pady=14)
-        form_panel = ttk.Frame(body, style='LoginSurface.TFrame', padding=(34, 34))
+        form_panel = ttk.Frame(body, style='LoginSurface.TFrame', padding=(30, 28))
         form_panel.pack(side=LEFT, fill=BOTH, expand=True)
-        brand_panel = ttk.Frame(body, style='LoginBrand.TFrame', padding=(25, 28), width=285)
+        brand_panel = ttk.Frame(body, style='LoginBrand.TFrame', padding=(24, 26), width=270)
         brand_panel.pack(side=RIGHT, fill=Y)
         brand_panel.pack_propagate(False)
 
@@ -1110,27 +1122,53 @@ class LoginDialog:
             ttk.Label(brand_panel, text='•  ' + line, style='LoginBrandSub.TLabel', justify='right').pack(anchor=E, fill=X, pady=5)
         ttk.Frame(brand_panel, style='LoginBrand.TFrame').pack(fill=BOTH, expand=True)
         ttk.Label(brand_panel, text=f'الإصدار {APP_VERSION}\n{setting("school_name", SCHOOL_NAME)}',
-                  style='LoginBrandFoot.TLabel', justify='right', wraplength=230).pack(anchor=E, pady=(14, 0))
+                  style='LoginBrandFoot.TLabel', justify='right', wraplength=220).pack(anchor=E, pady=(14, 0))
 
-        ttk.Label(form_panel, text='بوابة الدخول الآمن', style='Eyebrow.TLabel').pack(anchor=E, pady=(16, 7))
+        ttk.Label(form_panel, text='بوابة الدخول الآمن', style='Eyebrow.TLabel').pack(anchor=E, pady=(12, 7))
         ttk.Label(form_panel, text='مرحبًا بعودتك', style='LoginTitle.TLabel').pack(anchor=E, pady=(0, 6))
         school_name = setting('school_name', SCHOOL_NAME)
-        ttk.Label(form_panel, text=school_name, style='LoginSubtitle.TLabel', wraplength=450,
-                  justify='right').pack(anchor=E, fill=X, pady=(0, 28))
+        ttk.Label(form_panel, text=school_name, style='LoginSubtitle.TLabel', wraplength=420,
+                  justify='right').pack(anchor=E, fill=X, pady=(0, 22))
 
+        accounts = core.list_active_accounts()
+        self.account_map = {}
+        account_labels = []
+        for account in accounts:
+            role = 'مدير النظام' if account['role'] == 'admin' else 'مشرف تربوي'
+            label = f"{account['display_name']}  —  {role}  ({account['username']})"
+            account_labels.append(label)
+            self.account_map[label] = account['username']
         self.username = StringVar(value=prefill or setting('last_username', ''))
+        account_var = StringVar(value='')
+        selected = next((label for label, username in self.account_map.items()
+                         if username.casefold() == self.username.get().casefold()), '')
+        if not selected and account_labels:
+            selected = account_labels[0]
+            self.username.set(self.account_map[selected])
+        account_var.set(selected)
+        ttk.Label(form_panel, text='اختيار الحساب', style='FieldLabel.TLabel').pack(anchor=E, pady=(0, 5))
+        account_combo = ttk.Combobox(form_panel, textvariable=account_var, state='readonly',
+                                     values=account_labels, justify='right')
+        account_combo.pack(fill=X, ipady=3, pady=(0, 16))
+        def account_selected(_event=None):
+            username = self.account_map.get(account_var.get())
+            if username:
+                self.username.set(username)
+        account_combo.bind('<<ComboboxSelected>>', account_selected)
+
         self.password = StringVar()
-        ttk.Label(form_panel, text='اسم المستخدم', style='FieldLabel.TLabel').pack(anchor=E, pady=(0, 5))
-        user_entry = ttk.Entry(form_panel, textvariable=self.username, justify='right')
-        user_entry.pack(fill=X, ipady=3, pady=(0, 17))
         ttk.Label(form_panel, text='كلمة المرور', style='FieldLabel.TLabel').pack(anchor=E, pady=(0, 5))
         pass_entry = ttk.Entry(form_panel, textvariable=self.password, show='●', justify='right')
-        pass_entry.pack(fill=X, ipady=3, pady=(0, 8))
+        pass_entry.pack(fill=X, ipady=3, pady=(0, 4))
+        show_password = BooleanVar(value=False)
+        ttk.Checkbutton(form_panel, text='إظهار كلمة المرور', variable=show_password,
+                        command=lambda: pass_entry.configure(show='' if show_password.get() else '●')).pack(anchor=E, pady=(0, 5))
         err = DisplayStringVar()
-        ttk.Label(form_panel, textvariable=err, style='Error.TLabel', wraplength=460,
+        ttk.Label(form_panel, textvariable=err, style='Error.TLabel', wraplength=430,
                   justify='right').pack(fill=X, pady=(2, 5))
 
         def login():
+            account_selected()
             user, msg = core.authenticate(self.username.get(), self.password.get())
             if not user:
                 err.set(msg)
@@ -1143,12 +1181,13 @@ class LoginDialog:
                   'user', user['id'], user['username'])
             win.destroy()
 
-        ttk.Button(form_panel, text='دخول إلى النظام', command=login, style='Accent.TButton').pack(fill=X, pady=(13, 9), ipady=2)
+        ttk.Button(form_panel, text='دخول إلى النظام', command=login, style='Accent.TButton').pack(fill=X, pady=(12, 8), ipady=2)
         ttk.Button(form_panel, text='نسيت كلمة مرور المدير؟', command=lambda: RecoveryDialog(win),
                    style='Link.TButton').pack(anchor=E, pady=(1, 0))
-        ttk.Label(form_panel, text='استخدم بيانات حسابك المصرّح به فقط.', style='Hint.TLabel').pack(anchor=E, pady=(24, 0))
+        ttk.Label(form_panel, text='استخدم بيانات حسابك المصرّح به فقط.', style='Hint.TLabel').pack(anchor=E, pady=(18, 0))
         pass_entry.bind('<Return>', lambda _e: login())
-        (pass_entry if self.username.get() else user_entry).focus_set()
+        account_combo.bind('<Return>', lambda _e: pass_entry.focus_set())
+        pass_entry.focus_set()
         root.wait_window(win)
 
 
@@ -1306,8 +1345,8 @@ class RecordForm:
         self.title = titles[kind]
         self.win = Toplevel(app.root)
         self.win.title(self.title)
-        self.win.geometry('780x760' if kind == 'absence_return' else '700x640')
-        self.win.minsize(640, 560)
+        self.win.geometry('720x690' if kind == 'absence_return' else '660x570')
+        self.win.minsize(580, 500)
         self.win.transient(app.root)
         self.win.grab_set()
         ttk.Label(self.win, text=self.title, style='Title.TLabel').pack(pady=(12, 6))
@@ -1343,8 +1382,14 @@ class RecordForm:
         student_row.pack(fill=X, pady=6)
         ttk.Label(student_row, text='التلميذ', width=29, anchor=E).pack(side=RIGHT, padx=(4, 8))
         self.student_label = DisplayStringVar(value='لم يتم اختيار التلميذ')
-        ttk.Label(student_row, textvariable=self.student_label, relief='sunken', anchor=E, padding=7).pack(side=RIGHT, fill=X, expand=True)
-        ttk.Button(student_row, text='اختيار...', command=self.pick_student).pack(side=RIGHT, padx=6)
+        self.student_var = StringVar(value='')
+        self.student_combo = ttk.Combobox(student_row, textvariable=self.student_var, state='normal', justify='right')
+        self.student_combo.pack(side=RIGHT, fill=X, expand=True)
+        self.student_option_map = {}
+        self.student_combo.bind('<KeyRelease>', self._refresh_student_suggestions)
+        self.student_combo.bind('<<ComboboxSelected>>', self._student_suggestion_selected)
+        self.student_combo.bind('<Return>', self._student_suggestion_selected)
+        ttk.Button(student_row, text='بحث...', command=self.pick_student).pack(side=RIGHT, padx=6)
 
         if kind == 'late':
             ttk.Label(form, text='سبب التأخر', anchor=E).pack(fill=X, pady=(9, 3))
@@ -1409,8 +1454,19 @@ class RecordForm:
             self.special_combo.pack(side=RIGHT, fill=X, expand=True)
             self.expulsion_frame = ttk.Frame(form, relief='groove', borderwidth=1)
             ttk.Label(self.expulsion_frame, text='معلومات الطرد من الحصة', font=('Segoe UI', 9, 'bold')).pack(anchor=E, padx=6, pady=4)
-            add_row(self.expulsion_frame, 'teacher_name', 'اسم الأستاذ الذي طرد التلميذ')
-            add_row(self.expulsion_frame, 'subject', 'المادة الدراسية')
+            self.teacher_var = StringVar(value='')
+            self.selected_teacher_id = None
+            self.teacher_option_map = {}
+            teacher_row = ttk.Frame(self.expulsion_frame); teacher_row.pack(fill=X, pady=5)
+            ttk.Label(teacher_row, text='اسم الأستاذ', width=29, anchor=E).pack(side=RIGHT, padx=(4, 8))
+            self.teacher_combo = ttk.Combobox(teacher_row, textvariable=self.teacher_var, state='normal', justify='right')
+            self.teacher_combo.pack(side=RIGHT, fill=X, expand=True)
+            self.teacher_combo.bind('<KeyRelease>', self._refresh_teacher_suggestions)
+            self.teacher_combo.bind('<<ComboboxSelected>>', self._teacher_suggestion_selected)
+            self.subject_var = StringVar(value='')
+            subject_row = ttk.Frame(self.expulsion_frame); subject_row.pack(fill=X, pady=5)
+            ttk.Label(subject_row, text='المادة الدراسية', width=29, anchor=E).pack(side=RIGHT, padx=(4, 8))
+            ttk.Entry(subject_row, textvariable=self.subject_var, state='readonly', justify='right').pack(side=RIGHT, fill=X, expand=True)
             self.special_note = add_row(form, 'special_note', 'ملاحظة (اختياري)')
             self.special_combo.bind('<<ComboboxSelected>>', lambda _e: self._refresh_special_reason())
             self._refresh_special_reason()
@@ -1476,6 +1532,74 @@ class RecordForm:
         else:
             self.expulsion_frame.pack_forget()
 
+    def _refresh_student_suggestions(self, _event=None):
+        if not hasattr(self, 'student_combo'):
+            return
+        query = self.student_var.get().strip()
+        selected_label = getattr(self, '_selected_student_label', '')
+        if self.student is not None and query != selected_label:
+            # Never let a changed search string silently retain a different student.
+            self.student = None
+            self.student_label.set('لم يتم اختيار التلميذ')
+            self._selected_student_label = ''
+        if not query:
+            self.student_combo.configure(values=())
+            self.student_option_map = {}
+            return
+        try:
+            rows = core.search_students(query, 18)
+            options = {}
+            for row in rows:
+                label = f"{student_name(row)} — {row['class_name']} — {row['student_key']}"
+                options[label] = row
+            self.student_option_map = options
+            self.student_combo.configure(values=tuple(options))
+            # Open the native dropdown immediately after typing without changing the query text.
+            if options:
+                try:
+                    self.student_combo.event_generate('<Down>')
+                except Exception:
+                    pass
+        except Exception:
+            self.student_option_map = {}
+
+    def _student_suggestion_selected(self, _event=None):
+        row = self.student_option_map.get(self.student_var.get())
+        if row:
+            self.set_student(row)
+        return 'break'
+
+    def _refresh_teacher_suggestions(self, _event=None):
+        if not hasattr(self, 'teacher_combo'):
+            return
+        query = self.teacher_var.get().strip()
+        self.selected_teacher_id = None
+        self.subject_var.set('')
+        try:
+            rows = core.search_teachers(query, 20) if query else core.list_teachers(active_only=True)
+            options = {}
+            for row in rows:
+                classes = f" — {row['classes']}" if row['classes'] else ''
+                label = f"{row['full_name']} — {row['subject']}{classes}"
+                options[label] = row
+            self.teacher_option_map = options
+            self.teacher_combo.configure(values=tuple(options))
+            if query and options:
+                try:
+                    self.teacher_combo.event_generate('<Down>')
+                except Exception:
+                    pass
+        except Exception:
+            self.teacher_option_map = {}
+
+    def _teacher_suggestion_selected(self, _event=None):
+        row = self.teacher_option_map.get(self.teacher_var.get())
+        if row:
+            self.selected_teacher_id = int(row['id'])
+            self.teacher_var.set(f"{row['full_name']} — {row['subject']}")
+            self.subject_var.set(row['subject'])
+        return 'break'
+
     def pick_student(self):
         with db_connect() as conn:
             count = conn.execute('SELECT COUNT(*) FROM students WHERE active=1').fetchone()[0]
@@ -1486,7 +1610,11 @@ class RecordForm:
 
     def set_student(self, row):
         self.student = row
-        self.student_label.set(f"{student_name(row)} — {row['class_name']} — {row['student_key']}")
+        label = f"{student_name(row)} — {row['class_name']} — {row['student_key']}"
+        self.student_label.set(label)
+        self._selected_student_label = label
+        if hasattr(self, 'student_var'):
+            self.student_var.set(label)
 
     def save(self):
         if self._saving:
@@ -1537,7 +1665,11 @@ class RecordForm:
                     guardian_present=self.check_vars['guardian_present'].get(), other_reason=g('other_reason'))
             elif self.kind == 'special_entry':
                 entry_reason = self.special_options[self.special_reason.get()]
-                row = core.create_special_entry(self.student, uid, entry_reason, g('teacher_name'), g('subject'), g('special_note'))
+                if entry_reason == 'class_expulsion' and not self.selected_teacher_id:
+                    raise ValueError('اختر الأستاذ من القائمة. أضف بياناته أولًا من قسم إدارة الأساتذة إن لم يكن مسجلًا.')
+                row = core.create_special_entry(
+                    self.student, uid, entry_reason, g('teacher_name'), g('subject'), g('special_note'),
+                    teacher_id=getattr(self, 'selected_teacher_id', None))
             else:
                 row = core.create_exit_permit(self.student, uid, g('reason'), g('guardian_name'), g('relationship'), g('national_id'))
         except USER_ERRORS as exc:
@@ -2014,9 +2146,9 @@ class SchoolPassApp:
 
         sidebar_scroll = ScrollableFrame(shell, inner_style='Sidebar.TFrame',
                                          canvas_background=UI_PALETTE.get('sidebar', '#142B49'),
-                                         width=264)
+                                         width=280)
         sidebar_scroll.pack(side=RIGHT, fill=Y)
-        sidebar_scroll.configure(width=264)
+        sidebar_scroll.configure(width=280)
         self.sidebar_scroll = sidebar_scroll
         sidebar = sidebar_scroll.inner
         brand = ttk.Frame(sidebar, style='Sidebar.TFrame')
@@ -2025,20 +2157,32 @@ class SchoolPassApp:
         ttk.Label(brand, text='نظام المتابعة المدرسية', style='SidebarSub.TLabel').pack(anchor=E, pady=(5, 0))
         ttk.Frame(sidebar, height=1, style='Sidebar.TFrame').pack(fill=X, padx=16, pady=(0, 12))
 
-        def nav(label, command):
-            ttk.Button(sidebar, text=label, command=command, style='Nav.TButton').pack(fill=X, padx=10, pady=2)
+        def nav(label, command, style='Nav.TButton'):
+            button = ttk.Button(sidebar, text=label, command=command, style=style)
+            button.pack(fill=X, padx=10, pady=3)
+            return button
 
         def nav_section(label):
-            ttk.Label(sidebar, text=label, style='SidebarSub.TLabel').pack(anchor=E, padx=18, pady=(13, 5))
+            ttk.Label(sidebar, text=label, style='SidebarSub.TLabel').pack(anchor=E, padx=18, pady=(15, 6))
 
         nav('⌂   لوحة التحكم الرئيسية', self.refresh_all)
         nav_section('إجراءات الدخول والخروج')
-        nav('＋   رخصة الدخول — تأخر', lambda: RecordForm(self, 'late'))
-        nav('↩   رخصة الدخول — عودة بعد الغياب', lambda: RecordForm(self, 'absence_return'))
-        nav('⚑   رخصة الدخول — طرد / إدارة', lambda: RecordForm(self, 'special_entry'))
-        nav('⇥   رخصة خروج استثنائي', lambda: RecordForm(self, 'exit_permit'))
+        entry_group = ttk.Frame(sidebar, style='Sidebar.TFrame')
+        entry_toggle = nav('＋   رخصة الدخول  ▾', lambda: entry_group.pack(fill=X, padx=13, pady=(0, 4))
+                           if not entry_group.winfo_ismapped() else entry_group.pack_forget())
+        entry_items = (
+            ('＋  تأخر عن الدخول', 'late'),
+            ('↩  عودة بعد الغياب', 'absence_return'),
+            ('⚑  طرد من الحصة / حالة خاصة', 'special_entry'),
+        )
+        for label, kind in entry_items:
+            ttk.Button(entry_group, text=label, command=lambda k=kind: RecordForm(self, k),
+                       style='Nav.TButton').pack(fill=X, padx=(8, 2), pady=2)
+        entry_toggle.bind('<Enter>', lambda _event: entry_group.pack(fill=X, padx=13, pady=(0, 4)))
+        nav('⇥   رخصة خروج استثنائي', lambda: RecordForm(self, 'exit_permit'), 'Gold.TButton')
         nav_section('المتابعة والتقارير')
         nav('▤   إدارة التلاميذ', self.manage_students)
+        nav('▥   سجل التلاميذ المطرودين', self.open_expulsion_report)
         nav('▥   سجل العمليات والتصفية', self.open_logs)
         nav('▦   الإحصائيات والرسوم البيانية', self.show_stats)
         nav('▧   التقارير الشهرية', self.monthly_report)
@@ -2048,6 +2192,7 @@ class SchoolPassApp:
             ttk.Label(sidebar, text='إدارة النظام', style='SidebarSub.TLabel').pack(anchor=E, padx=18, pady=(0, 4))
             nav('◷   التقرير اليومي التفصيلي A4', self.daily_summary)
             nav('♙   المستخدمون والصلاحيات', self.manage_users)
+            nav('♟   إدارة الأساتذة والمواد', self.manage_teachers)
             nav('▣   النسخ الاحتياطي والاستعادة', self.backup_db)
             nav('⚙   إعدادات المؤسسة والطباعة', self.settings_dialog)
             nav('≡   سجل التدقيق', self.audit_view)
@@ -2139,7 +2284,7 @@ class SchoolPassApp:
 
         # KPI cards in a responsive 3x2 grid with an icon, a clear metric and context.
         cards = ttk.Frame(content)
-        cards.pack(fill=X, padx=18, pady=(2, 8))
+        cards.pack(fill=X, padx=20, pady=(6, 14))
         self.card_values = {}
         card_specs = [
             ('students', 'إجمالي التلاميذ النشطين', '♙', 'قاعدة بيانات المؤسسة'),
@@ -2154,9 +2299,9 @@ class SchoolPassApp:
         for col in range(3):
             cards.grid_columnconfigure(col, weight=1, uniform='kpi')
         for idx, (key, label, icon, hint) in enumerate(card_specs):
-            card = ttk.Frame(cards, style='MetricCard.TFrame', padding=(17, 15))
+            card = ttk.Frame(cards, style='MetricCard.TFrame', padding=(15, 12))
             self.kpi_cards.append(card)
-            card.grid(row=idx // 3, column=2 - (idx % 3), sticky='nsew', padx=6, pady=5)
+            card.grid(row=idx // 3, column=2 - (idx % 3), sticky='nsew', padx=7, pady=7)
             ttk.Frame(card, height=3, style='KPIAccent.TFrame').pack(fill=X, pady=(0, 10))
             card_head = ttk.Frame(card, style='MetricCard.TFrame')
             card_head.pack(fill=X)
@@ -2178,7 +2323,7 @@ class SchoolPassApp:
 
         # Chart and alerts share a row to keep the dashboard informative yet compact.
         overview = ttk.Frame(content)
-        overview.pack(fill=X, padx=22, pady=(1, 8))
+        overview.pack(fill=X, padx=22, pady=(0, 14))
         chart_panel = ttk.Frame(overview, style='Surface.TFrame', padding=(16, 14))
         self.chart_panel = chart_panel
         chart_panel.pack(side=LEFT, fill=BOTH, expand=True, padx=(0, 5))
@@ -2228,7 +2373,7 @@ class SchoolPassApp:
         add_dashboard_action(action_row, 'التقرير الشهري', 'شهري', self.monthly_report, 'TButton', LEFT)
 
         panel = ttk.Frame(content, style='Surface.TFrame', padding=(16, 14))
-        panel.pack(fill=BOTH, expand=True, padx=22, pady=(0, 12))
+        panel.pack(fill=BOTH, expand=True, padx=22, pady=(0, 16))
         title_row = ttk.Frame(panel, style='Surface.TFrame')
         title_row.pack(fill=X, pady=(0, 7))
         ttk.Label(title_row, text='أحدث العمليات المسجلة', style='Section.TLabel').pack(side=RIGHT)
@@ -2786,6 +2931,148 @@ class SchoolPassApp:
             self._return_exit(rid)
 
     # ------------------------------------------------------------ students
+    def manage_teachers(self):
+        """Administer the reusable teacher/subject directory and preview Excel imports safely."""
+        if self.current_user['role'] != 'admin':
+            messagebox.showwarning('صلاحيات غير كافية', 'إدارة بيانات الأساتذة متاحة لمدير النظام فقط.', parent=self.root)
+            return
+        win = Toplevel(self.root)
+        configure_window(win, 'إدارة الأساتذة والمواد — SchoolPass', '980x650')
+        win.minsize(780, 540)
+        win.transient(self.root)
+        ttk.Label(win, text='إدارة الأساتذة والمواد الدراسية', style='Title.TLabel').pack(pady=(12, 6))
+        ttk.Label(win, text='أضف الأستاذ يدويًا أو استورد قائمة Excel. لا يتم استبدال سجل موجود عند تكرار الاسم والمادة.',
+                  style='Hint.TLabel').pack(anchor=E, padx=18, pady=(0, 8))
+
+        form = ttk.Frame(win, style='Surface.TFrame', padding=12)
+        form.pack(fill=X, padx=14, pady=6)
+        name_var, subject_var, classes_var = StringVar(), StringVar(), StringVar()
+        selected = {'id': None, 'active': True}
+        def field(parent, title, variable, width=32):
+            row = ttk.Frame(parent); row.pack(fill=X, pady=4)
+            ttk.Label(row, text=title, width=18, anchor=E).pack(side=RIGHT, padx=(4, 8))
+            ttk.Entry(row, textvariable=variable, justify='right', width=width).pack(side=RIGHT, fill=X, expand=True)
+        field(form, 'الاسم الكامل', name_var)
+        field(form, 'المادة الدراسية', subject_var)
+        field(form, 'الأقسام (اختياري)', classes_var)
+
+        table_wrap = ttk.Frame(win)
+        table_wrap.pack(fill=BOTH, expand=True, padx=14, pady=6)
+        columns = ('name', 'subject', 'classes', 'status')
+        tree = ttk.Treeview(table_wrap, columns=columns, show='headings', height=12)
+        for col, title, width in (
+            ('name', 'الأستاذ', 260), ('subject', 'المادة', 190),
+            ('classes', 'الأقسام المسندة', 280), ('status', 'الحالة', 90),
+        ):
+            tree.heading(col, text=title)
+            tree.column(col, width=width, anchor=E, stretch=True)
+        yscroll = ttk.Scrollbar(table_wrap, orient='vertical', command=tree.yview)
+        tree.configure(yscrollcommand=yscroll.set)
+        tree.pack(side=LEFT, fill=BOTH, expand=True); yscroll.pack(side=RIGHT, fill=Y)
+
+        def refresh():
+            for iid in tree.get_children():
+                tree.delete(iid)
+            for row in core.list_teachers(active_only=False):
+                tree.insert('', END, iid=str(row['id']),
+                            values=(row['full_name'], row['subject'], row['classes'] or '—',
+                                    'نشط' if row['active'] else 'غير نشط'))
+        def clear_form():
+            selected.update({'id': None, 'active': True})
+            name_var.set(''); subject_var.set(''); classes_var.set('')
+        def choose(_event=None):
+            selection = tree.selection()
+            if not selection:
+                return
+            row = core.get_teacher(int(selection[0]))
+            if row:
+                selected.update({'id': int(row['id']), 'active': bool(row['active'])})
+                name_var.set(row['full_name']); subject_var.set(row['subject']); classes_var.set(row['classes'])
+        tree.bind('<<TreeviewSelect>>', choose)
+
+        def add():
+            try:
+                core.create_teacher_as(self.current_user['id'], name_var.get(), subject_var.get(), classes_var.get())
+                messagebox.showinfo('تم الحفظ', 'تمت إضافة الأستاذ إلى القائمة.', parent=win)
+                clear_form(); refresh()
+            except USER_ERRORS as exc:
+                show_error(win, 'تعذر إضافة الأستاذ', exc)
+        def update():
+            if not selected['id']:
+                messagebox.showwarning('تحديد أستاذ', 'اختر أستاذًا من الجدول أولًا.', parent=win); return
+            try:
+                core.update_teacher_as(self.current_user['id'], selected['id'],
+                                       name_var.get(), subject_var.get(), classes_var.get())
+                messagebox.showinfo('تم التحديث', 'تم تحديث بيانات الأستاذ. تبقى بيانات الرخص السابقة محفوظة كما صدرت.', parent=win)
+                clear_form(); refresh()
+            except USER_ERRORS as exc:
+                show_error(win, 'تعذر تحديث الأستاذ', exc)
+        def toggle_active():
+            if not selected['id']:
+                messagebox.showwarning('تحديد أستاذ', 'اختر أستاذًا من الجدول أولًا.', parent=win); return
+            new_active = not selected['active']
+            try:
+                core.set_teacher_active_as(self.current_user['id'], selected['id'], new_active)
+                messagebox.showinfo('حالة الأستاذ', 'تم تفعيل الأستاذ.' if new_active else 'تم إيقاف الأستاذ؛ ستبقى سجلاته السابقة محفوظة.', parent=win)
+                clear_form(); refresh()
+            except USER_ERRORS as exc:
+                show_error(win, 'تعذر تغيير حالة الأستاذ', exc)
+
+        def import_excel():
+            path = filedialog.askopenfilename(parent=win, title='اختيار ملف قائمة الأساتذة',
+                filetypes=[('ملفات Excel', '*.xlsx *.xlsm'), ('ملفات CSV', '*.csv'), ('جميع الملفات', '*.*')])
+            if not path:
+                return
+            try:
+                preview = core.preview_teacher_import(path)
+            except (USER_ERRORS + (ImportError,)) as exc:
+                show_error(win, 'تعذر قراءة ملف الأساتذة', exc); return
+            preview_win = Toplevel(win)
+            configure_window(preview_win, 'مراجعة استيراد الأساتذة', '900x540')
+            ttk.Label(preview_win, text='معاينة قبل الاستيراد', style='Title.TLabel').pack(pady=(10, 4))
+            counts = preview['counts']
+            ttk.Label(preview_win,
+                text=f"الأسطر: {preview['total']}  |  جاهز: {counts['ready']}  |  موجود مسبقًا: {counts['existing']}  |  مكرر: {counts['duplicate_file']}  |  غير صالح: {counts['invalid']}",
+                style='Badge.TLabel').pack(anchor=E, padx=12, pady=5)
+            preview_tree = ttk.Treeview(preview_win, columns=('row','name','subject','classes','status'),
+                                        show='headings', height=14)
+            for col, title, width in (('row','السطر',55),('name','الأستاذ',205),('subject','المادة',140),
+                                      ('classes','الأقسام',170),('status','نتيجة المراجعة',250)):
+                preview_tree.heading(col,text=title); preview_tree.column(col,width=width,anchor=E)
+            preview_tree.pack(fill=BOTH,expand=True,padx=12,pady=6)
+            for item in preview['rows']:
+                preview_tree.insert('',END,values=(item['row'],item['full_name'],item['subject'],
+                                                   item['classes'] or '—',item['message']))
+            def confirm_import():
+                if not counts['ready']:
+                    messagebox.showinfo('لا توجد إضافات', 'لم يتم العثور على صفوف جديدة صالحة للإضافة.', parent=preview_win)
+                    return
+                if not messagebox.askyesno('تأكيد الاستيراد',
+                    f"سيتم إضافة {counts['ready']} أستاذًا جديدًا فقط. لن تُعدّل السجلات الموجودة ولن تُحذف أي بيانات. هل تتابع؟",
+                    parent=preview_win):
+                    return
+                try:
+                    result = core.import_teachers_as(path, self.current_user['id'])
+                    messagebox.showinfo('اكتمل الاستيراد',
+                        f"تمت إضافة {result['added']} أستاذًا. راجع الأسطر المكررة أو غير الصالحة في المعاينة.",
+                        parent=preview_win)
+                    preview_win.destroy(); refresh()
+                except (USER_ERRORS + (ImportError,)) as exc:
+                    show_error(preview_win, 'تعذر استيراد الأساتذة', exc)
+            buttons = ttk.Frame(preview_win); buttons.pack(fill=X,padx=12,pady=8)
+            ttk.Button(buttons,text='تأكيد إضافة الصفوف الجديدة',command=confirm_import,
+                       style='Accent.TButton').pack(side=RIGHT,padx=4)
+            ttk.Button(buttons,text='إلغاء',command=preview_win.destroy).pack(side=LEFT,padx=4)
+
+        buttons = ttk.Frame(win); buttons.pack(fill=X,padx=14,pady=(2,12))
+        ttk.Button(buttons,text='إضافة أستاذ',command=add,style='Accent.TButton').pack(side=RIGHT,padx=4)
+        ttk.Button(buttons,text='تحديث البيانات المحددة',command=update).pack(side=RIGHT,padx=4)
+        ttk.Button(buttons,text='تفعيل / إيقاف',command=toggle_active).pack(side=RIGHT,padx=4)
+        ttk.Button(buttons,text='استيراد من Excel',command=import_excel,style='Gold.TButton').pack(side=RIGHT,padx=4)
+        ttk.Button(buttons,text='تفريغ الحقول',command=clear_form).pack(side=LEFT,padx=4)
+        ttk.Button(buttons,text='إغلاق',command=win.destroy).pack(side=LEFT,padx=4)
+        refresh()
+
     def manage_students(self):
         if self.current_user['role'] != 'admin':
             messagebox.showwarning('صلاحيات محدودة', 'إدارة قائمة التلاميذ واستيرادها متاحة لمدير النظام فقط.', parent=self.root)
@@ -3134,11 +3421,11 @@ class SchoolPassApp:
         start_var = StringVar(value=today_value.replace(day=1).isoformat())
         end_var = StringVar(value=today_text)
         win = Toplevel(self.root)
-        win.title('إحصائيات الطرد من الحصة حسب الأستاذ')
+        win.title('سجل التلاميذ المطرودين — الطرد من الحصة')
         win.geometry('1180x690')
         win.minsize(900, 560)
         win.transient(self.root)
-        ttk.Label(win, text='تقرير حالات الطرد من الحصة حسب الأستاذ', style='Title.TLabel').pack(pady=(14, 6))
+        ttk.Label(win, text='سجل التلاميذ المطرودين حسب الأستاذ', style='Title.TLabel').pack(pady=(14, 6))
 
         filters = ttk.Frame(win)
         filters.pack(fill=X, padx=16, pady=8)
@@ -3164,6 +3451,7 @@ class SchoolPassApp:
                 name = str(details.get('expelling_teacher') or '').strip()
                 if name:
                     teacher_names.add(name)
+        teacher_names.update(str(row['full_name']) for row in core.list_teachers(active_only=False))
         teacher_values = ['الكل'] + sorted(teacher_names, key=str.casefold)
         teacher_var = ComboStringVar(teacher_values, value='الكل')
         ttk.Label(filters, text='الأستاذ:').pack(side=RIGHT, padx=(12, 3))

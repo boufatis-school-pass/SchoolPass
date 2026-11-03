@@ -321,13 +321,25 @@ class TestGuiSmoke(unittest.TestCase):
         COMMANDS.clear(); self.app.SetupDialog(root); self.press_all("setup")     # empty fields -> error message, no crash
         self.assertFalse(core.has_admin())
 
+    def test_student_autocomplete_clears_selection_when_query_changes(self):
+        a = self.make_app(self.sup)
+        form = self.app.RecordForm(a, "late")
+        form.set_student(self.s1)
+        self.assertIsNotNone(form.student)
+        form.student_var.set("اسم غير مطابق")
+        form._refresh_student_suggestions()
+        self.assertIsNone(form.student)
+        self.assertEqual(form.student_label.get(), self.app.rtl_display("لم يتم اختيار التلميذ"))
+
     def test_special_entry_form_creates_expulsion_with_teacher_and_subject(self):
         a = self.make_app(self.sup)
         form = self.app.RecordForm(a, "special_entry")
         form.student = self.s1
         form.special_reason.set("الطرد من الحصة")
-        form.vars["teacher_name"].set("الأستاذ التجريبي")
-        form.vars["subject"].set("رياضيات")
+        teacher = core.create_teacher_as(self.admin, "الأستاذ التجريبي", "رياضيات")
+        form.teacher_var.set("الأستاذ التجريبي — رياضيات")
+        form.subject_var.set("رياضيات")
+        form.selected_teacher_id = int(teacher["id"])
         with mock.patch.object(a, "show_record") as show_record:
             form.save()
         show_record.assert_called_once()

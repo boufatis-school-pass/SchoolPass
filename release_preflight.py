@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-EXPECTED = "4.6.1"
+EXPECTED = "4.7.0"
 
 
 def main() -> int:
@@ -34,8 +34,8 @@ def main() -> int:
     if "pyinstaller==6.22.3" not in (ROOT / "requirements_dev.txt").read_text(encoding="utf-8"):
         errors.append("requirements_dev.txt must pin the reviewed PyInstaller 6.22.3 release")
     schema = re.search(r"^SCHEMA_VERSION\s*=\s*[\"\']?(\d+)[\"\']?", core, re.M)
-    if not schema or schema.group(1) != "6":
-        errors.append("The 4.6.1 corrective release must preserve database schema version 6 for existing SchoolPass data compatibility")
+    if not schema or schema.group(1) != "7":
+        errors.append("SchoolPass 4.7.0 must use schema version 7 with an additive teachers table migration")
     if not setup_version:
         errors.append("MyAppVersion is missing from SchoolPass_Setup.iss")
     elif setup_version.group(1) != EXPECTED:
@@ -105,9 +105,14 @@ def main() -> int:
         ("def show_shortcuts(self):", "keyboard shortcuts help window"),
         ("self.root.bind_all('<F1>'", "F1 keyboard help binding"),
         ("self.shortcuts_button", "visible keyboard shortcut access"),
+        ("def manage_teachers(self):", "teacher directory management"),
+        ("def _refresh_student_suggestions(self, _event=None):", "live student autocomplete"),
+        ("def _refresh_teacher_suggestions(self, _event=None):", "live teacher autocomplete"),
+        ("سجل التلاميذ المطرودين", "dedicated class-expulsion log navigation"),
+        ("اختيار الحساب", "account selector on login"),
     ):
         if marker not in app_source:
-            errors.append(f"SchoolPass 4.6.1 visual design marker missing: {description}")
+            errors.append(f"SchoolPass 4.7.0 visual design marker missing: {description}")
     for marker, description in (
         ("def _schoolpass_map_values", "dynamic Arabic combobox values"),
         ("def _schoolpass_save_logical_values", "logical Treeview value preservation"),
@@ -117,6 +122,21 @@ def main() -> int:
     ):
         if marker not in app_source:
             errors.append(f"Arabic UI regression guard missing: {description}")
+
+    if "CREATE TABLE IF NOT EXISTS teachers" not in core:
+        errors.append("Teacher directory table migration is missing")
+    if "expelling_teacher_id" not in core:
+        errors.append("Expulsion records do not preserve a stable teacher reference")
+    if "def preview_teacher_import(" not in core or "def import_teachers_as(" not in core:
+        errors.append("Safe teacher Excel preview/import functions are missing")
+    if "def search_students(" not in core:
+        errors.append("Student autocomplete query is missing")
+    if (
+        "def draw_student_name(value, baseline, size):" not in core
+        or "c.setFont(font, 17.0)" not in core
+        or "c.drawCentredString(W / 2" not in core
+    ):
+        errors.append("Centered bold student name and prominent entry time markers are missing")
 
     if "SetupIconFile=app.ico" not in setup:
         errors.append("Inno Setup wizard icon is not configured")

@@ -1,5 +1,5 @@
-SchoolPass 4.6.1 — SOURCE RELEASE
-Version: 4.6.1
+SchoolPass 4.7.0 — SOURCE RELEASE
+Version: 4.7.0
 Database schema: 6 (unchanged)
 Runtime data directory: %LOCALAPPDATA%\SchoolPass
 Target: Windows 10/11 x64
