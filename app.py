@@ -346,7 +346,7 @@ def make_style(root: Tk, primary: str | None = None, secondary: str | None = Non
     style.configure('CardTitle.TLabel', background=surface, foreground=muted,
                     font=('Segoe UI', 9, 'bold'), anchor='e')
     style.configure('CardValue.TLabel', background=surface, foreground=primary_color,
-                    font=('Segoe UI', 25, 'bold'), anchor='e')
+                    font=('Segoe UI', 21, 'bold'), anchor='e')
     style.configure('Badge.TLabel', background=palette['primary_soft'], foreground=primary_color,
                     padding=(13, 8), font=('Segoe UI', 9, 'bold'))
     style.configure('Status.TLabel', background=palette['surface_alt'], foreground=muted,
@@ -2277,7 +2277,7 @@ class SchoolPassApp:
 
         # KPI cards in a responsive 3x2 grid with an icon, a clear metric and context.
         cards = ttk.Frame(content)
-        cards.pack(fill=X, padx=18, pady=(2, 8))
+        cards.pack(fill=X, padx=20, pady=(6, 14))
         self.card_values = {}
         card_specs = [
             ('students', 'إجمالي التلاميذ النشطين', '♙', 'قاعدة بيانات المؤسسة'),
@@ -2292,9 +2292,9 @@ class SchoolPassApp:
         for col in range(3):
             cards.grid_columnconfigure(col, weight=1, uniform='kpi')
         for idx, (key, label, icon, hint) in enumerate(card_specs):
-            card = ttk.Frame(cards, style='MetricCard.TFrame', padding=(13, 10))
+            card = ttk.Frame(cards, style='MetricCard.TFrame', padding=(15, 12))
             self.kpi_cards.append(card)
-            card.grid(row=idx // 3, column=2 - (idx % 3), sticky='nsew', padx=6, pady=5)
+            card.grid(row=idx // 3, column=2 - (idx % 3), sticky='nsew', padx=7, pady=7)
             ttk.Frame(card, height=3, style='KPIAccent.TFrame').pack(fill=X, pady=(0, 10))
             card_head = ttk.Frame(card, style='MetricCard.TFrame')
             card_head.pack(fill=X)
@@ -2316,7 +2316,7 @@ class SchoolPassApp:
 
         # Chart and alerts share a row to keep the dashboard informative yet compact.
         overview = ttk.Frame(content)
-        overview.pack(fill=X, padx=22, pady=(1, 8))
+        overview.pack(fill=X, padx=22, pady=(0, 14))
         chart_panel = ttk.Frame(overview, style='Surface.TFrame', padding=(16, 14))
         self.chart_panel = chart_panel
         chart_panel.pack(side=LEFT, fill=BOTH, expand=True, padx=(0, 5))
@@ -2366,7 +2366,7 @@ class SchoolPassApp:
         add_dashboard_action(action_row, 'التقرير الشهري', 'شهري', self.monthly_report, 'TButton', LEFT)
 
         panel = ttk.Frame(content, style='Surface.TFrame', padding=(16, 14))
-        panel.pack(fill=BOTH, expand=True, padx=22, pady=(0, 12))
+        panel.pack(fill=BOTH, expand=True, padx=22, pady=(0, 16))
         title_row = ttk.Frame(panel, style='Surface.TFrame')
         title_row.pack(fill=X, pady=(0, 7))
         ttk.Label(title_row, text='أحدث العمليات المسجلة', style='Section.TLabel').pack(side=RIGHT)
