@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-import tempfile
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -108,6 +108,25 @@ class TestV47Features:
     def test_student_autocomplete_matches_partial_arabic_name_and_class(self):
         assert [r["student_key"] for r in core.search_students("أحمد")] == ["S-470-01"]
         assert [r["student_key"] for r in core.search_students("أولى علوم")] == ["S-470-01"]
+
+    def test_v46_database_upgrade_adds_teacher_table_without_losing_school_data(self, tmp_path):
+        record = core.create_late_slip(self.student, self.supervisor, "سجل قبل التحديث")
+        legacy = tmp_path / "schoolpass_4_6_1.sqlite3"
+        core._copy_db(core.DB_PATH, legacy)
+        with sqlite3.connect(legacy) as conn:
+            conn.execute("DROP TABLE IF EXISTS teachers")
+            conn.execute("DELETE FROM settings WHERE setting_key='schema_version'")
+            conn.execute(
+                "INSERT INTO settings(setting_key,setting_value) VALUES('schema_version','6')"
+            )
+            conn.commit()
+
+        core.restore_database(legacy, self.admin)
+
+        assert core.setting("schema_version") == "7"
+        assert core.get_student("S-470-01")["student_key"] == "S-470-01"
+        assert core.record_by_id(record["id"])["reason"] == "سجل قبل التحديث"
+        assert core.list_teachers(active_only=False) == []
 
     def test_login_selector_returns_active_accounts_without_credentials(self):
         accounts = core.list_active_accounts()
