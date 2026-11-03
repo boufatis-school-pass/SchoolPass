@@ -2684,7 +2684,7 @@ def _draw_entry_page(c, row, details: dict, reprint: bool, font: str, school: st
     c.setFont(font, 6.8)
     c.drawRightString(right - 2.2 * mm, student_top - 3.8 * mm, _arabic_visual("اسم التلميذ"))
     c.setFillColorRGB(*ink)
-    name_size = 13.4
+    name_size = 14.4
     name_text = str(row["student_name"] or "—")
     while name_size > 10.8 and _text_width(name_text, font, name_size) > usable - 8.0 * mm:
         name_size -= 0.3
@@ -2719,7 +2719,7 @@ def _draw_entry_page(c, row, details: dict, reprint: bool, font: str, school: st
     c.setFont(font, 7.0)
     c.drawCentredString(right_x + tile_w / 2, tile_y - 3.3 * mm, _arabic_visual("وقت الدخول"))
     c.setFillColorRGB(*green)
-    c.setFont(font, 15.2)
+    c.setFont(font, 17.0)
     time_visual = _arabic_visual(issue_time)
     c.drawCentredString(right_x + tile_w / 2 - 0.10 * mm, tile_y - 9.2 * mm, time_visual)
     c.drawCentredString(right_x + tile_w / 2 + 0.10 * mm, tile_y - 9.2 * mm, time_visual)
@@ -2964,7 +2964,12 @@ def _draw_page(c, row, details: dict, copy_type: str | None, reprint: bool, font
                         0.7 * MM, stroke=0, fill=1)
         c.setFillColorRGB(0.72, 0.05, 0.08) if red else c.setFillColorRGB(0.055, 0.16, 0.27)
         c.setFont(font, size)
-        c.drawRightString(x_right - 1.4 * MM, y, _arabic_visual(text))
+        if text.startswith("التلميذ: "):
+            # Slight overprint increases visual weight while preserving the existing A6 layout.
+            c.drawRightString(x_right - 1.30 * MM, y, _arabic_visual(text))
+            c.drawRightString(x_right - 1.10 * MM, y, _arabic_visual(text))
+        else:
+            c.drawRightString(x_right - 1.4 * MM, y, _arabic_visual(text))
         y -= gap * MM
     c.setFillColorRGB(0, 0, 0)
 
