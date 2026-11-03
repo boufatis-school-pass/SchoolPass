@@ -3108,6 +3108,7 @@ def purge_old_prints(days: int = 30) -> int:
 # ----------------------------------------------------------------------------- backup / restore
 _REQUIRED_COLUMNS = {
     "users": {"id", "username", "display_name", "role", "salt", "password_hash", "active", "failed_count", "lock_until", "created_at"},
+    "teachers": {"id", "full_name", "subject", "classes", "active", "created_at", "updated_at", "created_by", "updated_by"},
     "students": {"id", "student_key", "last_name", "first_name", "gender", "year", "branch", "section", "class_name", "active", "imported_at"},
     "records": {"id", "record_no", "qr_token", "kind", "student_key", "student_name", "class_name", "created_at", "issued_at", "user_id", "reason", "status",
                 "details_json", "related_record_id", "cancelled_reason", "cancelled_at", "cancelled_by", "returned_at", "returned_by", "printed_count"},
