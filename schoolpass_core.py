@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 APP_NAME = "SchoolPass"
-APP_VERSION = "4.6.0"
+APP_VERSION = "4.6.1"
 SCHOOL_NAME = "ثانوية المجاهد بسجراري لخضر بوفاطيس"
 MINISTRY_NAME = "الجمهورية الجزائرية الديمقراطية الشعبية — وزارة التربية الوطنية"
 SERVER_PORT = 8765
@@ -1305,7 +1305,7 @@ def create_statistics_report_pdf(dest_path, user_id) -> Path:
         report.drawRightString(page_w - margin, page_h - 15 * mm, visual(setting('school_name', SCHOOL_NAME)))
         report.setFillColor(colors.HexColor('#1B655C'))
         report.setFont(font, 11)
-        report.drawRightString(page_w - margin, page_h - 22 * mm, visual('التقرير الإحصائي الشامل — SchoolPass 4.6.0'))
+        report.drawRightString(page_w - margin, page_h - 22 * mm, visual('التقرير الإحصائي الشامل — SchoolPass 4.6.1'))
         report.setFillColor(colors.HexColor('#647875'))
         report.setFont(font, 8)
         report.drawRightString(page_w - margin, page_h - 28 * mm,
