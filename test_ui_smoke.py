@@ -326,8 +326,10 @@ class TestGuiSmoke(unittest.TestCase):
         form = self.app.RecordForm(a, "special_entry")
         form.student = self.s1
         form.special_reason.set("الطرد من الحصة")
-        form.vars["teacher_name"].set("الأستاذ التجريبي")
-        form.vars["subject"].set("رياضيات")
+        teacher = core.create_teacher_as(self.admin, "الأستاذ التجريبي", "رياضيات")
+        form.teacher_var.set("الأستاذ التجريبي — رياضيات")
+        form.subject_var.set("رياضيات")
+        form.selected_teacher_id = int(teacher["id"])
         with mock.patch.object(a, "show_record") as show_record:
             form.save()
         show_record.assert_called_once()
