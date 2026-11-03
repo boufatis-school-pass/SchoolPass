@@ -368,8 +368,11 @@ class TestGuiSmoke(unittest.TestCase):
         form.vars["absence_start"].set((__import__("datetime").date.today() - __import__("datetime").timedelta(days=4)).isoformat())
         form.vars["return_date"].set(core.date_today())
         form._update_absence_rule()
-        self.assertEqual(tuple(form.method_combo.kw["values"]), (
-            "حضور ولي الأمر شخصيًا", "شهادة طبية + حضور ولي الأمر شخصيًا"))
+        expected_display_values = tuple(
+            self.app.rtl_display(value)
+            for value in ("حضور ولي الأمر شخصيًا", "شهادة طبية + حضور ولي الأمر شخصيًا")
+        )
+        self.assertEqual(tuple(form.method_combo.kw["values"]), expected_display_values)
         form.proof_method.set("شهادة طبية + حضور ولي الأمر شخصيًا")
         form._refresh_absence_method()
         self.assertTrue(form.medical_frame.kw.get("_packed", True))

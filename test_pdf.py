@@ -84,8 +84,22 @@ class TestPdf(unittest.TestCase):
         with mock.patch.object(core, 'protect_sensitive_text', lambda value: 'DPAPI1:' + value[::-1]):
             permit = core.create_exit_permit(self.student, self.sup, 'موعد طبي', 'ولي الأمر', 'الأب', NID)
         core.create_special_entry(self.student, self.sup, 'class_expulsion', 'الأستاذ أحمد', 'رياضيات')
+        # The history report is keyed by the persisted student database ID.
+        # Record helpers accept an in-memory student mapping, so create the matching
+        # database row explicitly for this report-specific test.
+        with core.db_connect() as conn:
+            conn.execute(
+                "INSERT INTO students(student_key,last_name,first_name,class_name,imported_at) "
+                "VALUES(?,?,?,?,?)",
+                (self.student["student_key"], self.student["last_name"],
+                 self.student["first_name"], self.student["class_name"], core.now_iso()),
+            )
+            student_id = conn.execute(
+                "SELECT id FROM students WHERE student_key=?",
+                (self.student["student_key"],),
+            ).fetchone()["id"]
         target = Path(tempfile.mkdtemp(dir=TEST_ROOT)) / 'student-history.pdf'
-        out = core.create_student_history_report_pdf(target, self.student['id'], self.admin)
+        out = core.create_student_history_report_pdf(target, student_id, self.admin)
         self.assertTrue(out.exists())
         self.assertEqual(out.read_bytes()[:4], b'%PDF')
         sizes = self.pages(out)
