@@ -9,7 +9,7 @@ CORE = (ROOT / "schoolpass_core.py").read_text(encoding="utf-8")
 
 
 def test_release_version_is_475():
-    assert re.search(r'^APP_VERSION\s*=\s*["\']4\.7\.2["\']', CORE, re.M)
+    assert re.search(r'^APP_VERSION\s*=\s*["\']4\.7\.5["\']', CORE, re.M)
     assert (ROOT / "VERSION.txt").read_text(encoding="ascii").strip() == "4.7.5"
     setup = (ROOT / "SchoolPass_Setup.iss").read_text(encoding="utf-8-sig")
     assert '#define MyAppVersion "4.7.5"' in setup
@@ -61,7 +61,7 @@ def test_sidebar_groups_are_large_colored_and_foldable_with_saved_preferences():
         "NavGroupOps.TButton", "NavGroupData.TButton", "NavGroupReports.TButton",
         "NavGroupAdmin.TButton", "font=('Segoe UI', 13, 'bold')",
         "sidebar_open_groups", "def sidebar_preferences(self):",
-        "self._sidebar_group_setters", "set_open(key in selected)",
+        "self._sidebar_group_setters", "_saved_groups", "if key in _saved_groups:",
         "تخصيص القائمة الجانبية",
     ):
         assert marker in APP
