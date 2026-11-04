@@ -43,11 +43,11 @@ def test_keyboard_help_lists_only_bound_shortcuts_and_has_f1_entry_point():
 
 def test_database_schema_and_version_metadata_are_consistent():
     core_source = (ROOT / "schoolpass_core.py").read_text(encoding="utf-8")
-    assert 'APP_VERSION = "4.7.5"' in core_source
-    assert 'SCHEMA_VERSION = "7"' in core_source
-    assert (ROOT / "VERSION.txt").read_text(encoding="ascii").strip() == "4.7.5"
+    assert 'APP_VERSION = "4.7.6"' in core_source
+    assert 'SCHEMA_VERSION = "8"' in core_source
+    assert (ROOT / "VERSION.txt").read_text(encoding="ascii").strip() == "4.7.6"
     setup = (ROOT / "SchoolPass_Setup.iss").read_text(encoding="utf-8-sig")
-    assert '#define MyAppVersion "4.7.5"' in setup
+    assert '#define MyAppVersion "4.7.6"' in setup
 
 
 def _ascii_for_pdf_tests(value):
