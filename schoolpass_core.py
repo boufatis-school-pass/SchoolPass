@@ -3012,22 +3012,18 @@ def _academic_year(value: datetime | None = None) -> str:
 
 def _draw_admin_signature_box(c, x: float, y: float, font: str, border_color: tuple[float, float, float],
                               line_color: tuple[float, float, float], *,
-                              width: float = 43.0 * MM, height: float = 29.0 * MM) -> None:
-    """Draw a generous blank area for a handwritten administration signature.
-
-    QR verification is kept elsewhere on the slip. This box is intentionally not
-    labelled as a stamp, digital signature, or cryptographic authenticity mark.
-    """
+                              width: float = 48.0 * MM, height: float = 32.0 * MM) -> None:
+    """Draw a larger blank area reserved for the school's physical stamp and signature."""
     c.saveState()
     c.setStrokeColorRGB(*border_color)
-    c.setLineWidth(0.7)
-    c.roundRect(x, y, width, height, 1.4 * MM, stroke=1, fill=0)
+    c.setLineWidth(0.9)
+    c.roundRect(x, y, width, height, 1.7 * MM, stroke=1, fill=0)
     c.setFillColorRGB(*border_color)
-    c.setFont(font, 6.8)
-    c.drawCentredString(x + width / 2, y + height - 6.3 * MM, _arabic_visual("توقيع الإدارة"))
+    c.setFont(font, 8.0)
+    c.drawCentredString(x + width / 2, y + height - 7.0 * MM, _arabic_visual("ختم الإدارة"))
     c.setStrokeColorRGB(*line_color)
-    c.setLineWidth(0.45)
-    c.line(x + 4.0 * MM, y + 5.2 * MM, x + width - 4.0 * MM, y + 5.2 * MM)
+    c.setLineWidth(0.55)
+    c.line(x + 4.0 * MM, y + 5.5 * MM, x + width - 4.0 * MM, y + 5.5 * MM)
     c.restoreState()
 
 
@@ -3278,8 +3274,8 @@ def _draw_entry_page(c, row, details: dict, reprint: bool, font: str, school: st
     c.setFont(font, 5.1)
     c.drawCentredString(qr_x + qr_size / 2, qr_y - 2.0 * mm, _arabic_visual("امسح للتحقق"))
 
-    signature_w, signature_h = 43.0 * mm, 29.0 * mm
-    sx, sy = right - signature_w, 6.5 * mm
+    signature_w, signature_h = 48.0 * mm, 32.0 * mm
+    sx, sy = right - signature_w, 3.5 * mm
     _draw_admin_signature_box(c, sx, sy, font, green, line, width=signature_w, height=signature_h)
     if cancelled:
         c.saveState()
@@ -3432,8 +3428,8 @@ def _draw_page(c, row, details: dict, copy_type: str | None, reprint: bool, font
     c.drawString(qr_x, qr_y - 2.6 * MM, "SchoolPass " + row["record_no"])
 
     # --- enlarged administration signature area; the school does not require a stamp field.
-    signature_w, signature_h = 43.0 * MM, 29.0 * MM
-    sx, sy = x_right - signature_w, 6.5 * MM
+    signature_w, signature_h = 48.0 * MM, 32.0 * MM
+    sx, sy = x_right - signature_w, 3.5 * MM
     _draw_admin_signature_box(
         c, sx, sy, font, (0.08, 0.25, 0.42), (0.55, 0.62, 0.69),
         width=signature_w, height=signature_h,
