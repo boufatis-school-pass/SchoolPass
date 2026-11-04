@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 APP_NAME = "SchoolPass"
-APP_VERSION = "4.7.1"
+APP_VERSION = "4.7.2"
 SCHOOL_NAME = "ثانوية المجاهد بسجراري لخضر بوفاطيس"
 MINISTRY_NAME = "الجمهورية الجزائرية الديمقراطية الشعبية — وزارة التربية الوطنية"
 SERVER_PORT = 8765
