@@ -1238,7 +1238,7 @@ class StudentPicker:
         self.query.trace_add('write', lambda *_: self.refresh())
         ent.bind('<Return>', lambda _e: self.pick_selected())
         self.refresh()
-        ent.focus_set()
+        self.win.after(100, ent.focus_set)
 
     def refresh(self):
         for item in self.tree.get_children():
@@ -1492,13 +1492,16 @@ class RecordForm:
         ttk.Label(student_row, text='التلميذ', width=29, anchor=E).pack(side=RIGHT, padx=(4, 8))
         self.student_label = DisplayStringVar(value='لم يتم اختيار التلميذ')
         self.student_var = StringVar(value='')
-        self.student_combo = ttk.Combobox(student_row, textvariable=self.student_var, state='normal', justify='right')
+        # Use a real Entry for typing; suggestions live in a separate, non-modal popup.
+        self.student_combo = ttk.Entry(student_row, textvariable=self.student_var, justify='right')
         self.student_combo.pack(side=RIGHT, fill=X, expand=True)
         self.student_option_map = {}
+        self.student_suggestions = SuggestionPopup(self.student_combo, self._choose_student_suggestion)
         self.student_combo.bind('<KeyRelease>', self._refresh_student_suggestions)
-        self.student_combo.bind('<<ComboboxSelected>>', self._student_suggestion_selected)
         self.student_combo.bind('<Return>', self._student_suggestion_selected)
-        ttk.Button(student_row, text='بحث...', command=self.pick_student).pack(side=RIGHT, padx=6)
+        self.student_combo.bind('<Down>', lambda _e: self.student_suggestions.move_selection())
+        self.student_combo.bind('<Escape>', lambda _e: self.student_suggestions.hide())
+        ttk.Button(student_row, text='بحث بالقائمة', command=self.pick_student).pack(side=RIGHT, padx=6)
 
         if kind == 'late':
             ttk.Label(form, text='سبب التأخر', anchor=E).pack(fill=X, pady=(9, 3))
@@ -1568,14 +1571,20 @@ class RecordForm:
             self.teacher_option_map = {}
             teacher_row = ttk.Frame(self.expulsion_frame); teacher_row.pack(fill=X, pady=5)
             ttk.Label(teacher_row, text='اسم الأستاذ', width=29, anchor=E).pack(side=RIGHT, padx=(4, 8))
-            self.teacher_combo = ttk.Combobox(teacher_row, textvariable=self.teacher_var, state='normal', justify='right')
+            self.teacher_combo = ttk.Entry(teacher_row, textvariable=self.teacher_var, justify='right')
             self.teacher_combo.pack(side=RIGHT, fill=X, expand=True)
+            self.teacher_suggestions = SuggestionPopup(self.teacher_combo, self._choose_teacher_suggestion)
             self.teacher_combo.bind('<KeyRelease>', self._refresh_teacher_suggestions)
-            self.teacher_combo.bind('<<ComboboxSelected>>', self._teacher_suggestion_selected)
+            self.teacher_combo.bind('<Return>', self._teacher_suggestion_selected)
+            self.teacher_combo.bind('<Down>', lambda _e: self.teacher_suggestions.move_selection())
+            self.teacher_combo.bind('<Escape>', lambda _e: self.teacher_suggestions.hide())
             self.subject_var = StringVar(value='')
             subject_row = ttk.Frame(self.expulsion_frame); subject_row.pack(fill=X, pady=5)
             ttk.Label(subject_row, text='المادة الدراسية', width=29, anchor=E).pack(side=RIGHT, padx=(4, 8))
             ttk.Entry(subject_row, textvariable=self.subject_var, state='readonly', justify='right').pack(side=RIGHT, fill=X, expand=True)
+            if self.app.current_user.get('role') == 'admin':
+                ttk.Button(self.expulsion_frame, text='إدارة الأساتذة واستيراد القائمة',
+                           command=self.app.manage_teachers, style='Link.TButton').pack(anchor=E, padx=8, pady=(0, 6))
             self.special_note = add_row(form, 'special_note', 'ملاحظة (اختياري)')
             self.special_combo.bind('<<ComboboxSelected>>', lambda _e: self._refresh_special_reason())
             self._refresh_special_reason()
@@ -1641,72 +1650,81 @@ class RecordForm:
         else:
             self.expulsion_frame.pack_forget()
 
-    def _refresh_student_suggestions(self, _event=None):
+    def _refresh_student_suggestions(self, event=None):
         if not hasattr(self, 'student_combo'):
+            return
+        if event is not None and getattr(event, 'keysym', '') in ('Return', 'Escape', 'Up', 'Down', 'Tab', 'Shift_L', 'Shift_R'):
             return
         query = self.student_var.get().strip()
         selected_label = getattr(self, '_selected_student_label', '')
         if self.student is not None and query != selected_label:
-            # Never let a changed search string silently retain a different student.
             self.student = None
             self.student_label.set('لم يتم اختيار التلميذ')
             self._selected_student_label = ''
         if not query:
-            self.student_combo.configure(values=())
             self.student_option_map = {}
+            self.student_suggestions.hide()
             return
         try:
             rows = core.search_students(query, 18)
-            options = {}
-            for row in rows:
-                label = f"{student_name(row)} — {row['class_name']} — {row['student_key']}"
-                options[label] = row
-            self.student_option_map = options
-            self.student_combo.configure(values=tuple(options))
-            # Open the native dropdown immediately after typing without changing the query text.
-            if options:
-                try:
-                    self.student_combo.event_generate('<Down>')
-                except Exception:
-                    pass
+            self.student_option_map = {
+                f"{student_name(row)} — {row['class_name']} — {row['student_key']}": row
+                for row in rows
+            }
+            self.student_suggestions.show(list(self.student_option_map.items()))
         except Exception:
             self.student_option_map = {}
+            self.student_suggestions.hide()
+
+    def _choose_student_suggestion(self, row, _label=''):
+        self.set_student(row)
+        self.student_suggestions.hide()
 
     def _student_suggestion_selected(self, _event=None):
         row = self.student_option_map.get(self.student_var.get())
         if row:
             self.set_student(row)
+        else:
+            self.student_suggestions.select_first()
         return 'break'
 
-    def _refresh_teacher_suggestions(self, _event=None):
+    def _refresh_teacher_suggestions(self, event=None):
         if not hasattr(self, 'teacher_combo'):
+            return
+        if event is not None and getattr(event, 'keysym', '') in ('Return', 'Escape', 'Up', 'Down', 'Tab', 'Shift_L', 'Shift_R'):
             return
         query = self.teacher_var.get().strip()
         self.selected_teacher_id = None
         self.subject_var.set('')
+        if len(query) < 2:
+            self.teacher_option_map = {}
+            self.teacher_suggestions.hide()
+            return
         try:
-            rows = core.search_teachers(query, 20) if query else core.list_teachers(active_only=True)
-            options = {}
+            rows = core.search_teachers(query, 20)
+            self.teacher_option_map = {}
             for row in rows:
                 classes = f" — {row['classes']}" if row['classes'] else ''
                 label = f"{row['full_name']} — {row['subject']}{classes}"
-                options[label] = row
-            self.teacher_option_map = options
-            self.teacher_combo.configure(values=tuple(options))
-            if query and options:
-                try:
-                    self.teacher_combo.event_generate('<Down>')
-                except Exception:
-                    pass
+                self.teacher_option_map[label] = row
+            self.teacher_suggestions.show(list(self.teacher_option_map.items()))
         except Exception:
             self.teacher_option_map = {}
+            self.teacher_suggestions.hide()
+
+    def _choose_teacher_suggestion(self, row, _label=''):
+        self.selected_teacher_id = int(row['id'])
+        self.teacher_var.set(f"{row['full_name']} — {row['subject']}")
+        self.subject_var.set(row['subject'])
+        self.teacher_suggestions.hide()
+        self.teacher_combo.focus_set()
 
     def _teacher_suggestion_selected(self, _event=None):
         row = self.teacher_option_map.get(self.teacher_var.get())
         if row:
-            self.selected_teacher_id = int(row['id'])
-            self.teacher_var.set(f"{row['full_name']} — {row['subject']}")
-            self.subject_var.set(row['subject'])
+            self._choose_teacher_suggestion(row)
+        else:
+            self.teacher_suggestions.select_first()
         return 'break'
 
     def pick_student(self):
@@ -1724,6 +1742,10 @@ class RecordForm:
         self._selected_student_label = label
         if hasattr(self, 'student_var'):
             self.student_var.set(label)
+        if hasattr(self, 'student_suggestions'):
+            self.student_suggestions.hide()
+        if hasattr(self, 'student_combo'):
+            self.student_combo.focus_set()
 
     def save(self):
         if self._saving:
