@@ -1116,8 +1116,8 @@ class LoginDialog:
         self.user = None
         win = Toplevel(root)
         title = 'فتح الجلسة — SchoolPass' if lock_mode else 'تسجيل الدخول — SchoolPass'
-        configure_window(win, title, '820x540')
-        win.minsize(700, 480)
+        configure_window(win, title, '740x480')
+        win.minsize(620, 410)
         win.transient(root)
         win.grab_set()
         win.protocol('WM_DELETE_WINDOW', win.destroy)
@@ -1125,9 +1125,9 @@ class LoginDialog:
 
         body = ttk.Frame(win, style='LoginSurface.TFrame')
         body.pack(fill=BOTH, expand=True, padx=14, pady=14)
-        form_panel = ttk.Frame(body, style='LoginSurface.TFrame', padding=(30, 28))
+        form_panel = ttk.Frame(body, style='LoginSurface.TFrame', padding=(22, 18))
         form_panel.pack(side=LEFT, fill=BOTH, expand=True)
-        brand_panel = ttk.Frame(body, style='LoginBrand.TFrame', padding=(24, 26), width=270)
+        brand_panel = ttk.Frame(body, style='LoginBrand.TFrame', padding=(18, 18), width=235)
         brand_panel.pack(side=RIGHT, fill=Y)
         brand_panel.pack_propagate(False)
 
@@ -1458,6 +1458,7 @@ class RecordForm:
         self.win.minsize(580, 500)
         self.win.transient(app.root)
         self.win.grab_set()
+        self.win.protocol('WM_DELETE_WINDOW', self.close)
         ttk.Label(self.win, text=self.title, style='Title.TLabel').pack(pady=(12, 6))
         form_scroll = ScrollableFrame(self.win, inner_style='TFrame')
         form_scroll.pack(fill=BOTH, expand=True, padx=12, pady=4)
@@ -1599,7 +1600,14 @@ class RecordForm:
         bar = ttk.Frame(self.win)
         bar.pack(fill=X, padx=25, pady=16)
         ttk.Button(bar, text='حفظ وإصدار الرخصة', command=self.save, style='Accent.TButton').pack(side=RIGHT, padx=5)
-        ttk.Button(bar, text='إلغاء', command=self.win.destroy).pack(side=RIGHT, padx=5)
+        ttk.Button(bar, text='إلغاء', command=self.close).pack(side=RIGHT, padx=5)
+
+    def close(self):
+        for name in ('student_suggestions', 'teacher_suggestions'):
+            popup = getattr(self, name, None)
+            if popup is not None:
+                popup.hide()
+        self.win.destroy()
 
     def _absence_days_now(self):
         if self.kind != 'absence_return':
