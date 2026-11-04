@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 APP_NAME = "SchoolPass"
-APP_VERSION = "4.7.7"
+APP_VERSION = "4.8.0"
 SCHOOL_NAME = "ثانوية المجاهد بسجراري لخضر بوفاطيس"
 MINISTRY_NAME = "الجمهورية الجزائرية الديمقراطية الشعبية — وزارة التربية الوطنية"
 SERVER_PORT = 8765
@@ -198,7 +198,7 @@ def db_connect() -> sqlite3.Connection:
     return conn
 
 
-SCHEMA_VERSION = "8"
+SCHEMA_VERSION = "9"
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -297,6 +297,8 @@ CREATE TABLE IF NOT EXISTS records (
     returned_at TEXT DEFAULT '',
     returned_by INTEGER,
     printed_count INTEGER NOT NULL DEFAULT 0,
+    exit_executed_at TEXT NOT NULL DEFAULT '',
+    exit_executed_by INTEGER,
     FOREIGN KEY(user_id) REFERENCES users(id),
     FOREIGN KEY(related_record_id) REFERENCES records(id),
     FOREIGN KEY(cancelled_by) REFERENCES users(id),
@@ -312,6 +314,19 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     description TEXT NOT NULL DEFAULT '',
     FOREIGN KEY(user_id) REFERENCES users(id)
 );
+CREATE TABLE IF NOT EXISTS student_notes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    student_key TEXT NOT NULL,
+    note TEXT NOT NULL CHECK(length(trim(note)) BETWEEN 1 AND 500),
+    created_at TEXT NOT NULL,
+    user_id INTEGER,
+    FOREIGN KEY(user_id) REFERENCES users(id)
+);
+CREATE INDEX IF NOT EXISTS idx_student_notes_key_time ON student_notes(student_key, created_at DESC);
+CREATE TRIGGER IF NOT EXISTS trg_student_notes_no_update BEFORE UPDATE ON student_notes
+BEGIN SELECT RAISE(ABORT, 'append-only student notes'); END;
+CREATE TRIGGER IF NOT EXISTS trg_student_notes_no_delete BEFORE DELETE ON student_notes
+BEGIN SELECT RAISE(ABORT, 'append-only student notes'); END;
 CREATE TABLE IF NOT EXISTS settings (
     setting_key TEXT PRIMARY KEY,
     setting_value TEXT NOT NULL
@@ -383,6 +398,10 @@ def init_db() -> None:
         columns = {r[1] for r in conn.execute("PRAGMA table_info(records)")}
         if "issued_at" not in columns:
             conn.execute("ALTER TABLE records ADD COLUMN issued_at TEXT NOT NULL DEFAULT ''")
+        if "exit_executed_at" not in columns:
+            conn.execute("ALTER TABLE records ADD COLUMN exit_executed_at TEXT NOT NULL DEFAULT ''")
+        if "exit_executed_by" not in columns:
+            conn.execute("ALTER TABLE records ADD COLUMN exit_executed_by INTEGER")
         conn.execute("UPDATE records SET issued_at=created_at WHERE TRIM(COALESCE(issued_at,''))=''")
         # Rebuild the immutable trigger so issue timestamp cannot be altered independently.
         # Schema v6 corrects historical absence day counts: the return date is not
@@ -1185,6 +1204,79 @@ def monthly_late_count(student_key: str, month: str | None = None) -> int:
                                 (str(student_key), month)).fetchone()[0])
 
 
+
+
+def list_student_notes(student_key: str, user_id) -> list[dict]:
+    """List the pupil's append-only administrative notes for active staff."""
+    require_user(user_id)
+    with db_connect() as conn:
+        rows=conn.execute(
+            """SELECT n.id,n.student_key,n.note,n.created_at,n.user_id,
+                      COALESCE(u.display_name,'غير معروف') AS supervisor
+               FROM student_notes n LEFT JOIN users u ON u.id=n.user_id
+               WHERE n.student_key=? ORDER BY n.created_at DESC,n.id DESC LIMIT 200""",
+            (str(student_key),)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def add_student_note(student_key: str, user_id, note: str) -> dict:
+    """Append an administrative note; database triggers prevent later edits/deletion."""
+    actor=require_user(user_id)
+    key,value=str(student_key or '').strip(),str(note or '').strip()
+    if not key or not value:
+        raise ValueError("اكتب الملاحظة الإدارية وحدد التلميذ.")
+    if len(value)>500:
+        raise ValueError("الملاحظة الإدارية طويلة جدًا؛ الحد الأقصى 500 حرف.")
+    with db_connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        if not conn.execute("SELECT 1 FROM students WHERE student_key=?",(key,)).fetchone():
+            raise ValueError("التلميذ غير موجود في قاعدة البيانات.")
+        cur=conn.execute("INSERT INTO student_notes(student_key,note,created_at,user_id) VALUES(?,?,?,?)",
+                         (key,value,now_iso(),actor["id"]))
+        note_id=int(cur.lastrowid)
+        conn.execute("INSERT INTO audit_logs(happened_at,user_id,action,target_type,target_id,description) VALUES(?,?,?,?,?,?)",
+                     (now_iso(),actor["id"],"إضافة ملاحظة إدارية للتلميذ","student_note",str(note_id),
+                      f"التلميذ: {key}؛ أضيفت ملاحظة إدارية."))
+        row=conn.execute(
+            """SELECT n.id,n.student_key,n.note,n.created_at,n.user_id,
+                      COALESCE(u.display_name,'غير معروف') AS supervisor
+               FROM student_notes n LEFT JOIN users u ON u.id=n.user_id WHERE n.id=?""",
+            (note_id,)).fetchone()
+    return dict(row)
+
+
+def student_monthly_attention(student_key: str, user_id, month: str | None = None) -> dict:
+    """Count monthly lates and real absence-days overlapping the selected calendar month."""
+    require_user(user_id)
+    month=month or date.today().strftime("%Y-%m")
+    if not re.fullmatch(r"\d{4}-\d{2}",month):
+        raise ValueError("صيغة الشهر غير صحيحة؛ استعمل YYYY-MM.")
+    try:
+        year,number=(int(x) for x in month.split("-"))
+        start_month=date(year,number,1)
+        next_month=date(year+1,1,1) if number==12 else date(year,number+1,1)
+    except ValueError as exc:
+        raise ValueError("الشهر المحدد غير صحيح.") from exc
+    late_count=monthly_late_count(str(student_key),month)
+    with db_connect() as conn:
+        absence_rows=conn.execute(
+            "SELECT details_json FROM records WHERE student_key=? AND kind='absence_return' AND status<>'cancelled'",
+            (str(student_key),)).fetchall()
+    days=0
+    for row in absence_rows:
+        try:
+            details=json.loads(row["details_json"] or "{}")
+            first=date.fromisoformat(str(details.get("absence_start",""))[:10])
+            last=date.fromisoformat(str(details.get("return_date",""))[:10])
+            left,right=max(first,start_month),min(last,next_month)
+            if right>left: days+=(right-left).days
+        except (ValueError,TypeError,json.JSONDecodeError):
+            continue
+    notes_rows=list_student_notes(str(student_key),user_id)
+    return {"month":month,"late_count":int(late_count),"absence_days":int(days),
+            "absence_return_count":len(absence_rows),"note_count":len(notes_rows),"recent_notes":notes_rows[:2]}
+
+
 LATE_REASON_LABELS = {
     "consultation": "التواجد في الاستشارة",
     "transport": "التأخر بسبب انعدام النقل",
@@ -1656,7 +1748,65 @@ def return_from_exit(record_id: int, user_id) -> sqlite3.Row:
     return slip
 
 
-def record_by_token(token: str) -> sqlite3.Row | None:
+
+
+def mark_exit_executed(record_id: int, user_id) -> sqlite3.Row:
+    """Record gatekeeper-confirmed physical exit separately from permit issuance."""
+    actor=require_user(user_id)
+    with db_connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        row=conn.execute("SELECT * FROM records WHERE id=?",(int(record_id),)).fetchone()
+        if not row or row["kind"]!="exit_permit":
+            raise ValueError("السجل المحدد ليس رخصة خروج.")
+        if row["status"]!="valid":
+            raise ValueError("لا يمكن تأكيد خروج فعلي لرخصة ملغاة أو أُغلقت بالعودة.")
+        if str(row["exit_executed_at"] or "").strip():
+            raise ValueError("تم تسجيل تنفيذ الخروج لهذه الرخصة مسبقًا.")
+        happened=now_iso()
+        changed=conn.execute(
+            "UPDATE records SET exit_executed_at=?,exit_executed_by=? WHERE id=? AND status='valid' AND TRIM(COALESCE(exit_executed_at,''))=''",
+            (happened,actor["id"],int(record_id))).rowcount
+        if changed!=1: raise ValueError("سُجل تنفيذ الخروج من جلسة أخرى؛ حدّث السجل.")
+        conn.execute("INSERT INTO audit_logs(happened_at,user_id,action,target_type,target_id,description) VALUES(?,?,?,?,?,?)",
+                     (happened,actor["id"],"تأكيد تنفيذ خروج التلميذ عند الحاجب","record",str(record_id),
+                      f"الرخصة: {row['record_no']}؛ التلميذ: {row['student_name']}"))
+        updated=conn.execute("SELECT * FROM records WHERE id=?",(int(record_id),)).fetchone()
+    return updated
+
+
+def get_gatekeeper_log(user_id, date_from: str = "", date_to: str = "", state: str = "all") -> list[dict]:
+    """List exit permits with separate issued, actually-exited and returned events."""
+    require_user(user_id)
+    if state not in {"all","pending","executed","returned","cancelled"}:
+        raise ValueError("حالة سجل الحاجب غير صحيحة.")
+    first,last=str(date_from or "").strip(),str(date_to or "").strip()
+    for value in (first,last):
+        if value:
+            try: date.fromisoformat(value)
+            except ValueError as exc: raise ValueError("تاريخ سجل الحاجب غير صحيح؛ استعمل YYYY-MM-DD.") from exc
+    if first and last and last<first: raise ValueError("تاريخ النهاية يجب أن يكون بعد تاريخ البداية.")
+    issue="COALESCE(NULLIF(r.issued_at,''),r.created_at)"
+    where,params=["r.kind='exit_permit'"],[]
+    if first: where.append(f"substr({issue},1,10)>=?");params.append(first)
+    if last: where.append(f"substr({issue},1,10)<=?");params.append(last)
+    if state=="pending":where.append("r.status='valid' AND TRIM(COALESCE(r.exit_executed_at,''))=''")
+    elif state=="executed":where.append("r.status='valid' AND TRIM(COALESCE(r.exit_executed_at,''))<>''")
+    elif state=="returned":where.append("r.status='returned'")
+    elif state=="cancelled":where.append("r.status='cancelled'")
+    with db_connect() as conn:
+        rows=conn.execute(
+            f"""SELECT r.*,COALESCE(issuer.display_name,'غير معروف') AS issuer_name,
+                       COALESCE(executor.display_name,'—') AS exit_executor_name,
+                       COALESCE(returner.display_name,'—') AS returner_name
+                FROM records r LEFT JOIN users issuer ON issuer.id=r.user_id
+                LEFT JOIN users executor ON executor.id=r.exit_executed_by
+                LEFT JOIN users returner ON returner.id=r.returned_by
+                WHERE {' AND '.join(where)} ORDER BY {issue} DESC,r.id DESC LIMIT 2000""",
+            tuple(params)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def record_by_token(def record_by_token(token: str) -> sqlite3.Row | None:
     with db_connect() as conn:
         return conn.execute("SELECT * FROM records WHERE qr_token=?", (token,)).fetchone()
 
@@ -3351,33 +3501,32 @@ def create_pdf(record_id: int, copy_types: list[str | None] | None = None, repri
     return out
 
 
-def print_record(record_id: int, user_id, launch: bool = True) -> list[Path]:
-    """Create the PDF (re-print = same record, never a new number) and optionally hand it to Windows."""
-    user = require_user(user_id)
-    row = record_by_id(record_id)
-    if not row:
-        raise ValueError("السجل غير موجود.")
+def print_record(record_id: int, user_id, launch: bool = True, mode: str = "auto") -> list[Path]:
+    """Print the original once or explicitly reprint the same numbered permit."""
+    user=require_user(user_id)
+    if mode not in {"auto","initial","reprint"}: raise ValueError("وضع الطباعة غير معروف.")
+    row=record_by_id(record_id)
+    if not row: raise ValueError("السجل غير موجود.")
     with db_connect() as conn:
-        latest = conn.execute("SELECT record_no,printed_count FROM records WHERE id=?", (record_id,)).fetchone()
-    if not latest:
-        raise ValueError("السجل غير موجود.")
-    is_reprint = int(latest["printed_count"] or 0) > 0
-    print_at = now_iso()
-    path = create_pdf(record_id, reprint=is_reprint, reprint_at=print_at if is_reprint else "")
+        latest=conn.execute("SELECT record_no,printed_count FROM records WHERE id=?",(record_id,)).fetchone()
+    if not latest: raise ValueError("السجل غير موجود.")
+    already=int(latest["printed_count"] or 0)>0
+    if mode=="initial" and already: raise ValueError("هذه الرخصة طُبعت سابقًا؛ استخدم زر إعادة طباعة الرخصة.")
+    if mode=="reprint" and not already: raise ValueError("لم تُطبع هذه الرخصة من قبل؛ استخدم زر طباعة الرخصة.")
+    print_at=now_iso()
+    path=create_pdf(record_id,reprint=already,reprint_at=print_at if already else "")
     with db_connect() as conn:
         conn.execute("BEGIN IMMEDIATE")
-        latest = conn.execute("SELECT record_no,printed_count FROM records WHERE id=?", (record_id,)).fetchone()
-        if not latest:
-            raise ValueError("السجل غير موجود.")
-        # If another workstation printed concurrently, preserve the record but expose that this is a reprint.
-        is_reprint_now = int(latest["printed_count"] or 0) > 0
-        changed = conn.execute("UPDATE records SET printed_count=printed_count+1 WHERE id=?", (record_id,)).rowcount
-        if changed != 1:
-            raise RuntimeError("تعذر تحديث عدد مرات الطباعة.")
+        latest=conn.execute("SELECT record_no,printed_count FROM records WHERE id=?",(record_id,)).fetchone()
+        if not latest: raise ValueError("السجل غير موجود.")
+        reprint_now=int(latest["printed_count"] or 0)>0
+        if mode=="initial" and reprint_now: raise ValueError("بدأت عملية طباعة أخرى لهذه الرخصة؛ حدّث السجل.")
+        if mode=="reprint" and not reprint_now: raise ValueError("لم تعد هذه الرخصة مؤهلة لإعادة الطباعة؛ حدّث السجل.")
+        changed=conn.execute("UPDATE records SET printed_count=printed_count+1 WHERE id=?",(record_id,)).rowcount
+        if changed!=1: raise RuntimeError("تعذر تحديث عدد مرات الطباعة.")
         conn.execute("INSERT INTO audit_logs(happened_at,user_id,action,target_type,target_id,description) VALUES(?,?,?,?,?,?)",
-                     (print_at, user["id"], "إعادة طباعة رخصة" if is_reprint_now else "طباعة رخصة", "record", str(record_id), latest["record_no"]))
-    if launch:
-        open_pdf(path)
+                     (print_at,user["id"],"إعادة طباعة رخصة" if reprint_now else "طباعة رخصة","record",str(record_id),latest["record_no"]))
+    if launch: open_pdf(path)
     return [path]
 
 
