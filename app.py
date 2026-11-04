@@ -755,6 +755,10 @@ def _install_rtl_widget_adapters():
 
         class ArabicTextWidget(original):
             def __init__(self, master=None, **kwargs):
+                # A consistent RTL default for every label/button; explicit
+                # center/left alignment supplied by a specific control is preserved.
+                kwargs.setdefault('justify', 'right')
+                kwargs.setdefault('anchor', 'e')
                 if isinstance(kwargs.get('text'), str):
                     kwargs['text'] = rtl_display(kwargs['text'])
                 self._schoolpass_text_source = None
