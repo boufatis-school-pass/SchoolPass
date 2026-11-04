@@ -3221,15 +3221,15 @@ def _draw_entry_page(c, row, details: dict, reprint: bool, font: str, school: st
         c.roundRect(margin, y_bottom, usable, row_h - 0.6 * mm, 0.7 * mm, stroke=0, fill=1)
         c.setFillColorRGB(*dark_muted)
         baseline = y_top - 2.35 * mm
-        label_size = 6.2 if row_h <= 5.2 * mm else 6.8
-        value_size = 6.6 if row_h <= 5.2 * mm else 7.6
+        label_size = 6.5 if row_h <= 5.2 * mm else 7.2
+        value_size = 6.9 if row_h <= 5.2 * mm else 8.1
         if not label_b:
             # Full-width field for long reason / guardian details; reduce the
             # font slightly rather than silently dropping the end of a value.
             c.setFillColorRGB(*dark_muted)
             c.setFont(font, label_size)
             c.drawRightString(right - 1.8 * mm, baseline, _arabic_visual(label_a + ":"))
-            value_font = 7.0 if row_h > 5.2 * mm else 6.1
+            value_font = 7.4 if row_h > 5.2 * mm else 6.3
             max_value_w = usable - 24 * mm
             while value_font > 5.2 and _text_width(value_a, font, value_font) > max_value_w:
                 value_font -= 0.2
@@ -3321,7 +3321,7 @@ def _draw_page(c, row, details: dict, copy_type: str | None, reprint: bool, font
     c.setFillColorRGB(0.055, 0.31, 0.53)
     c.roundRect(margin + 2 * MM, H - 36.5 * MM, usable - 4 * MM, 8.2 * MM, 1.7 * MM, stroke=0, fill=1)
     c.setFillColorRGB(1, 1, 1)
-    c.setFont(font, 10.0)
+    c.setFont(font, 10.8)
     c.drawCentredString(W / 2, H - 33.6 * MM, _arabic_visual(kind_label(row["kind"])))
     c.restoreState()
     y = H - 41.5 * MM
@@ -3365,7 +3365,7 @@ def _draw_page(c, row, details: dict, copy_type: str | None, reprint: bool, font
     if audit_user:
         items.append((f"المشرف: {audit_user}", 7.2, 4.1, False))
     if copy_type:
-        items.append((f"النسخة: {copy_type}", 6.6, 3.8, False))
+        items.append((f"النسخة: {copy_type}", 9.6, 5.2, False))
 
     # --- bottom zones
     qr_x, qr_y, qr_size = margin, 8 * MM, 24 * MM
@@ -3397,6 +3397,15 @@ def _draw_page(c, row, details: dict, copy_type: str | None, reprint: bool, font
     else:
         raise ValueError("بيانات الرخصة طويلة جدًا ولا تتسع في ورقة A6؛ اختصر السبب أو اسم ولي الأمر.")
     for idx, (text, size, gap, red) in enumerate(built):
+        if text.startswith("النسخة:"):
+            c.setFillColorRGB(0.91, 0.95, 0.98)
+            c.roundRect(margin + 0.7 * MM, y - 2.1 * MM, usable - 1.4 * MM, 5.5 * MM,
+                        1.0 * MM, stroke=0, fill=1)
+            c.setFillColorRGB(0.055, 0.22, 0.39)
+            c.setFont(font, size)
+            c.drawCentredString(W / 2, y - 0.15 * MM, _arabic_visual(text))
+            y -= gap * MM
+            continue
         # Soft alternating information rows improve scanning without wasting A6 space.
         row_h = max(3.0 * MM, gap * MM * 0.82)
         if idx % 2 == 0 and not red:
