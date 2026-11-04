@@ -654,14 +654,28 @@ def make_style(root: Tk, primary: str | None = None, secondary: str | None = Non
 
     # Forms and data grids
     style.configure('TLabel', background=bg, foreground=ink, font=('Segoe UI', 10), anchor='e')
-    style.configure('TEntry', padding=(11, 9), fieldbackground=palette['field'], foreground=ink,
-                    borderwidth=1, relief='flat')
-    style.map('TEntry', fieldbackground=[('readonly', palette['surface_alt']), ('disabled', palette['surface_alt'])],
-              bordercolor=[('focus', primary_color), ('!focus', palette['border'])])
-    style.configure('TCombobox', padding=(10, 8), fieldbackground=palette['field'], foreground=ink,
-                    arrowsize=15, borderwidth=1, relief='flat')
-    style.map('TCombobox', fieldbackground=[('readonly', palette['field'])],
-              foreground=[('readonly', ink)], bordercolor=[('focus', primary_color)])
+    style.configure(
+        'TEntry', padding=(13, 10), fieldbackground=palette['field'], foreground=ink,
+        borderwidth=2, relief='solid', bordercolor=palette['border'],
+        lightcolor=palette['border'], darkcolor=palette['border'],
+        insertwidth=2,
+    )
+    style.map('TEntry',
+              fieldbackground=[('readonly', palette['surface_alt']), ('disabled', palette['surface_alt'])],
+              bordercolor=[('focus', primary_color), ('!focus', palette['border'])],
+              lightcolor=[('focus', primary_color), ('!focus', palette['border'])],
+              darkcolor=[('focus', primary_color), ('!focus', palette['border'])])
+    style.configure(
+        'TCombobox', padding=(12, 9), fieldbackground=palette['field'], foreground=ink,
+        arrowsize=16, borderwidth=2, relief='solid', bordercolor=palette['border'],
+        lightcolor=palette['border'], darkcolor=palette['border'],
+    )
+    style.map('TCombobox',
+              fieldbackground=[('readonly', palette['field'])],
+              foreground=[('readonly', ink)],
+              bordercolor=[('focus', primary_color), ('!focus', palette['border'])],
+              lightcolor=[('focus', primary_color), ('!focus', palette['border'])],
+              darkcolor=[('focus', primary_color), ('!focus', palette['border'])])
     style.configure('TCheckbutton', background=surface, foreground=ink, font=('Segoe UI', 9), padding=4)
     style.map('TCheckbutton', foreground=[('disabled', muted), ('active', primary_color)])
     style.configure('TRadiobutton', background=surface, foreground=ink, font=('Segoe UI', 9), padding=4)
