@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-EXPECTED = "4.7.7"
+EXPECTED = "4.8.0"
 
 
 def main() -> int:
@@ -34,8 +34,8 @@ def main() -> int:
     if "pyinstaller==6.22.3" not in (ROOT / "requirements_dev.txt").read_text(encoding="utf-8"):
         errors.append("requirements_dev.txt must pin the reviewed PyInstaller 6.22.3 release")
     schema = re.search(r"^SCHEMA_VERSION\s*=\s*[\"\']?(\d+)[\"\']?", core, re.M)
-    if not schema or schema.group(1) != "8":
-        errors.append("SchoolPass 4.7.7 must use schema version 8 with additive guardian and student-guardian tables")
+    if not schema or schema.group(1) != "9":
+        errors.append("SchoolPass 4.8.0 must use schema version 9 with additive guardian, student-note and gate-execution fields")
     if not setup_version:
         errors.append("MyAppVersion is missing from SchoolPass_Setup.iss")
     elif setup_version.group(1) != EXPECTED:
@@ -85,6 +85,17 @@ def main() -> int:
             errors.append(f"Removed receipt label reappeared: {removed_label}")
     if core_source.count("_draw_admin_signature_box(") < 3:
         errors.append("Both A6 receipt renderers must use the shared administration signature component")
+    for marker, description in (
+        ("def student_monthly_attention(", "monthly repeated-absence and lateness attention"),
+        ("def add_student_note(", "append-only administrative notes"),
+        ("def mark_exit_executed(", "physical exit confirmation at the gate"),
+        ("def get_gatekeeper_log(", "gatekeeper execution ledger"),
+        ("def create_annual_report_pdf(", "annual PDF archive"),
+        ('mode: str = "auto"', "explicit first-print and reprint modes"),
+    ):
+        if marker not in core_source:
+            errors.append(f"SchoolPass 4.8.0 core feature missing: {description}")
+
 
     app_source = (ROOT / "app.py").read_text(encoding="utf-8-sig")
     test_ui_source = (ROOT / "test_ui_smoke.py").read_text(encoding="utf-8-sig")
@@ -204,6 +215,16 @@ def main() -> int:
         or "c.drawCentredString(W / 2" not in core
     ):
         errors.append("Centered bold student name and prominent entry time markers are missing")
+
+    for marker, description in (
+        ("def gatekeeper_log(self):", "gatekeeper log screen"),
+        ("def archive_reports(self):", "monthly/yearly archive selector"),
+        ("فتح الملف الشامل للتلميذ", "quick pupil-history access"),
+        ("إعادة طباعة الرخصة", "separate reprint action"),
+        ("def _update_student_attention(self):", "monthly attention alerts"),
+    ):
+        if marker not in app_source:
+            errors.append(f"SchoolPass 4.8.0 UI feature missing: {description}")
 
     if "SetupIconFile=app.ico" not in setup:
         errors.append("Inno Setup wizard icon is not configured")

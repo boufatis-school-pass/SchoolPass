@@ -4327,7 +4327,7 @@ class SchoolPassApp:
                 notes_text.insert(END, 'لا توجد ملاحظات إدارية مسجلة لهذا التلميذ.')
             else:
                 for item in current:
-                    notes_text.insert(END, f"{item['created_at']} — {item['supervisor']}\\n{item['note']}\\n\\n")
+                    notes_text.insert(END, f"{item['created_at']} — {item['supervisor']}\n{item['note']}\n\n")
             notes_text.configure(state='disabled')
         def add_note():
             value = ask_text(win, 'إضافة ملاحظة إدارية', 'اكتب ملاحظة إدارية موجزة (حتى 500 حرف):')

@@ -421,6 +421,7 @@ def init_db() -> None:
         conn.execute("INSERT OR IGNORE INTO settings(setting_key,setting_value) VALUES('theme_primary','#185A8D')")
         conn.execute("INSERT OR IGNORE INTO settings(setting_key,setting_value) VALUES('theme_secondary','#F2F5F9')")
         conn.execute("INSERT OR IGNORE INTO settings(setting_key,setting_value) VALUES('late_alert_threshold','3')")
+        conn.execute("INSERT OR IGNORE INTO settings(setting_key,setting_value) VALUES('absence_alert_threshold_days','5')")
         conn.execute("INSERT OR IGNORE INTO settings(setting_key,setting_value) VALUES('rtl_shaping','1')")
         conn.execute("INSERT OR IGNORE INTO settings(setting_key,setting_value) VALUES('external_backup_path','')")
         # Older experimental silent printing could ignore A6; force safe PDF preview after upgrade.
