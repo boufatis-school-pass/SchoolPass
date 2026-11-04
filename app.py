@@ -130,6 +130,37 @@ def _text_on(hex_color: str) -> str:
     return core.text_color_for(hex_color)
 
 
+def _center_toplevel_window(win):
+    """Center a mapped dialog over its owner, or over the desktop as a fallback."""
+    try:
+        if win.overrideredirect():
+            return
+        win.update_idletasks()
+        width = max(1, int(win.winfo_width()))
+        height = max(1, int(win.winfo_height()))
+        screen_w = int(win.winfo_screenwidth() or 1366)
+        screen_h = int(win.winfo_screenheight() or 768)
+        owner = getattr(win, 'master', None)
+        x = y = None
+        if owner is not None and owner is not win:
+            try:
+                owner.update_idletasks()
+                owner_w, owner_h = int(owner.winfo_width()), int(owner.winfo_height())
+                if owner.winfo_viewable() and owner_w >= width * 0.55 and owner_h >= height * 0.55:
+                    x = int(owner.winfo_rootx() + (owner_w - width) / 2)
+                    y = int(owner.winfo_rooty() + (owner_h - height) / 2)
+            except Exception:
+                x = y = None
+        if x is None or y is None:
+            x = int((screen_w - width) / 2)
+            y = int((screen_h - height) / 2)
+        x = max(0, min(x, max(0, screen_w - width)))
+        y = max(0, min(y, max(0, screen_h - height)))
+        win.geometry(f'{width}x{height}+{x}+{y}')
+    except Exception:
+        pass
+
+
 def _install_toplevel_background():
     """Apply the selected secondary color to every Tk top-level, not only the main window."""
     if getattr(Toplevel, '_schoolpass_theme_installed', False):
@@ -144,6 +175,14 @@ def _install_toplevel_background():
             self.configure(background=_window_background())
         except Exception:
             pass
+        try:
+            def center_when_mapped(event):
+                if event.widget is self and not getattr(self, '_schoolpass_center_done', False):
+                    self._schoolpass_center_done = True
+                    self.after_idle(lambda target=self: _center_toplevel_window(target))
+            self.bind('<Map>', center_when_mapped, add='+')
+        except Exception:
+            pass
 
     def screen_fit_geometry(self, *args):
         # Keep fixed-size dialogs inside the usable desktop area, including on
@@ -155,10 +194,9 @@ def _install_toplevel_background():
                     screen_w = int(self.winfo_screenwidth() or 1366)
                     screen_h = int(self.winfo_screenheight() or 768)
                     requested_w, requested_h = int(match.group(1)), int(match.group(2))
-                    width = int(requested_w * 0.90) if requested_w >= 650 else requested_w
-                    height = int(requested_h * 0.88) if requested_h >= 450 else requested_h
-                    width = min(max(360, width), max(360, screen_w - 70))
-                    height = min(max(260, height), max(260, screen_h - 90))
+                    # Preserve designed dimensions; arbitrary shrinking clipped buttons.
+                    width = min(max(360, requested_w), max(360, screen_w - 70))
+                    height = min(max(280, requested_h), max(280, screen_h - 90))
                     args = (f'{width}x{height}{match.group(3)}',) + args[1:]
                 except Exception:
                     pass
@@ -171,13 +209,9 @@ def _install_toplevel_background():
             screen_w = int(self.winfo_screenwidth() or 1366)
             screen_h = int(self.winfo_screenheight() or 768)
             if width is not None:
-                width = int(width)
-                if width >= 650: width = int(width * 0.90)
-                width = min(max(360, width), max(360, screen_w - 70))
+                width = min(max(360, int(width)), max(360, screen_w - 70))
             if height is not None:
-                height = int(height)
-                if height >= 450: height = int(height * 0.88)
-                height = min(max(260, height), max(260, screen_h - 90))
+                height = min(max(280, int(height)), max(280, screen_h - 90))
         except Exception:
             pass
         if callable(original_minsize):
@@ -256,6 +290,14 @@ def make_style(root: Tk, primary: str | None = None, secondary: str | None = Non
             'danger_bg': '#FCEBED', 'danger_fg': '#A73543',
             'canvas': '#FFFFFF', 'white': '#FFFFFF',
         }
+    palette['sidebar_ops_bg'] = '#193652' if dark else '#E8F0FC'
+    palette['sidebar_data_bg'] = '#183D3B' if dark else '#E6F4EF'
+    palette['sidebar_reports_bg'] = '#40351F' if dark else '#F7F0E2'
+    palette['sidebar_admin_bg'] = '#382F4A' if dark else '#F0EBF8'
+    palette['sidebar_ops_fg'] = '#B8D8FB' if dark else '#214F7A'
+    palette['sidebar_data_fg'] = '#B9E8D8' if dark else '#20624F'
+    palette['sidebar_reports_fg'] = '#F4DDA7' if dark else '#78591C'
+    palette['sidebar_admin_fg'] = '#DCCCF8' if dark else '#5A477B'
     UI_PALETTE = palette
 
     # ttkbootstrap supplies polished native ttk mappings; all application-specific
@@ -285,19 +327,19 @@ def make_style(root: Tk, primary: str | None = None, secondary: str | None = Non
     primary_color = palette['primary']
     try:
         root.configure(background=bg)
-        root.option_add('*Font', ('Segoe UI', 10))
+        root.option_add('*Font', ('Segoe UI', 10, 'bold'))
         root.option_add('*TCombobox*Listbox.font', ('Segoe UI', 10))
         import tkinter.font as tkfont
         for font_name in ('TkDefaultFont', 'TkTextFont', 'TkMenuFont', 'TkHeadingFont', 'TkCaptionFont'):
             try:
-                tkfont.nametofont(font_name, root=root).configure(family='Segoe UI', size=10)
+                tkfont.nametofont(font_name, root=root).configure(family='Segoe UI', size=10, weight='bold')
             except Exception:
                 pass
     except Exception:
         pass
 
     # Base typography and surfaces
-    style.configure('.', font=('Segoe UI', 10), foreground=ink)
+    style.configure('.', font=('Segoe UI', 10, 'bold'), foreground=ink)
     style.configure('TFrame', background=bg)
     style.configure('Surface.TFrame', background=surface, relief='flat', borderwidth=0)
     style.configure('PageHeader.TFrame', background=surface, relief='flat', borderwidth=0)
@@ -309,6 +351,16 @@ def make_style(root: Tk, primary: str | None = None, secondary: str | None = Non
     style.configure('Sidebar.TFrame', background=palette['sidebar'])
     style.configure('SidebarProfile.TFrame', background=palette['sidebar_hover'], relief='flat')
     style.configure('SidebarSeparator.TFrame', background=palette['sidebar_hover'])
+    for suffix, bg_key, fg_key in (
+        ('Ops', 'sidebar_ops_bg', 'sidebar_ops_fg'),
+        ('Data', 'sidebar_data_bg', 'sidebar_data_fg'),
+        ('Reports', 'sidebar_reports_bg', 'sidebar_reports_fg'),
+        ('Admin', 'sidebar_admin_bg', 'sidebar_admin_fg'),
+    ):
+        style.configure(f'SidebarGroup{suffix}.TFrame', background=palette[bg_key], relief='flat', borderwidth=0)
+        style.configure(f'SidebarGroup{suffix}Title.TLabel', background=palette[bg_key],
+                        foreground=palette[fg_key], font=('Segoe UI', 10, 'bold'),
+                        padding=(9, 7), anchor='e')
     style.configure('LoginBrand.TFrame', background=palette['sidebar'])
     style.configure('LoginSurface.TFrame', background=surface)
     style.configure('LoginMark.TLabel', background=palette['primary'], foreground=palette['primary_text'],
@@ -459,6 +511,20 @@ def make_style(root: Tk, primary: str | None = None, secondary: str | None = Non
                     padding=(13, 10), font=('Segoe UI', 9, 'bold'), anchor='e')
     style.configure('Danger.TLabel', background=palette['danger_bg'], foreground=palette['danger_fg'],
                     padding=(13, 10), font=('Segoe UI', 9, 'bold'), anchor='e')
+
+    # Apply a stronger, consistent type weight across the application while
+    # preserving the larger title sizes already defined above.
+    for style_name, font_size in {
+        'TLabel': 10, 'Hint.TLabel': 10, 'Subtitle.TLabel': 10,
+        'PageSubtitle.TLabel': 10, 'LoginSubtitle.TLabel': 10,
+        'SidebarSub.TLabel': 10, 'SidebarProfileRole.TLabel': 9,
+        'HeroText.TLabel': 10, 'MetricHint.TLabel': 9,
+        'CardTitle.TLabel': 10, 'DialogMessage.TLabel': 10,
+        'ShortcutDesc.TLabel': 10, 'Status.TLabel': 10,
+        'TEntry': 10, 'TCombobox': 10, 'Treeview': 10,
+        'Treeview.Heading': 10, 'TCheckbutton': 10, 'TRadiobutton': 10,
+    }.items():
+        style.configure(style_name, font=('Segoe UI', font_size, 'bold'))
 
 
 RTL_SHAPING_ENABLED = True
@@ -884,7 +950,7 @@ class ScrollableFrame(ttk.Frame):
     """A width-following vertical content area with reliable Windows mouse-wheel scrolling."""
     def __init__(self, master, *, inner_style='TFrame', canvas_background=None, width=None, **kwargs):
         super().__init__(master, width=width, **kwargs)
-        self.canvas = Canvas(self, highlightthickness=0, bd=0,
+        self.canvas = Canvas(self, highlightthickness=0, bd=0, yscrollincrement=26,
                              background=canvas_background or _window_background())
         self.scrollbar = ttk.Scrollbar(self, orient='vertical', command=self.canvas.yview)
         self.canvas.configure(yscrollcommand=self.scrollbar.set)
@@ -913,7 +979,12 @@ class ScrollableFrame(ttk.Frame):
 
     def _update_scroll_region(self, _event=None):
         try:
-            self.canvas.configure(scrollregion=self.canvas.bbox('all'))
+            box = self.canvas.bbox(self._window_id)
+            content_width = max(int(self.canvas.winfo_width()), int(self.inner.winfo_reqwidth()), int(box[2]) if box else 1)
+            content_height = max(int(self.canvas.winfo_height()), int(self.inner.winfo_reqheight()), int(box[3]) if box else 1)
+            self.canvas.configure(scrollregion=(0, 0, content_width, content_height))
+            if content_height <= int(self.canvas.winfo_height() or 1):
+                self.canvas.yview_moveto(0)
         except Exception:
             pass
 
@@ -965,6 +1036,9 @@ class ScrollableFrame(ttk.Frame):
                 return None
             units = -int(delta / 120) if abs(delta) >= 120 else (-1 if delta > 0 else 1)
         try:
+            first, last = self.canvas.yview()
+            if (units < 0 and first <= 0.0001) or (units > 0 and last >= 0.9999):
+                return 'break'
             self.canvas.yview_scroll(units, 'units')
             return 'break'
         except Exception:
@@ -1060,12 +1134,12 @@ class SetupDialog:
         win.minsize(540, 520)
         win.transient(root)
         win.grab_set()
-        outer = ttk.Frame(win, style='DialogCard.TFrame', padding=(34, 28))
+        outer = ttk.Frame(win, style='DialogCard.TFrame', padding=(26, 18))
         outer.pack(fill=BOTH, expand=True, padx=18, pady=18)
         ttk.Label(outer, text='تهيئة النظام', style='Eyebrow.TLabel').pack(anchor=E, pady=(0, 5))
         ttk.Label(outer, text='مرحبًا بك في SchoolPass', style='DialogTitle.TLabel').pack(anchor=E, pady=(0, 7))
         ttk.Label(outer, text='أنشئ حساب المدير الأول لإدارة المستخدمين والإعدادات. لا توجد كلمة مرور افتراضية، ولا تُحفظ كلمة المرور كنص واضح.',
-                  style='DialogMessage.TLabel', wraplength=500, justify='right').pack(fill=X, pady=(0, 16))
+                  style='DialogMessage.TLabel', wraplength=500, justify='right').pack(fill=X, pady=(0, 10))
         form = ttk.Frame(outer, style='Dialog.TFrame')
         form.pack(fill=X)
         self.user = StringVar(value='')
@@ -1078,9 +1152,9 @@ class SetupDialog:
                 ('تأكيد كلمة المرور', self.confirm, '●', 'أعد كتابة كلمة المرور')]
         entries = []
         for label, var, show, hint in rows:
-            ttk.Label(form, text=label, style='FieldLabel.TLabel').pack(anchor=E, pady=(9, 3))
+            ttk.Label(form, text=label, style='FieldLabel.TLabel').pack(anchor=E, pady=(6, 2))
             ent = ttk.Entry(form, textvariable=var, show=show, justify='right')
-            ent.pack(fill=X, ipady=1)
+            ent.pack(fill=X, ipady=2)
             entries.append(ent)
             ttk.Label(form, text=hint, style='Hint.TLabel').pack(anchor=E, pady=(2, 1))
 
@@ -1098,7 +1172,7 @@ class SetupDialog:
             show_recovery_code(win, code)
             win.destroy()
         actions = ttk.Frame(outer, style='Dialog.TFrame')
-        actions.pack(fill=X, pady=(20, 0))
+        actions.pack(fill=X, pady=(12, 0))
         ttk.Button(actions, text='إنشاء حساب المدير', command=create, style='Accent.TButton').pack(side=RIGHT)
         win.protocol('WM_DELETE_WINDOW', win.destroy)
         entries[0].focus_set()
@@ -1259,13 +1333,13 @@ class StudentPicker:
         self.win.grab_set()
         top = ttk.Frame(self.win)
         top.pack(fill=X, padx=12, pady=12)
-        ttk.Label(top, text='ابحث بالاسم أو اللقب أو رقم التعريف أو القسم:').pack(side=RIGHT, padx=5)
+        ttk.Label(top, text='ابحث بالاسم أو اللقب أو القسم:').pack(side=RIGHT, padx=5)
         self.query = StringVar()
         ent = ttk.Entry(top, textvariable=self.query, justify='right')
         ent.pack(side=RIGHT, fill=X, expand=True)
-        cols = ('student_key', 'name', 'class_name')
+        cols = ('name', 'class_name')
         self.tree = ttk.Treeview(self.win, columns=cols, show='headings')
-        for col, title, width in [('student_key', 'رقم التعريف', 170), ('name', 'اسم التلميذ', 260), ('class_name', 'القسم', 250)]:
+        for col, title, width in [('name', 'اللقب والاسم', 360), ('class_name', 'القسم', 250)]:
             self.tree.heading(col, text=title)
             self.tree.column(col, width=width, anchor=E)
         self.tree.pack(fill=BOTH, expand=True, padx=12, pady=(0, 6))
@@ -1289,7 +1363,7 @@ class StudentPicker:
                 "OR (last_name||' '||first_name) LIKE ? OR (first_name||' '||last_name) LIKE ? OR class_name LIKE ?) "
                 "ORDER BY last_name,first_name LIMIT 250", (f'%{q}%',) * 6).fetchall()
         for s in rows:
-            self.tree.insert('', END, iid=str(s['id']), values=(s['student_key'], student_name(s), s['class_name']))
+            self.tree.insert('', END, iid=str(s['id']), values=(student_name(s), s['class_name']))
 
     def pick_selected(self, _event=None):
         sel = self.tree.selection()
@@ -1715,7 +1789,7 @@ class RecordForm:
         try:
             rows = core.search_students(query, 18)
             self.student_option_map = {
-                f"{student_name(row)} — {row['class_name']} — {row['student_key']}": row
+                f"{student_name(row)} — {row['class_name']}": row
                 for row in rows
             }
             self.student_suggestions.show(list(self.student_option_map.items()))
@@ -1784,7 +1858,7 @@ class RecordForm:
 
     def set_student(self, row):
         self.student = row
-        label = f"{student_name(row)} — {row['class_name']} — {row['student_key']}"
+        label = f"{student_name(row)} — {row['class_name']}"
         self.student_label.set(label)
         self._selected_student_label = label
         if hasattr(self, 'student_var'):
@@ -2350,13 +2424,17 @@ class SchoolPassApp:
                 button.bind('<Leave>', lambda _event, target=button: target.configure(style='SubNav.TButton'))
             return button
 
-        def nav_section(label):
-            ttk.Label(sidebar, text=label, style='SidebarSub.TLabel').pack(anchor=E, padx=18, pady=(15, 6))
+        def nav_group(label, frame_style, title_style):
+            group = ttk.Frame(sidebar, style=frame_style)
+            group.pack(fill=X, padx=8, pady=4)
+            ttk.Label(group, text=label, style=title_style).pack(fill=X, padx=7, pady=(6, 3))
+            ttk.Frame(group, height=1, style='SidebarSeparator.TFrame').pack(fill=X, padx=8, pady=(0, 4))
+            return group
 
         nav('⌂   لوحة التحكم الرئيسية', self.refresh_all)
-        nav_section('إجراءات الدخول والخروج')
-        entry_group = ttk.Frame(sidebar, style='Sidebar.TFrame')
-        entry_toggle = nav('＋   رخص الدخول  ▾', lambda: None)
+        operations_group = nav_group('إجراءات الدخول والخروج', 'SidebarGroupOps.TFrame', 'SidebarGroupOpsTitle.TLabel')
+        entry_group = ttk.Frame(operations_group, style='SidebarGroupOps.TFrame')
+        entry_toggle = nav('＋   رخص الدخول  ▾', lambda: None, parent=operations_group)
         entry_items = (
             ('＋  تأخر عن الدخول', 'late'),
             ('↩  عودة بعد الغياب', 'absence_return'),
@@ -2364,32 +2442,34 @@ class SchoolPassApp:
         )
         for label, kind in entry_items:
             nav(label, lambda k=kind: RecordForm(self, k), 'SubNav.TButton', parent=entry_group)
-        exit_button = nav('⇥   رخصة خروج استثنائي', lambda: RecordForm(self, 'exit_permit'), 'Gold.TButton')
+        exit_button = nav('⇥   رخصة خروج استثنائي', lambda: RecordForm(self, 'exit_permit'), 'Gold.TButton', parent=operations_group)
         def toggle_entry_group(_event=None):
             if entry_group.winfo_ismapped():
                 entry_group.pack_forget()
                 entry_toggle.configure(text='＋   رخص الدخول  ▾')
             else:
-                entry_group.pack(fill=X, padx=13, pady=(0, 4), before=exit_button)
+                entry_group.pack(fill=X, padx=8, pady=(0, 4), before=exit_button)
                 entry_toggle.configure(text='＋   رخص الدخول  ▴')
         entry_toggle.configure(command=toggle_entry_group)
+
+        data_group = nav_group('إدارة البيانات', 'SidebarGroupData.TFrame', 'SidebarGroupDataTitle.TLabel')
         if self.current_user['role'] == 'admin':
-            nav('♟   إدارة الأساتذة واستيراد القائمة', self.manage_teachers)
-        nav_section('المتابعة والتقارير')
-        nav('▤   إدارة التلاميذ', self.manage_students)
-        nav('▥   سجل التلاميذ المطرودين', self.open_expulsion_report)
-        nav('▥   سجل العمليات والتصفية', self.open_logs)
-        nav('▦   الإحصائيات والرسوم البيانية', self.show_stats)
-        nav('▧   التقارير الشهرية', self.monthly_report)
-        nav('!   تنبيهات الخروج دون عودة', self.show_open_exits)
+            nav('♟   إدارة الأساتذة واستيراد Excel', self.manage_teachers, parent=data_group)
+        nav('▤   إدارة التلاميذ', self.manage_students, parent=data_group)
+
+        reports_group = nav_group('المتابعة والتقارير', 'SidebarGroupReports.TFrame', 'SidebarGroupReportsTitle.TLabel')
+        nav('▥   سجل التلاميذ المطرودين', self.open_expulsion_report, parent=reports_group)
+        nav('▥   سجل العمليات والتصفية', self.open_logs, parent=reports_group)
+        nav('▦   الإحصائيات والرسوم البيانية', self.show_stats, parent=reports_group)
+        nav('▧   التقارير الشهرية', self.monthly_report, parent=reports_group)
+        nav('!   تنبيهات الخروج دون عودة', self.show_open_exits, parent=reports_group)
         if self.current_user['role'] == 'admin':
-            ttk.Frame(sidebar, height=1, style='Sidebar.TFrame').pack(fill=X, padx=16, pady=9)
-            ttk.Label(sidebar, text='إدارة النظام', style='SidebarSub.TLabel').pack(anchor=E, padx=18, pady=(0, 4))
-            nav('◷   التقرير اليومي التفصيلي A4', self.daily_summary)
-            nav('♙   المستخدمون والصلاحيات', self.manage_users)
-            nav('▣   النسخ الاحتياطي والاستعادة', self.backup_db)
-            nav('⚙   إعدادات المؤسسة والطباعة', self.settings_dialog)
-            nav('≡   سجل التدقيق', self.audit_view)
+            admin_group = nav_group('إدارة النظام', 'SidebarGroupAdmin.TFrame', 'SidebarGroupAdminTitle.TLabel')
+            nav('◷   التقرير اليومي التفصيلي A4', self.daily_summary, parent=admin_group)
+            nav('♙   المستخدمون والصلاحيات', self.manage_users, parent=admin_group)
+            nav('▣   النسخ الاحتياطي والاستعادة', self.backup_db, parent=admin_group)
+            nav('⚙   إعدادات المؤسسة والطباعة', self.settings_dialog, parent=admin_group)
+            nav('≡   سجل التدقيق', self.audit_view, parent=admin_group)
         ttk.Frame(sidebar, style='Sidebar.TFrame').pack(fill=BOTH, expand=True)
         profile = ttk.Frame(sidebar, style='SidebarProfile.TFrame', padding=(13, 11))
         profile.pack(fill=X, padx=10, pady=(4, 8))
@@ -2474,6 +2554,11 @@ class SchoolPassApp:
             hero_actions, text='متابعة حالات الخروج', style='TButton',
             command=self.show_open_exits)
         self.hero_open_button.pack(side=LEFT, padx=(7, 0))
+        if self.current_user['role'] == 'admin':
+            self.hero_teacher_button = ttk.Button(
+                hero_actions, text='♟  إدارة الأساتذة واستيراد Excel',
+                command=self.manage_teachers, style='TButton')
+            self.hero_teacher_button.pack(side=LEFT, padx=7)
         self.hero_frame = hero
 
         # KPI cards in a responsive 3x2 grid with an icon, a clear metric and context.
@@ -2704,6 +2789,8 @@ class SchoolPassApp:
             self.hero_entry_button.configure(text='＋ دخول' if compact else '＋  إصدار رخصة دخول')
             self.hero_exit_button.configure(text='⇥ خروج' if compact else '⇥  خروج استثنائي')
             self.hero_open_button.configure(text='الحالات المفتوحة' if compact else 'متابعة حالات الخروج')
+            if hasattr(self, 'hero_teacher_button'):
+                self.hero_teacher_button.configure(text='♟ الأساتذة' if compact else '♟ إدارة الأساتذة واستيراد Excel')
         if hasattr(self, 'hero_description'):
             self.hero_description.configure(wraplength=max(220, min(660, width - 360)))
         if hasattr(self, 'maximize_button'):
@@ -3136,7 +3223,11 @@ class SchoolPassApp:
         win.transient(self.root)
         ttk.Label(win, text='إدارة الأساتذة والمواد الدراسية', style='Title.TLabel').pack(pady=(12, 6))
         ttk.Label(win, text='أضف الأستاذ يدويًا، أو نزّل النموذج واملأه ثم استورده مع معاينة وكشف التكرارات قبل الحفظ.',
-                  style='Hint.TLabel').pack(anchor=E, padx=18, pady=(0, 8))
+                  style='Hint.TLabel').pack(anchor=E, padx=18, pady=(0, 6))
+        ttk.Label(win, text='الخطوات: تنزيل النموذج ← تعبئة الاسم والمادة ← استيراد الملف ومراجعة المعاينة.',
+                  style='Hint.TLabel').pack(anchor=E, padx=18, pady=(0, 5))
+        import_toolbar = ttk.Frame(win)
+        import_toolbar.pack(fill=X, padx=14, pady=(0, 5))
 
         form = ttk.Frame(win, style='Surface.TFrame', padding=12)
         form.pack(fill=X, padx=14, pady=6)
@@ -3291,12 +3382,14 @@ class SchoolPassApp:
                        style='Accent.TButton').pack(side=RIGHT,padx=4)
             ttk.Button(buttons,text='إلغاء',command=preview_win.destroy).pack(side=LEFT,padx=4)
 
+        ttk.Button(import_toolbar, text='①  تنزيل نموذج Excel للأساتذة',
+                   command=download_template, style='Gold.TButton').pack(side=RIGHT, padx=5, pady=2)
+        ttk.Button(import_toolbar, text='②  استيراد ملف Excel ومراجعته',
+                   command=import_excel, style='Accent.TButton').pack(side=RIGHT, padx=5, pady=2)
         buttons = ttk.Frame(win); buttons.pack(fill=X,padx=14,pady=(2,12))
         ttk.Button(buttons,text='إضافة أستاذ',command=add,style='Accent.TButton').pack(side=RIGHT,padx=4)
         ttk.Button(buttons,text='تحديث البيانات المحددة',command=update).pack(side=RIGHT,padx=4)
         ttk.Button(buttons,text='تفعيل / إيقاف',command=toggle_active).pack(side=RIGHT,padx=4)
-        ttk.Button(buttons,text='تنزيل نموذج Excel',command=download_template,style='Gold.TButton').pack(side=RIGHT,padx=4)
-        ttk.Button(buttons,text='استيراد ملف Excel',command=import_excel,style='Accent.TButton').pack(side=RIGHT,padx=4)
         ttk.Button(buttons,text='تفريغ الحقول',command=clear_form).pack(side=LEFT,padx=4)
         ttk.Button(buttons,text='إغلاق',command=win.destroy).pack(side=LEFT,padx=4)
         refresh()

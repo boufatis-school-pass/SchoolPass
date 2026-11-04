@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-EXPECTED = "4.7.1"
+EXPECTED = "4.7.2"
 
 
 def main() -> int:
@@ -35,7 +35,7 @@ def main() -> int:
         errors.append("requirements_dev.txt must pin the reviewed PyInstaller 6.22.3 release")
     schema = re.search(r"^SCHEMA_VERSION\s*=\s*[\"\']?(\d+)[\"\']?", core, re.M)
     if not schema or schema.group(1) != "7":
-        errors.append("SchoolPass 4.7.1 must use schema version 7 with an additive teachers table migration")
+        errors.append("SchoolPass 4.7.2 must use schema version 7 with an additive teachers table migration")
     if not setup_version:
         errors.append("MyAppVersion is missing from SchoolPass_Setup.iss")
     elif setup_version.group(1) != EXPECTED:
@@ -87,6 +87,13 @@ def main() -> int:
         errors.append("Both A6 receipt renderers must use the shared administration signature component")
 
     app_source = (ROOT / "app.py").read_text(encoding="utf-8-sig")
+    test_ui_source = (ROOT / "test_ui_smoke.py").read_text(encoding="utf-8-sig")
+    if "def test_student_search_labels_show_only_full_name_and_class(self):" not in test_ui_source:
+        errors.append("Student search display regression test is missing")
+
+    if "requested_w * 0.90" in app_source or "requested_h * 0.88" in app_source:
+        errors.append("Dialog geometry must not be arbitrarily scaled down; this clips buttons on school screens.")
+
     if "event_generate('<Down>')" in app_source:
         errors.append("Combobox Down-key injection may interrupt continuous typing")
 
@@ -112,6 +119,13 @@ def main() -> int:
         ("def _refresh_student_suggestions(self, event=None):", "focus-preserving live student autocomplete"),
         ("def _refresh_teacher_suggestions(self, event=None):", "focus-preserving live teacher autocomplete"),
         ("class SuggestionPopup:", "independent autocomplete results popup"),
+        ("def _center_toplevel_window(win):", "centered popup and dialog placement"),
+        ("def nav_group(label, frame_style, title_style):", "colored grouped sidebar navigation"),
+        ("SidebarGroupOps.TFrame", "distinct operations sidebar group"),
+        ("SidebarGroupData.TFrame", "distinct data sidebar group"),
+        ("SidebarGroupReports.TFrame", "distinct reports sidebar group"),
+        ("①  تنزيل نموذج Excel للأساتذة", "visible teacher Excel template action"),
+        ("②  استيراد ملف Excel ومراجعته", "visible teacher Excel import action"),
         ("def download_template():", "downloadable teacher Excel template"),
         ("إدارة الأساتذة واستيراد القائمة", "visible teacher import entry point"),
         ("before=exit_button", "correctly positioned entry submenu"),
@@ -122,7 +136,7 @@ def main() -> int:
         ("اختيار الحساب", "account selector on login"),
     ):
         if marker not in app_source:
-            errors.append(f"SchoolPass 4.7.1 visual design marker missing: {description}")
+            errors.append(f"SchoolPass 4.7.2 visual design marker missing: {description}")
     for marker, description in (
         ("def _schoolpass_map_values", "dynamic Arabic combobox values"),
         ("def _schoolpass_save_logical_values", "logical Treeview value preservation"),

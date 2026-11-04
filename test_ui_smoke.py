@@ -368,6 +368,19 @@ class TestGuiSmoke(unittest.TestCase):
                          ("اسم الأستاذ", "المادة", "الأقسام"))
         workbook.close()
 
+    def test_student_search_labels_show_only_full_name_and_class(self):
+        app = self.make_app(self.sup)
+        form = self.app.RecordForm(app, "late")
+        form.student_var.set("أحمد")
+        form._refresh_student_suggestions()
+        labels = list(form.student_option_map)
+        self.assertTrue(labels)
+        self.assertTrue(all(self.s1["student_key"] not in label for label in labels))
+        self.assertTrue(all(self.s1["class_name"] in label for label in labels))
+        form.set_student(self.s1)
+        self.assertNotIn(self.s1["student_key"], form.student_var.get())
+        self.assertIn(self.s1["class_name"], form.student_var.get())
+
     def test_special_entry_form_creates_expulsion_with_teacher_and_subject(self):
         a = self.make_app(self.sup)
         form = self.app.RecordForm(a, "special_entry")

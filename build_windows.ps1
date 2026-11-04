@@ -109,7 +109,7 @@ try {
     $setup = Join-Path $Root 'dist\SchoolPass_Setup.exe'
     if (-not (Test-Path $setup) -or (Get-Item $setup).Length -lt 1000000) { throw 'لم يتم العثور على مثبت Windows صالح.' }
 
-    Write-Host "`nاكتمل بناء SchoolPass 4.7.0." -ForegroundColor Green
+    Write-Host "`nاكتمل بناء SchoolPass 4.7.2." -ForegroundColor Green
     Write-Host "ملف التثبيت: $setup" -ForegroundColor Green
     Write-Host 'لم يجر لمس مجلد بيانات المستخدم %LOCALAPPDATA%\SchoolPass.'
     Start-Process explorer.exe -ArgumentList (Join-Path $Root 'dist')
