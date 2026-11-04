@@ -1631,6 +1631,28 @@ class RecordForm:
         self.student_combo.bind('<Escape>', lambda _e: self.student_suggestions.hide())
         ttk.Button(student_row, text='بحث بالقائمة', command=self.pick_student).pack(side=RIGHT, padx=6)
 
+        # Guardian profiles are shared across all permit forms and are loaded per selected student.
+        guardian_box = ttk.Frame(form, relief='groove', borderwidth=1)
+        guardian_box.pack(fill=X, pady=(4, 7))
+        ttk.Label(guardian_box, text='أولياء التلميذ المسجلون', font=('Segoe UI', 9, 'bold')).pack(anchor=E, padx=8, pady=(5, 2))
+        guardian_row = ttk.Frame(guardian_box)
+        guardian_row.pack(fill=X, padx=7, pady=3)
+        ttk.Label(guardian_row, text='الولي', width=29, anchor=E).pack(side=RIGHT, padx=(4, 8))
+        self.guardian_var = StringVar(value='')
+        self.guardian_combo = ttk.Combobox(guardian_row, textvariable=self.guardian_var,
+                                           state='readonly', values=(), justify='right')
+        self.guardian_combo.pack(side=RIGHT, fill=X, expand=True)
+        self.guardian_combo.bind('<<ComboboxSelected>>', self._guardian_selected)
+        ttk.Button(guardian_row, text='+ إضافة ولي', command=self.add_guardian_dialog,
+                   style='Gold.TButton').pack(side=RIGHT, padx=5)
+        guardian_actions = ttk.Frame(guardian_box)
+        guardian_actions.pack(fill=X, padx=8, pady=(2, 5))
+        self.guardian_info_var = DisplayStringVar(value='اختر التلميذ لعرض بيانات أوليائه المسجلين.')
+        ttk.Label(guardian_actions, textvariable=self.guardian_info_var,
+                  foreground='#526579', wraplength=490, justify='right').pack(side=RIGHT, fill=X, expand=True)
+        ttk.Button(guardian_actions, text='تعيين الولي المختار كأساسي',
+                   command=self.set_selected_guardian_primary, style='Link.TButton').pack(side=LEFT, padx=4)
+
         if kind == 'late':
             ttk.Label(form, text='سبب التأخر', anchor=E).pack(fill=X, pady=(9, 3))
             late_options = ('التواجد في الاستشارة', 'التأخر بسبب انعدام النقل', 'التأخر في الالتحاق بالقسم')
@@ -1879,8 +1901,136 @@ class RecordForm:
             self.student_var.set(label)
         if hasattr(self, 'student_suggestions'):
             self.student_suggestions.hide()
+        self._refresh_guardian_choices()
         if hasattr(self, 'student_combo'):
             self.student_combo.focus_set()
+
+    def _refresh_guardian_choices(self, preferred_id=None):
+        if not self.student or not hasattr(self, 'guardian_combo'):
+            return
+        for key in ('guardian_name', 'relationship', 'national_id'):
+            if key in self.vars:
+                self.vars[key].set('')
+        try:
+            rows = core.list_student_guardians(int(self.student['id']), self.app.current_user['id'])
+        except Exception as exc:
+            self.guardian_option_map = {}
+            self.guardian_combo.configure(values=())
+            self.guardian_var.set('')
+            self.guardian_info_var.set('تعذر تحميل بيانات الأولياء المحفوظة.')
+            show_error(self.win, 'تعذر تحميل بيانات الولي', exc)
+            return
+        self.guardian_option_map = {}
+        labels = []
+        for item in rows:
+            relationship = item.get('relationship_label') or item.get('relationship') or ''
+            label = f"{item['full_name']} — {relationship} — {item['national_id_masked']}"
+            self.guardian_option_map[label] = item
+            labels.append(label)
+        self.guardian_combo.configure(values=tuple(labels))
+        if not rows:
+            self.guardian_var.set('')
+            self.guardian_info_var.set('لا توجد بيانات ولي محفوظة لهذا التلميذ. أضف الأب أو الأم أو الوصي مرة واحدة لتظهر بياناته تلقائيًا لاحقًا.')
+            return
+        chosen = next((item for item in rows if preferred_id and int(item['id']) == int(preferred_id)), None)
+        if chosen is None:
+            chosen = next((item for item in rows if item.get('is_primary')), rows[0])
+        chosen_label = next(label for label, item in self.guardian_option_map.items()
+                            if int(item['id']) == int(chosen['id']))
+        self.guardian_combo.set(chosen_label)
+        self._apply_selected_guardian(chosen)
+
+    def _guardian_selected(self, _event=None):
+        item = self.guardian_option_map.get(self.guardian_combo.get())
+        if item:
+            self._apply_selected_guardian(item)
+
+    def _apply_selected_guardian(self, item):
+        relationship = item.get('relationship_label') or item.get('relationship') or ''
+        for key, value in (('guardian_name', item.get('full_name', '')),
+                           ('relationship', relationship),
+                           ('national_id', item.get('national_id', ''))):
+            if key in self.vars:
+                self.vars[key].set(value)
+        phone = item.get('phone') or 'غير مسجل'
+        self.guardian_info_var.set(
+            f"الولي المحدد: {item.get('full_name', '')} — {relationship}؛ "
+            f"رقم بطاقة التعريف: {item.get('national_id_masked', 'غير متاح')}؛ الهاتف: {phone}. "
+            "تحديده هنا لا يعني تأكيد حضوره شخصيًا."
+        )
+
+    def set_selected_guardian_primary(self):
+        if not self.student:
+            messagebox.showinfo('اختر تلميذًا', 'اختر التلميذ أولًا.', parent=self.win)
+            return
+        item = self.guardian_option_map.get(self.guardian_combo.get())
+        if not item:
+            messagebox.showinfo('اختر وليًا', 'اختر وليًا مسجلًا أولًا.', parent=self.win)
+            return
+        try:
+            core.set_primary_student_guardian(
+                self.app.current_user['id'], int(self.student['id']), int(item['id']))
+            self._refresh_guardian_choices(preferred_id=item['id'])
+            self.guardian_info_var.set('تم تعيين هذا الولي كأساسي لهذا التلميذ.')
+        except Exception as exc:
+            show_error(self.win, 'تعذر تعيين الولي الأساسي', exc)
+
+    def add_guardian_dialog(self):
+        if not self.student:
+            messagebox.showinfo('اختر تلميذًا', 'اختر التلميذ قبل إضافة ولي.', parent=self.win)
+            return
+        dialog = Toplevel(self.win)
+        configure_window(dialog, 'إضافة ولي وربطه بالتلميذ', '560x470')
+        dialog.transient(self.win)
+        dialog.grab_set()
+        ttk.Label(dialog, text=f"إضافة ولي إلى ملف: {student_name(self.student)}",
+                  style='Title.TLabel').pack(pady=(14, 8))
+        form = ttk.Frame(dialog, padding=18)
+        form.pack(fill=BOTH, expand=True)
+
+        def field(label, variable):
+            row = ttk.Frame(form); row.pack(fill=X, pady=6)
+            ttk.Label(row, text=label, width=22, anchor=E).pack(side=RIGHT, padx=(4, 8))
+            entry = ttk.Entry(row, textvariable=variable, justify='right')
+            entry.pack(side=RIGHT, fill=X, expand=True)
+            return entry
+
+        name_var, id_var, phone_var = StringVar(), StringVar(), StringVar()
+        relationship_var = StringVar(value='الأب')
+        other_var = StringVar()
+        primary_var = BooleanVar(value=not bool(getattr(self, 'guardian_option_map', {})))
+        field('الاسم واللقب الكامل', name_var)
+        rel_row = ttk.Frame(form); rel_row.pack(fill=X, pady=6)
+        ttk.Label(rel_row, text='صلة القرابة', width=22, anchor=E).pack(side=RIGHT, padx=(4, 8))
+        relationship_combo = ttk.Combobox(
+            rel_row, textvariable=relationship_var, state='readonly',
+            values=core.GUARDIAN_RELATIONSHIPS, justify='right')
+        relationship_combo.pack(side=RIGHT, fill=X, expand=True)
+        field('صلة أخرى (عند الاختيار)', other_var)
+        field('رقم بطاقة التعريف', id_var)
+        field('رقم الهاتف (اختياري)', phone_var)
+        ttk.Checkbutton(form, text='تعيين هذا الولي كأساسي لهذا التلميذ',
+                        variable=primary_var).pack(anchor=E, pady=(8, 4))
+        ttk.Label(form, text='يُحفظ رقم بطاقة التعريف مشفرًا، ويُعرض مختصرًا في القوائم والتقارير.',
+                  foreground='#526579', wraplength=490, justify='right').pack(anchor=E, pady=4)
+
+        def save_guardian():
+            try:
+                saved = core.create_guardian_for_student(
+                    self.app.current_user['id'], int(self.student['id']),
+                    name_var.get(), relationship_var.get(), id_var.get(), phone_var.get(),
+                    other_var.get(), bool(primary_var.get()))
+            except Exception as exc:
+                show_error(dialog, 'تعذر حفظ بيانات الولي', exc)
+                return
+            dialog.destroy()
+            self._refresh_guardian_choices(preferred_id=saved['id'])
+            messagebox.showinfo('تم الحفظ', 'حُفظ ملف الولي وربط بالتلميذ. ستظهر بياناته تلقائيًا عند إصدار الرخص القادمة.', parent=self.win)
+
+        buttons = ttk.Frame(dialog); buttons.pack(fill=X, padx=18, pady=(0, 14))
+        ttk.Button(buttons, text='حفظ وربط بالتلميذ', command=save_guardian,
+                   style='Accent.TButton').pack(side=RIGHT, padx=4)
+        ttk.Button(buttons, text='إلغاء', command=dialog.destroy).pack(side=RIGHT, padx=4)
 
     def save(self):
         if self._saving:
@@ -2040,7 +2190,7 @@ class SchoolPassApp:
         self._update_check_running = False
         self.last_activity = time.time()
         self._locked = False
-        configure_window(root, f"SchoolPass {APP_VERSION} — {setting('school_name', SCHOOL_NAME)}", '1320x860')
+        configure_window(root, f"SchoolPass {APP_VERSION}", '1320x860')
         try:
             sw = int(root.winfo_screenwidth() or 1366)
             sh = int(root.winfo_screenheight() or 768)
@@ -2559,6 +2709,7 @@ class SchoolPassApp:
         data_group = nav_group('data', 'إدارة البيانات', 'SidebarGroupData.TFrame', 'SidebarGroupDataTitle.TLabel')
         if self.current_user['role'] == 'admin':
             nav('♟   إدارة الأساتذة واستيراد Excel', self.manage_teachers, parent=data_group)
+            nav('👥   إدارة الأولياء', self.manage_guardians, parent=data_group)
         nav('▤   إدارة التلاميذ', self.manage_students, parent=data_group)
 
         reports_group = nav_group('reports', 'المتابعة والتقارير', 'SidebarGroupReports.TFrame', 'SidebarGroupReportsTitle.TLabel')
@@ -2661,10 +2812,8 @@ class SchoolPassApp:
             command=self.show_open_exits)
         self.hero_open_button.pack(side=LEFT, padx=(7, 0))
         if self.current_user['role'] == 'admin':
-            self.hero_teacher_button = ttk.Button(
-                hero_actions, text='♟  إدارة الأساتذة واستيراد Excel',
-                command=self.manage_teachers, style='TButton')
-            self.hero_teacher_button.pack(side=LEFT, padx=7)
+            # Teacher imports live in Data Management; keep the welcome area focused on daily actions.
+            pass
         self.hero_frame = hero
 
         # KPI cards in a responsive 3x2 grid with an icon, a clear metric and context.
@@ -2695,8 +2844,8 @@ class SchoolPassApp:
             title_label = ttk.Label(card_head, text=label, style='CardTitle.TLabel', wraplength=220, justify='right')
             title_label.pack(side=RIGHT, fill=X, expand=True, anchor='n', pady=(3, 0))
             value = ttk.Label(card, text='—', style='CardValue.TLabel')
-            value.pack(anchor=E, pady=(8, 0))
-            ttk.Label(card, text=hint, style='MetricHint.TLabel').pack(anchor=E, pady=(3, 0))
+            value.pack(fill=X, pady=(6, 0))
+            ttk.Label(card, text=hint, style='MetricHint.TLabel').pack(fill=X, pady=(3, 0))
             self.card_values[key] = value
             detail_keys = {'today_entry': 'today_entry', 'today_exit': 'today_exit', 'late': 'today_late',
                            'absence': 'today_absence', 'open': 'open_exits'}
@@ -3573,6 +3722,95 @@ class SchoolPassApp:
                 tree.insert('', END, iid=str(s['id']), values=(s['student_key'], student_name(s), s['class_name'], s['gender'], 'نشط' if s['active'] else 'غير نشط'))
         tree.bind('<Double-1>', lambda _e: profile())
         q.trace_add('write', refresh)
+        refresh()
+
+    def manage_guardians(self):
+        if self.current_user['role'] != 'admin':
+            messagebox.showwarning('صلاحيات محدودة', 'إدارة سجل الأولياء متاحة لمدير النظام فقط. يستطيع المشرف اختيار ولي مسجل أو إضافة ولي عند إصدار الرخصة.', parent=self.root)
+            return
+        win = Toplevel(self.root)
+        configure_window(win, 'إدارة أولياء التلاميذ', '1160x660')
+        win.transient(self.root)
+        ttk.Label(win, text='سجل أولياء التلاميذ', style='Title.TLabel').pack(pady=(14, 4))
+        ttk.Label(win, text='تُسجّل بيانات الولي من نموذج إصدار الرخصة، ويمكن من هنا مراجعة بياناته وتعديلها. رقم بطاقة التعريف مخفي في القائمة.',
+                  wraplength=1050, justify='right').pack(fill=X, padx=18, pady=(0, 8))
+        top = ttk.Frame(win); top.pack(fill=X, padx=14, pady=7)
+        query = StringVar()
+        ttk.Label(top, text='بحث بالاسم أو الهاتف أو آخر أربعة أرقام من الهوية:').pack(side=RIGHT, padx=5)
+        search = ttk.Entry(top, textvariable=query, justify='right')
+        search.pack(side=RIGHT, fill=X, expand=True)
+        columns = ('name', 'id', 'phone', 'count', 'students')
+        tree = ttk.Treeview(win, columns=columns, show='headings', height=18)
+        for key, label, width in (
+            ('name', 'اسم الولي', 210), ('id', 'رقم الهوية (مقنّع)', 150),
+            ('phone', 'الهاتف', 130), ('count', 'عدد التلاميذ', 100),
+            ('students', 'التلاميذ المرتبطون والصفة', 500),
+        ):
+            tree.heading(key, text=label)
+            tree.column(key, width=width, anchor=E)
+        tree.pack(fill=BOTH, expand=True, padx=14, pady=6)
+
+        def refresh(*_):
+            for child in tree.get_children():
+                tree.delete(child)
+            try:
+                rows = core.list_guardians_as_admin(self.current_user['id'], query.get())
+            except Exception as exc:
+                show_error(win, 'تعذر تحميل سجل الأولياء', exc)
+                return
+            for item in rows:
+                masked = '*' * max(4, int(item['national_id_length'] or 0) - 4) + item['national_id_last4']
+                tree.insert('', END, iid=str(item['id']),
+                            values=(item['full_name'], masked, item['phone'] or '—',
+                                    item['student_count'], item['linked_students'] or 'لا يوجد ارتباط'))
+        def edit_selected():
+            selected = tree.selection()
+            if not selected:
+                messagebox.showinfo('اختر وليًا', 'حدد وليًا من القائمة أولًا.', parent=win)
+                return
+            guardian_id = int(selected[0])
+            try:
+                details = core.get_guardian_as_admin(self.current_user['id'], guardian_id)
+            except Exception as exc:
+                show_error(win, 'تعذر فتح بيانات الولي', exc)
+                return
+            dialog = Toplevel(win)
+            configure_window(dialog, 'تعديل بيانات ولي', '560x410')
+            dialog.transient(win); dialog.grab_set()
+            ttk.Label(dialog, text='تعديل ملف الولي', style='Title.TLabel').pack(pady=(14, 7))
+            form = ttk.Frame(dialog, padding=18); form.pack(fill=BOTH, expand=True)
+            name_var, id_var, phone_var = (
+                StringVar(value=details['full_name']),
+                StringVar(value=details['national_id']),
+                StringVar(value=details['phone'] or ''),
+            )
+            for label, variable in (('الاسم الكامل', name_var), ('رقم بطاقة التعريف', id_var), ('رقم الهاتف', phone_var)):
+                row = ttk.Frame(form); row.pack(fill=X, pady=7)
+                ttk.Label(row, text=label, width=22, anchor=E).pack(side=RIGHT, padx=(4, 8))
+                ttk.Entry(row, textvariable=variable, justify='right').pack(side=RIGHT, fill=X, expand=True)
+            ttk.Label(form, text='يُسجل عرض رقم الهوية الكامل في سجل التدقيق. اترك الرقم كما هو إن لم ترغب بتغييره.',
+                      foreground='#526579', wraplength=480, justify='right').pack(anchor=E, pady=6)
+            def save():
+                try:
+                    core.update_guardian_as_admin(
+                        self.current_user['id'], guardian_id, name_var.get(), phone_var.get(), id_var.get())
+                except Exception as exc:
+                    show_error(dialog, 'تعذر تعديل بيانات الولي', exc)
+                    return
+                dialog.destroy()
+                refresh()
+                messagebox.showinfo('تم التعديل', 'حُفظت بيانات الولي وسُجل التعديل في سجل التدقيق.', parent=win)
+            bar = ttk.Frame(dialog); bar.pack(fill=X, padx=18, pady=(0, 14))
+            ttk.Button(bar, text='حفظ التعديلات', command=save, style='Accent.TButton').pack(side=RIGHT, padx=4)
+            ttk.Button(bar, text='إلغاء', command=dialog.destroy).pack(side=RIGHT, padx=4)
+
+        bar = ttk.Frame(win); bar.pack(fill=X, padx=14, pady=(0, 12))
+        ttk.Button(bar, text='تعديل بيانات الولي المحدد', command=edit_selected,
+                   style='Accent.TButton').pack(side=RIGHT, padx=4)
+        ttk.Button(bar, text='تحديث القائمة', command=refresh).pack(side=RIGHT, padx=4)
+        ttk.Button(bar, text='إغلاق', command=win.destroy).pack(side=LEFT, padx=4)
+        query.trace_add('write', refresh)
+        tree.bind('<Double-1>', lambda _e: edit_selected())
         refresh()
 
     def _import_students(self, parent, after):
