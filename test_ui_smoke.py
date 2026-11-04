@@ -576,6 +576,7 @@ class TestGuiSmoke(unittest.TestCase):
         owner = self.app._tk.Tk()
         tree = self.app.ttk.Treeview(owner, columns=('student',), show='headings')
         tree.heading('student', text='اسم التلميذ')
+        self.assertEqual(tree.column('student')['anchor'], 'e')
         tree.column('student', width=220)
         self.assertEqual(tree.headings['student']['text'], self.app.rtl_display('اسم التلميذ'))
         self.assertEqual(tree.headings['student']['anchor'], 'e')
