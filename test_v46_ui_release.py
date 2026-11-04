@@ -105,9 +105,9 @@ def test_arabic_rtl_adapters_cover_window_titles_widgets_and_right_aligned_repor
         "kwargs.setdefault('anchor', 'e')",
         "def column(self, column, option=None, **kwargs):",
         "tag_configure('_schoolpass_rtl', justify='right')",
-        "base_dir=\"R\"",
     ):
         assert marker in APP
+    assert 'base_dir="R"' in CORE
     ui_tests = (ROOT / "test_ui_smoke.py").read_text(encoding="utf-8-sig")
     for marker in (
         "def test_arabic_rtl_rendering_covers_titles_labels_text_canvas_and_entries(self):",
