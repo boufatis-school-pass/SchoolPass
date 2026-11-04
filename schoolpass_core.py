@@ -3437,7 +3437,7 @@ def _draw_page(c, row, details: dict, copy_type: str | None, reprint: bool, font
     c.setFont(font, 5.6)
     c.drawString(qr_x, qr_y - 2.6 * MM, "SchoolPass " + row["record_no"])
 
-    # --- enlarged administration signature area; the school does not require a stamp field.
+    # --- larger area reserved for the school's physical administration stamp.
     signature_w, signature_h = 48.0 * MM, 32.0 * MM
     sx, sy = x_right - signature_w, 3.5 * MM
     _draw_admin_signature_box(
