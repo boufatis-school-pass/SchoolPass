@@ -108,6 +108,8 @@ def test_arabic_rtl_adapters_cover_window_titles_widgets_and_right_aligned_repor
     ):
         assert marker in APP
     assert 'base_dir="R"' in CORE
+    assert "held_tokens: list[tuple[str, str]]" in CORE
+    assert "ltr_numeric = re.compile(" in CORE
     ui_tests = (ROOT / "test_ui_smoke.py").read_text(encoding="utf-8-sig")
     for marker in (
         "def test_arabic_rtl_rendering_covers_titles_labels_text_canvas_and_entries(self):",
