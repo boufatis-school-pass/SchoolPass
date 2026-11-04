@@ -1807,7 +1807,7 @@ def get_gatekeeper_log(user_id, date_from: str = "", date_to: str = "", state: s
     return [dict(r) for r in rows]
 
 
-def record_by_token(def record_by_token(token: str) -> sqlite3.Row | None:
+def record_by_token(token: str) -> sqlite3.Row | None:
     with db_connect() as conn:
         return conn.execute("SELECT * FROM records WHERE qr_token=?", (token,)).fetchone()
 
@@ -3383,7 +3383,7 @@ def _draw_page(c, row, details: dict, copy_type: str | None, reprint: bool, font
     def build(scale: float, max_reason_lines: int):
         out = []
         for text, size, gap, red in items:
-            s = size * scale * 1.12
+            s = size * scale * 1.16
             lines = _wrap_to_width(text, font, s, usable)
             if text.startswith(("السبب:", "سبب الإلغاء:")) and len(lines) > max_reason_lines:
                 lines = lines[:max_reason_lines]
