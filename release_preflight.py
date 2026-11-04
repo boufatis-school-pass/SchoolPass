@@ -87,6 +87,10 @@ def main() -> int:
         errors.append("Both A6 receipt renderers must use the shared administration signature component")
 
     app_source = (ROOT / "app.py").read_text(encoding="utf-8-sig")
+    test_ui_source = (ROOT / "test_ui_smoke.py").read_text(encoding="utf-8-sig")
+    if "def test_student_search_labels_show_only_full_name_and_class(self):" not in test_ui_source:
+        errors.append("Student search display regression test is missing")
+
     if "requested_w * 0.90" in app_source or "requested_h * 0.88" in app_source:
         errors.append("Dialog geometry must not be arbitrarily scaled down; this clips buttons on school screens.")
 
@@ -120,7 +124,6 @@ def main() -> int:
         ("SidebarGroupOps.TFrame", "distinct operations sidebar group"),
         ("SidebarGroupData.TFrame", "distinct data sidebar group"),
         ("SidebarGroupReports.TFrame", "distinct reports sidebar group"),
-        ("def test_student_search_labels_show_only_full_name_and_class(self):", "student search hides student identifiers"),
         ("①  تنزيل نموذج Excel للأساتذة", "visible teacher Excel template action"),
         ("②  استيراد ملف Excel ومراجعته", "visible teacher Excel import action"),
         ("def download_template():", "downloadable teacher Excel template"),
