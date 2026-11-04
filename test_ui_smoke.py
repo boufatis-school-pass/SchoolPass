@@ -144,6 +144,7 @@ def fake_tk():
     m = types.ModuleType("tkinter")
     m.Tk = type("Tk", (Widget,), {}); m.Toplevel = type("Toplevel", (Widget,), {})
     m.Text = type("Text", (Widget,), {})
+    m.LabelFrame = type("LabelFrame", (Widget,), {})
     m.Listbox = type("Listbox", (Widget,), {})
     m.Canvas = type("Canvas", (Widget,), {})
     m.StringVar = StrVar; m.BooleanVar = StrVar
@@ -557,7 +558,7 @@ class TestGuiSmoke(unittest.TestCase):
 
     def test_arabic_rtl_rendering_covers_titles_labels_text_canvas_and_entries(self):
         owner = self.app._tk.Tk()
-        title = 'لوحة المتابعة — SchoolPass 4.7.7'
+        title = 'لوحة المتابعة — SchoolPass 4.8.0'
         owner.title(title)
         self.assertEqual(owner.title(), self.app.rtl_display(title))
 

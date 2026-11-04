@@ -1,5 +1,5 @@
 ﻿# -*- coding: utf-8 -*-
-"""SchoolPass 4.7.7 — rounded surfaces, clearly outlined input fields and visual polish."""
+"""SchoolPass 4.8.0 — pupil attendance alerts, complete histories and verified gate-exit tracking."""
 from __future__ import annotations
 
 import json
@@ -1850,6 +1850,19 @@ class RecordForm:
         self.student_combo.bind('<Escape>', lambda _e: self.student_suggestions.hide())
         ttk.Button(student_row, text='بحث بالقائمة', command=self.pick_student).pack(side=RIGHT, padx=6)
 
+        attention_box = ttk.Frame(form, style='Surface.TFrame', padding=(10, 7))
+        attention_box.pack(fill=X, pady=(3, 7))
+        attention_header = ttk.Frame(attention_box, style='Surface.TFrame')
+        attention_header.pack(fill=X)
+        ttk.Label(attention_header, text='متابعة الغياب والتأخر المتكرر', style='Section.TLabel').pack(side=RIGHT)
+        self.attention_open_button = ttk.Button(
+            attention_header, text='فتح الملف الشامل للتلميذ',
+            command=self.open_student_profile, state='disabled')
+        self.attention_open_button.pack(side=LEFT, padx=4)
+        self.attention_var = DisplayStringVar(value='اختر التلميذ لعرض ملخص التأخر والغياب والملاحظات السابقة.')
+        ttk.Label(attention_box, textvariable=self.attention_var, wraplength=610,
+                  justify='right', foreground='#5A4A22').pack(fill=X, anchor=E, pady=(4, 0))
+
         # Guardian profiles are shared across all permit forms and are loaded per selected student.
         guardian_box = ttk.Frame(form, relief='groove', borderwidth=1)
         guardian_box.pack(fill=X, pady=(4, 7))
@@ -2127,8 +2140,43 @@ class RecordForm:
         if hasattr(self, 'student_suggestions'):
             self.student_suggestions.hide()
         self._refresh_guardian_choices()
+        self._update_student_attention()
         if hasattr(self, 'student_combo'):
             self.student_combo.focus_set()
+
+    def open_student_profile(self):
+        if self.student:
+            self.app.show_student_profile(int(self.student["id"]))
+
+    def _update_student_attention(self):
+        if not self.student or not hasattr(self, "attention_var"):
+            return
+        try:
+            summary = core.student_monthly_attention(self.student["student_key"], self.app.current_user["id"])
+            late_threshold = int(core.setting("late_alert_threshold", "3") or "3")
+            absence_threshold = int(core.setting("absence_alert_threshold_days", "5") or "5")
+            messages = [
+                f"هذا الشهر ({summary['month']}): {summary['late_count']} حالة تأخر.",
+                f"أيام الغياب المسجلة خلال الشهر: {summary['absence_days']} يومًا.",
+                f"العودة بعد الغياب: {summary['absence_return_count']} مرة في السجل.",
+                f"الملاحظات الإدارية السابقة: {summary['note_count']}.",
+            ]
+            alerts = []
+            if summary["late_count"] >= late_threshold:
+                alerts.append(f"تنبيه: تجاوز حد التأخر المتكرر ({late_threshold}).")
+            if summary["absence_days"] >= absence_threshold:
+                alerts.append(f"تنبيه: تجاوز حد الغياب المتكرر ({absence_threshold} أيام).")
+            if summary["recent_notes"]:
+                last_note = summary["recent_notes"][0]
+                preview = str(last_note["note"]).replace("\n", " ").strip()
+                if len(preview) > 110:
+                    preview = preview[:107] + "…"
+                messages.append(f"آخر ملاحظة ({last_note['supervisor']}): {preview}")
+            self.attention_var.set("\n".join(alerts + messages))
+            self.attention_open_button.configure(state="normal")
+        except Exception as exc:
+            self.attention_var.set(f"تعذر تحميل ملخص متابعة التلميذ: {exc}")
+            self.attention_open_button.configure(state="normal")
 
     def _refresh_guardian_choices(self, preferred_id=None):
         if not self.student or not hasattr(self, 'guardian_combo'):
@@ -2944,7 +2992,8 @@ class SchoolPassApp:
         nav('▥   سجل التلاميذ المطرودين', self.open_expulsion_report, parent=reports_group)
         nav('▥   سجل العمليات والتصفية', self.open_logs, parent=reports_group)
         nav('▦   الإحصائيات والرسوم البيانية', self.show_stats, parent=reports_group)
-        nav('▧   التقارير الشهرية', self.monthly_report, parent=reports_group)
+        nav('▧   الأرشيف الشهري والسنوي', self.archive_reports, parent=reports_group)
+        nav('▤   سجل الحاجب — تنفيذ الخروج والعودة', self.gatekeeper_log, parent=reports_group)
         nav('!   تنبيهات الخروج دون عودة', self.show_open_exits, parent=reports_group)
         if self.current_user['role'] == 'admin':
             admin_group = nav_group('admin', 'إدارة النظام', 'SidebarGroupAdmin.TFrame', 'SidebarGroupAdminTitle.TLabel')
@@ -3185,7 +3234,8 @@ class SchoolPassApp:
             button.pack(side=side, padx=3)
             self.record_action_buttons.append((button, full, compact))
         add_record_action('عرض التفاصيل', 'تفاصيل', self.open_selected_record)
-        add_record_action('إعادة الطباعة', 'إعادة طباعة', self.reprint_selected, 'Accent.TButton')
+        add_record_action('طباعة الرخصة', 'طباعة', self.print_selected, 'Gold.TButton')
+        add_record_action('إعادة طباعة الرخصة', 'إعادة طباعة', self.reprint_selected, 'Accent.TButton')
         add_record_action('تسجيل العودة', 'عودة', self.return_selected_exit)
         add_record_action('إلغاء السجل', 'إلغاء', self.cancel_selected, side=LEFT)
         add_record_action('طباعة رخصتين مختلفتين على A4', 'رخصتان A4', self.print_two_selected, 'Gold.TButton', LEFT)
@@ -3452,6 +3502,75 @@ class SchoolPassApp:
             return
         self._show_print_options(out, self.root, title='التقرير اليومي — ورقة A4 للمدير')
 
+    def gatekeeper_log(self):
+        """Show permits issued, physical exit confirmed at the gate and subsequent return."""
+        win=Toplevel(self.root)
+        win.title('سجل الحاجب — تنفيذ الخروج والعودة')
+        win.geometry('1380x650')
+        win.minsize(1000,520)
+        win.transient(self.root)
+        top=ttk.Frame(win);top.pack(fill=X,padx=12,pady=(12,6))
+        states={'الكل':'all','لم ينفذ الخروج':'pending','نُفذ الخروج':'executed',
+                'عاد التلميذ':'returned','ملغاة':'cancelled'}
+        state_var=ComboStringVar(list(states),value='الكل')
+        ttk.Label(top,text='الحالة:').pack(side=RIGHT,padx=5)
+        ttk.Combobox(top,textvariable=state_var,values=list(states),state='readonly',
+                     width=18,justify='right').pack(side=RIGHT,padx=4)
+        count_var=DisplayStringVar(value='')
+        ttk.Label(top,textvariable=count_var).pack(side=LEFT,padx=8)
+        cols=('record_no','student','class_name','issued','guardian','executed','executor','returned','returner','state')
+        tree=ttk.Treeview(win,columns=cols,show='headings')
+        heads=[('record_no','رقم الرخصة',120),('student','التلميذ',160),('class_name','القسم',125),
+               ('issued','وقت إصدار الرخصة',145),('guardian','ولي الأمر',140),('executed','وقت الخروج الفعلي',145),
+               ('executor','من سجّل التنفيذ',125),('returned','وقت العودة',145),('returner','من سجّل العودة',125),('state','الحالة',105)]
+        for col,title,width in heads:
+            tree.heading(col,text=title);tree.column(col,width=width,anchor=E,stretch=True)
+        tree.pack(fill=BOTH,expand=True,padx=12,pady=6)
+        def refresh():
+            try: rows=core.get_gatekeeper_log(self.current_user['id'],state=states[state_var.get()])
+            except USER_ERRORS as exc:
+                show_error(win,'تعذر تحميل سجل الحاجب',exc);return
+            for item in tree.get_children():tree.delete(item)
+            for r in rows:
+                details=json.loads(r.get('details_json') or '{}')
+                state=('ملغاة' if r['status']=='cancelled' else
+                       ('عاد التلميذ' if r['status']=='returned' else
+                        ('نُفذ الخروج' if r.get('exit_executed_at') else 'لم ينفذ الخروج')))
+                tree.insert('',END,iid=str(r['id']),values=(
+                    r['record_no'],r['student_name'],r['class_name'],r['issued_at'] or r['created_at'],
+                    details.get('guardian_name','—'),r.get('exit_executed_at') or '—',
+                    r.get('exit_executor_name') or '—',r.get('returned_at') or '—',
+                    r.get('returner_name') or '—',state))
+            count_var.set(f'عدد رخص الخروج: {len(rows)}')
+        def selected():
+            return int(tree.selection()[0]) if tree.selection() else None
+        def mark_executed():
+            rid=selected()
+            if not rid:
+                messagebox.showinfo('اختيار رخصة','حدد رخصة خروج أولًا.',parent=win);return
+            try:core.mark_exit_executed(rid,self.current_user['id'])
+            except USER_ERRORS as exc:
+                show_error(win,'تعذر تأكيد تنفيذ الخروج',exc);return
+            self.refresh_records();refresh()
+        def returned():
+            rid=selected()
+            if not rid:
+                messagebox.showinfo('اختيار رخصة','حدد رخصة خروج أولًا.',parent=win);return
+            self._return_exit(rid)
+            self.refresh_records();refresh()
+        def details():
+            rid=selected()
+            if rid:self.show_record(rid)
+            else:messagebox.showinfo('اختيار رخصة','حدد رخصة أولًا.',parent=win)
+        bar=ttk.Frame(win);bar.pack(fill=X,padx=12,pady=(2,12))
+        ttk.Button(bar,text='تأكيد تنفيذ الخروج فعليًا',command=mark_executed,style='Accent.TButton').pack(side=RIGHT,padx=4)
+        ttk.Button(bar,text='تسجيل عودة التلميذ',command=returned).pack(side=RIGHT,padx=4)
+        ttk.Button(bar,text='عرض الرخصة المحددة',command=details).pack(side=RIGHT,padx=4)
+        ttk.Button(bar,text='تحديث السجل',command=refresh).pack(side=LEFT,padx=4)
+        state_var.trace_add('write',lambda *_:refresh())
+        tree.bind('<Double-1>',lambda _e:details())
+        refresh()
+
     def show_open_exits(self):
         with db_connect() as conn:
             rows = conn.execute("""SELECT r.id,r.record_no,r.student_name,r.class_name,r.issued_at,r.created_at,
@@ -3539,6 +3658,18 @@ class SchoolPassApp:
         if rid:
             self.show_record(rid)
 
+    def print_selected(self):
+        rid = self._need_selection()
+        if not rid:
+            return
+        row = record_by_id(rid)
+        if row and int(row["printed_count"] or 0) > 0:
+            messagebox.showinfo("هذه الرخصة طُبعت سابقًا",
+                                "استخدم زر «إعادة طباعة الرخصة» حتى تظهر علامة النسخة المعادة ويُسجل ذلك في التدقيق.",
+                                parent=self.root)
+            return
+        self._print_by_id(rid, self.root)
+
     def reprint_selected(self):
         rid = self._need_selection()
         if rid:
@@ -3585,7 +3716,11 @@ class SchoolPassApp:
             lines.append(f"مرجع تصريح الخروج: {details.get('permit_no', '—')}")
         if row['kind'] == 'exit_permit':
             lines += [f"ولي الأمر: {details.get('guardian_name', '—')}", f"صلة القرابة: {details.get('relationship', '—')}",
-                      f"رقم الهوية (مقنّع؛ الأصل مشفّر): {core.mask_national_id(details)}"]
+                      f"رقم الهوية (مقنّع؛ الأصل مشفّر): {core.mask_national_id(details)}",
+                      f"تنفيذ الخروج فعليًا: {row['exit_executed_at'] or 'لم يُسجل بعد'}"]
+            if row['exit_executed_by'] is not None:
+                executor = get_user(row['exit_executed_by'])
+                lines.append(f"سجّل التنفيذ: {executor['display_name'] if executor else '—'}")
             if row['status'] == 'returned':
                 lines.append(f"وقت العودة: {row['returned_at'] or '—'}")
         if row['status'] == 'cancelled':
@@ -3596,9 +3731,15 @@ class SchoolPassApp:
             ttk.Label(body, text=line, anchor=E, wraplength=560).pack(fill=X, pady=3)
         bar = ttk.Frame(win)
         bar.pack(fill=X, padx=20, pady=15)
-        ttk.Button(bar, text='طباعة / إعادة طباعة الرخصة', command=lambda: self._reprint_by_id(record_id, win)).pack(side=RIGHT, padx=4)
+        print_count = int(row['printed_count'] or 0)
+        ttk.Button(bar, text='طباعة الرخصة', state='disabled' if print_count else 'normal',
+                   command=lambda: self._print_by_id(record_id, win), style='Gold.TButton').pack(side=RIGHT, padx=4)
+        ttk.Button(bar, text='إعادة طباعة الرخصة', state='normal' if print_count else 'disabled',
+                   command=lambda: self._reprint_by_id(record_id, win), style='Accent.TButton').pack(side=RIGHT, padx=4)
         if row['status'] == 'valid':
             if row['kind'] == 'exit_permit':
+                if not str(row['exit_executed_at'] or '').strip():
+                    ttk.Button(bar, text='تأكيد تنفيذ الخروج', command=lambda: self._mark_exit_executed(record_id, win)).pack(side=RIGHT, padx=4)
                 ttk.Button(bar, text='تسجيل عودة التلميذ', command=lambda: self._return_exit(record_id, win)).pack(side=RIGHT, padx=4)
             ttk.Button(bar, text='إلغاء السجل', command=lambda: self._cancel_record(record_id, win)).pack(side=RIGHT, padx=4)
         if row['kind'] in ('exit_permit', 'absence_return') and self.current_user['role'] == 'admin' and json.loads(row['details_json'] or '{}').get('national_id_enc'):
@@ -3618,18 +3759,28 @@ class SchoolPassApp:
     def _ask_initial_print(self, record_id, win):
         if not win.winfo_exists():
             return
-        if messagebox.askyesno('طباعة الرخصة', 'تم حفظ السجل. هل تريد إنشاء ملف الرخصة الآن؟\nعند فتح نافذة الطباعة اختر الطابعة وورق A6 والحجم الفعلي 100%. رخصة الدخول بتنسيق A6.', parent=win):
-            self._reprint_by_id(record_id, win)
+        if messagebox.askyesno('طباعة الرخصة', 'تم حفظ السجل. هل تريد طباعة الرخصة الآن؟\nعند فتح نافذة الطباعة اختر الطابعة وورق A6 والحجم الفعلي 100%.', parent=win):
+            self._print_by_id(record_id, win)
 
-    def _reprint_by_id(self, record_id, parent):
-        """Create a reprint of the SAME numbered permit, then offer preview/printer selection."""
+    def _print_by_id(self, record_id, parent):
+        """Create the one-time original print; reject accidental duplicate originals."""
         try:
-            paths = core.print_record(record_id, self.current_user['id'], launch=False)
+            paths = core.print_record(record_id, self.current_user['id'], launch=False, mode='initial')
         except USER_ERRORS + (ImportError,) as exc:
-            show_error(parent, 'تعذرت الطباعة', exc)
+            show_error(parent, 'تعذرت طباعة الرخصة', exc)
             return
         self.refresh_records()
-        self._show_print_options(paths[0], parent, title='معاينة وطباعة الرخصة')
+        self._show_print_options(paths[0], parent, title='طباعة الرخصة — النسخة الأصلية')
+
+    def _reprint_by_id(self, record_id, parent):
+        """Explicitly create a marked reprint of the same numbered permit."""
+        try:
+            paths = core.print_record(record_id, self.current_user['id'], launch=False, mode='reprint')
+        except USER_ERRORS + (ImportError,) as exc:
+            show_error(parent, 'تعذرت إعادة طباعة الرخصة', exc)
+            return
+        self.refresh_records()
+        self._show_print_options(paths[0], parent, title='إعادة طباعة الرخصة')
 
     def _show_print_options(self, pdf_path: Path, parent, title='معاينة وطباعة'):
         win = Toplevel(parent)
@@ -3687,6 +3838,17 @@ class SchoolPassApp:
         rid = self._need_selection('حدد السجل المراد إلغاؤه.')
         if rid:
             self._cancel_record(rid)
+
+    def _mark_exit_executed(self, record_id, parent=None):
+        try:
+            core.mark_exit_executed(record_id, self.current_user['id'])
+        except USER_ERRORS as exc:
+            show_error(parent or self.root, 'تعذر تسجيل تنفيذ الخروج', exc)
+            return
+        self.refresh_records()
+        if parent is not None and parent.winfo_exists():
+            parent.destroy()
+        self.show_record(record_id)
 
     def _return_exit(self, record_id, parent=None):
         try:
@@ -4113,6 +4275,7 @@ class SchoolPassApp:
                 return
             records = conn.execute("SELECT r.*,u.display_name AS supervisor FROM records r LEFT JOIN users u ON u.id=r.user_id WHERE r.student_key=? ORDER BY r.id DESC",
                                    (student['student_key'],)).fetchall()
+        notes = core.list_student_notes(student['student_key'], self.current_user['id'])
         total_absence_days = 0
         late_count = 0
         return_after_absence = 0
@@ -4134,19 +4297,51 @@ class SchoolPassApp:
                 if r['status'] == 'valid': open_exit_count += 1
         win = Toplevel(self.root)
         win.title('الملف الشامل للتلميذ')
-        win.geometry('1120x700')
-        win.minsize(850, 550)
+        win.geometry('1120x760')
+        win.minsize(850, 600)
         win.transient(self.root)
         ttk.Label(win, text=student_name(student), style='Title.TLabel').pack(pady=(14, 3))
         ttk.Label(win, text=f"رقم التعريف: {student['student_key']}   |   القسم: {student['class_name']}   |   الحالة: {'نشط' if student['active'] else 'غير نشط'}").pack(pady=(0, 8))
         cards = ttk.Frame(win); cards.pack(fill=X, padx=12, pady=6)
         metrics = [('عدد العمليات', len(records)), ('مرات التأخر', late_count), ('العودة بعد الغياب', return_after_absence),
                    ('دخول خاص (طرد / إدارة)', special_entry_count), ('أيام الغياب المدخلة', total_absence_days),
-                   ('تصاريح الخروج', exit_count), ('خروج دون عودة', open_exit_count)]
+                   ('تصاريح الخروج', exit_count), ('خروج دون عودة', open_exit_count),
+                   ('ملاحظات إدارية', len(notes))]
         for title, val in metrics:
             box = ttk.Frame(cards, style='Surface.TFrame', padding=(8, 7)); box.pack(side=RIGHT, fill=X, expand=True, padx=3)
             ttk.Label(box, text=title, style='CardTitle.TLabel').pack(anchor=E)
             ttk.Label(box, text=str(val), style='CardValue.TLabel').pack(anchor=E)
+        notes_box = tk.LabelFrame(win, text='الملاحظات الإدارية السابقة')
+        notes_box.pack(fill=X, padx=14, pady=(5, 7))
+        notes_text = tk.Text(notes_box, height=3, wrap='word', font=('Segoe UI', 9), bd=0,
+                             highlightthickness=1, highlightbackground='#D7E0E8')
+        notes_scroll = ttk.Scrollbar(notes_box, command=notes_text.yview)
+        notes_text.configure(yscrollcommand=notes_scroll.set)
+        notes_text.pack(side=LEFT, fill=X, expand=True, padx=5, pady=4)
+        notes_scroll.pack(side=RIGHT, fill=Y, pady=4)
+        def refresh_notes():
+            current = core.list_student_notes(student['student_key'], self.current_user['id'])
+            notes_text.configure(state='normal')
+            notes_text.delete('1.0', END)
+            if not current:
+                notes_text.insert(END, 'لا توجد ملاحظات إدارية مسجلة لهذا التلميذ.')
+            else:
+                for item in current:
+                    notes_text.insert(END, f"{item['created_at']} — {item['supervisor']}\n{item['note']}\n\n")
+            notes_text.configure(state='disabled')
+        def add_note():
+            value = ask_text(win, 'إضافة ملاحظة إدارية', 'اكتب ملاحظة إدارية موجزة (حتى 500 حرف):')
+            if not value:
+                return
+            try:
+                core.add_student_note(student['student_key'], self.current_user['id'], value)
+            except USER_ERRORS as exc:
+                show_error(win, 'تعذر حفظ الملاحظة', exc)
+                return
+            refresh_notes()
+            messagebox.showinfo('تم الحفظ', 'أُضيفت الملاحظة إلى السجل الدائم للتلميذ.', parent=win)
+        ttk.Button(notes_box, text='＋ إضافة ملاحظة', command=add_note, style='Gold.TButton').pack(side=RIGHT, padx=7, pady=4)
+        refresh_notes()
         ttk.Label(win, text='السجل الزمني الكامل لرخص الدخول والخروج والإلغاءات وإثباتات العودة', style='Section.TLabel').pack(anchor=E, padx=16, pady=(8, 4))
         cols = ('record_no', 'kind', 'created_at', 'reason', 'status', 'supervisor')
         tree = ttk.Treeview(win, columns=cols, show='headings')
@@ -4316,6 +4511,43 @@ class SchoolPassApp:
             show_error(self.root, 'تعذر إنشاء التقرير', exc)
             return
         self._show_print_options(out, self.root, title='التقرير الشهري — معاينة وطباعة')
+
+    def archive_reports(self):
+        """Select a month or full year and create a shareable, printable PDF archive."""
+        win=Toplevel(self.root)
+        win.title('الأرشيف الشهري والسنوي')
+        win.geometry('540x300')
+        win.transient(self.root)
+        ttk.Label(win,text='اختيار فترة الأرشيف',style='Title.TLabel').pack(pady=(18,10))
+        today=date.today()
+        years=[str(y) for y in range(today.year,max(2000,today.year-15)-1,-1)]
+        year_var=ComboStringVar(years,value=str(today.year))
+        month_names=['جانفي','فيفري','مارس','أفريل','ماي','جوان','جويلية','أوت','سبتمبر','أكتوبر','نوفمبر','ديسمبر']
+        month_options=['كل السنة']+month_names
+        month_var=ComboStringVar(month_options,value=month_names[today.month-1])
+        row=ttk.Frame(win);row.pack(fill=X,padx=24,pady=9)
+        ttk.Label(row,text='السنة:',width=12,anchor=E).pack(side=RIGHT,padx=4)
+        ttk.Combobox(row,textvariable=year_var,values=years,state='readonly',width=12,justify='center').pack(side=RIGHT,padx=4)
+        ttk.Label(row,text='الشهر:',width=12,anchor=E).pack(side=RIGHT,padx=4)
+        ttk.Combobox(row,textvariable=month_var,values=month_options,state='readonly',width=16,justify='right').pack(side=RIGHT,padx=4)
+        ttk.Label(win,text='ينشئ التقرير PDF قابلًا للحفظ والطباعة والمشاركة، ويشمل السجلات والإحصاءات.',
+                  wraplength=470,justify='right').pack(fill=X,padx=26,pady=10)
+        def generate():
+            year=int(year_var.get());selected=month_var.get()
+            month=month_names.index(selected)+1 if selected in month_names else None
+            initial=f"SchoolPass_Archive_{year}_{month:02d}.pdf" if month else f"SchoolPass_Annual_Archive_{year}.pdf"
+            path=filedialog.asksaveasfilename(parent=win,title='حفظ أرشيف PDF',initialfile=initial,
+                defaultextension='.pdf',filetypes=[('تقرير PDF','*.pdf')])
+            if not path:return
+            try:
+                out=(core.create_monthly_report_pdf(path,year,month,self.current_user['id'])
+                     if month else core.create_annual_report_pdf(path,year,self.current_user['id']))
+            except Exception as exc:
+                show_error(win,'تعذر إنشاء الأرشيف',exc);return
+            self._show_print_options(out,win,title=f'الأرشيف {selected} — {year}')
+        bar=ttk.Frame(win);bar.pack(fill=X,padx=20,pady=12)
+        ttk.Button(bar,text='إنشاء ملف PDF',command=generate,style='Accent.TButton').pack(side=RIGHT,padx=4)
+        ttk.Button(bar,text='إغلاق',command=win.destroy).pack(side=RIGHT,padx=4)
 
     def open_expulsion_report(self):
         """Browse and export class-expulsion records by teacher and date interval."""

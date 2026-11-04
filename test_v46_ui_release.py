@@ -1,5 +1,5 @@
 ﻿# -*- coding: utf-8 -*-
-"""Static regression guards for the SchoolPass 4.7.7 rounded UI release."""
+"""Static regression guards for the SchoolPass 4.8.0 attention and permit release."""
 from pathlib import Path
 import re
 
@@ -8,15 +8,15 @@ APP = (ROOT / "app.py").read_text(encoding="utf-8-sig")
 CORE = (ROOT / "schoolpass_core.py").read_text(encoding="utf-8")
 
 
-def test_release_version_is_477():
-    assert re.search(r'^APP_VERSION\s*=\s*["\']4\.7\.7["\']', CORE, re.M)
-    assert (ROOT / "VERSION.txt").read_text(encoding="ascii").strip() == "4.7.7"
+def test_release_version_is_480():
+    assert re.search(r'^APP_VERSION\s*=\s*["\']4\.8\.0["\']', CORE, re.M)
+    assert (ROOT / "VERSION.txt").read_text(encoding="ascii").strip() == "4.8.0"
     setup = (ROOT / "SchoolPass_Setup.iss").read_text(encoding="utf-8-sig")
-    assert '#define MyAppVersion "4.7.7"' in setup
+    assert '#define MyAppVersion "4.8.0"' in setup
 
 
 def test_database_schema_is_additively_migrated():
-    assert re.search(r'^SCHEMA_VERSION\s*=\s*["\']8["\']', CORE, re.M)
+    assert re.search(r'^SCHEMA_VERSION\s*=\s*["\']9["\']', CORE, re.M)
     assert "CREATE TABLE IF NOT EXISTS guardians" in CORE
     assert "CREATE TABLE IF NOT EXISTS student_guardians" in CORE
     assert "guardians" in CORE[CORE.index("_REQUIRED_COLUMNS"):CORE.index("def _migrate_staged_database")]
@@ -52,8 +52,8 @@ def test_theme_switch_keeps_saved_data_layer_separate():
 
 def test_a6_receipts_use_large_administration_signature_without_stamp_or_digital_claims():
     assert "def _draw_admin_signature_box(" in CORE
-    assert "width: float = 43.0 * MM, height: float = 29.0 * MM" in CORE
-    assert "توقيع الإدارة" in CORE
+    assert "width: float = 48.0 * MM, height: float = 32.0 * MM" in CORE
+    assert "ختم الإدارة" in CORE
     assert "ختم المؤسسة" not in CORE
     assert "إمضاء المسؤول" not in CORE
     assert "توقيع رقمي" not in CORE

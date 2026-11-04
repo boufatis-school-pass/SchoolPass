@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 APP_NAME = "SchoolPass"
-APP_VERSION = "4.7.7"
+APP_VERSION = "4.8.0"
 SCHOOL_NAME = "ثانوية المجاهد بسجراري لخضر بوفاطيس"
 MINISTRY_NAME = "الجمهورية الجزائرية الديمقراطية الشعبية — وزارة التربية الوطنية"
 SERVER_PORT = 8765
@@ -198,7 +198,7 @@ def db_connect() -> sqlite3.Connection:
     return conn
 
 
-SCHEMA_VERSION = "8"
+SCHEMA_VERSION = "9"
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -297,6 +297,8 @@ CREATE TABLE IF NOT EXISTS records (
     returned_at TEXT DEFAULT '',
     returned_by INTEGER,
     printed_count INTEGER NOT NULL DEFAULT 0,
+    exit_executed_at TEXT NOT NULL DEFAULT '',
+    exit_executed_by INTEGER,
     FOREIGN KEY(user_id) REFERENCES users(id),
     FOREIGN KEY(related_record_id) REFERENCES records(id),
     FOREIGN KEY(cancelled_by) REFERENCES users(id),
@@ -312,6 +314,19 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     description TEXT NOT NULL DEFAULT '',
     FOREIGN KEY(user_id) REFERENCES users(id)
 );
+CREATE TABLE IF NOT EXISTS student_notes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    student_key TEXT NOT NULL,
+    note TEXT NOT NULL CHECK(length(trim(note)) BETWEEN 1 AND 500),
+    created_at TEXT NOT NULL,
+    user_id INTEGER,
+    FOREIGN KEY(user_id) REFERENCES users(id)
+);
+CREATE INDEX IF NOT EXISTS idx_student_notes_key_time ON student_notes(student_key, created_at DESC);
+CREATE TRIGGER IF NOT EXISTS trg_student_notes_no_update BEFORE UPDATE ON student_notes
+BEGIN SELECT RAISE(ABORT, 'append-only student notes'); END;
+CREATE TRIGGER IF NOT EXISTS trg_student_notes_no_delete BEFORE DELETE ON student_notes
+BEGIN SELECT RAISE(ABORT, 'append-only student notes'); END;
 CREATE TABLE IF NOT EXISTS settings (
     setting_key TEXT PRIMARY KEY,
     setting_value TEXT NOT NULL
@@ -383,6 +398,10 @@ def init_db() -> None:
         columns = {r[1] for r in conn.execute("PRAGMA table_info(records)")}
         if "issued_at" not in columns:
             conn.execute("ALTER TABLE records ADD COLUMN issued_at TEXT NOT NULL DEFAULT ''")
+        if "exit_executed_at" not in columns:
+            conn.execute("ALTER TABLE records ADD COLUMN exit_executed_at TEXT NOT NULL DEFAULT ''")
+        if "exit_executed_by" not in columns:
+            conn.execute("ALTER TABLE records ADD COLUMN exit_executed_by INTEGER")
         conn.execute("UPDATE records SET issued_at=created_at WHERE TRIM(COALESCE(issued_at,''))=''")
         # Rebuild the immutable trigger so issue timestamp cannot be altered independently.
         # Schema v6 corrects historical absence day counts: the return date is not
@@ -402,6 +421,7 @@ def init_db() -> None:
         conn.execute("INSERT OR IGNORE INTO settings(setting_key,setting_value) VALUES('theme_primary','#185A8D')")
         conn.execute("INSERT OR IGNORE INTO settings(setting_key,setting_value) VALUES('theme_secondary','#F2F5F9')")
         conn.execute("INSERT OR IGNORE INTO settings(setting_key,setting_value) VALUES('late_alert_threshold','3')")
+        conn.execute("INSERT OR IGNORE INTO settings(setting_key,setting_value) VALUES('absence_alert_threshold_days','5')")
         conn.execute("INSERT OR IGNORE INTO settings(setting_key,setting_value) VALUES('rtl_shaping','1')")
         conn.execute("INSERT OR IGNORE INTO settings(setting_key,setting_value) VALUES('external_backup_path','')")
         # Older experimental silent printing could ignore A6; force safe PDF preview after upgrade.
@@ -1185,6 +1205,79 @@ def monthly_late_count(student_key: str, month: str | None = None) -> int:
                                 (str(student_key), month)).fetchone()[0])
 
 
+
+
+def list_student_notes(student_key: str, user_id) -> list[dict]:
+    """List the pupil's append-only administrative notes for active staff."""
+    require_user(user_id)
+    with db_connect() as conn:
+        rows=conn.execute(
+            """SELECT n.id,n.student_key,n.note,n.created_at,n.user_id,
+                      COALESCE(u.display_name,'غير معروف') AS supervisor
+               FROM student_notes n LEFT JOIN users u ON u.id=n.user_id
+               WHERE n.student_key=? ORDER BY n.created_at DESC,n.id DESC LIMIT 200""",
+            (str(student_key),)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def add_student_note(student_key: str, user_id, note: str) -> dict:
+    """Append an administrative note; database triggers prevent later edits/deletion."""
+    actor=require_user(user_id)
+    key,value=str(student_key or '').strip(),str(note or '').strip()
+    if not key or not value:
+        raise ValueError("اكتب الملاحظة الإدارية وحدد التلميذ.")
+    if len(value)>500:
+        raise ValueError("الملاحظة الإدارية طويلة جدًا؛ الحد الأقصى 500 حرف.")
+    with db_connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        if not conn.execute("SELECT 1 FROM students WHERE student_key=?",(key,)).fetchone():
+            raise ValueError("التلميذ غير موجود في قاعدة البيانات.")
+        cur=conn.execute("INSERT INTO student_notes(student_key,note,created_at,user_id) VALUES(?,?,?,?)",
+                         (key,value,now_iso(),actor["id"]))
+        note_id=int(cur.lastrowid)
+        conn.execute("INSERT INTO audit_logs(happened_at,user_id,action,target_type,target_id,description) VALUES(?,?,?,?,?,?)",
+                     (now_iso(),actor["id"],"إضافة ملاحظة إدارية للتلميذ","student_note",str(note_id),
+                      f"التلميذ: {key}؛ أضيفت ملاحظة إدارية."))
+        row=conn.execute(
+            """SELECT n.id,n.student_key,n.note,n.created_at,n.user_id,
+                      COALESCE(u.display_name,'غير معروف') AS supervisor
+               FROM student_notes n LEFT JOIN users u ON u.id=n.user_id WHERE n.id=?""",
+            (note_id,)).fetchone()
+    return dict(row)
+
+
+def student_monthly_attention(student_key: str, user_id, month: str | None = None) -> dict:
+    """Count monthly lates and real absence-days overlapping the selected calendar month."""
+    require_user(user_id)
+    month=month or date.today().strftime("%Y-%m")
+    if not re.fullmatch(r"\d{4}-\d{2}",month):
+        raise ValueError("صيغة الشهر غير صحيحة؛ استعمل YYYY-MM.")
+    try:
+        year,number=(int(x) for x in month.split("-"))
+        start_month=date(year,number,1)
+        next_month=date(year+1,1,1) if number==12 else date(year,number+1,1)
+    except ValueError as exc:
+        raise ValueError("الشهر المحدد غير صحيح.") from exc
+    late_count=monthly_late_count(str(student_key),month)
+    with db_connect() as conn:
+        absence_rows=conn.execute(
+            "SELECT details_json FROM records WHERE student_key=? AND kind='absence_return' AND status<>'cancelled'",
+            (str(student_key),)).fetchall()
+    days=0
+    for row in absence_rows:
+        try:
+            details=json.loads(row["details_json"] or "{}")
+            first=date.fromisoformat(str(details.get("absence_start",""))[:10])
+            last=date.fromisoformat(str(details.get("return_date",""))[:10])
+            left,right=max(first,start_month),min(last,next_month)
+            if right>left: days+=(right-left).days
+        except (ValueError,TypeError,json.JSONDecodeError):
+            continue
+    notes_rows=list_student_notes(str(student_key),user_id)
+    return {"month":month,"late_count":int(late_count),"absence_days":int(days),
+            "absence_return_count":len(absence_rows),"note_count":len(notes_rows),"recent_notes":notes_rows[:2]}
+
+
 LATE_REASON_LABELS = {
     "consultation": "التواجد في الاستشارة",
     "transport": "التأخر بسبب انعدام النقل",
@@ -1654,6 +1747,64 @@ def return_from_exit(record_id: int, user_id) -> sqlite3.Row:
         conn.execute("INSERT INTO audit_logs(happened_at,user_id,action,target_type,target_id,description) VALUES(?,?,?,?,?,?)",
                      (now_iso(), user["id"], "تسجيل عودة بعد خروج استثنائي", "record", str(record_id), f"{permit['record_no']} → {slip['record_no']}"))
     return slip
+
+
+
+
+def mark_exit_executed(record_id: int, user_id) -> sqlite3.Row:
+    """Record gatekeeper-confirmed physical exit separately from permit issuance."""
+    actor=require_user(user_id)
+    with db_connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        row=conn.execute("SELECT * FROM records WHERE id=?",(int(record_id),)).fetchone()
+        if not row or row["kind"]!="exit_permit":
+            raise ValueError("السجل المحدد ليس رخصة خروج.")
+        if row["status"]!="valid":
+            raise ValueError("لا يمكن تأكيد خروج فعلي لرخصة ملغاة أو أُغلقت بالعودة.")
+        if str(row["exit_executed_at"] or "").strip():
+            raise ValueError("تم تسجيل تنفيذ الخروج لهذه الرخصة مسبقًا.")
+        happened=now_iso()
+        changed=conn.execute(
+            "UPDATE records SET exit_executed_at=?,exit_executed_by=? WHERE id=? AND status='valid' AND TRIM(COALESCE(exit_executed_at,''))=''",
+            (happened,actor["id"],int(record_id))).rowcount
+        if changed!=1: raise ValueError("سُجل تنفيذ الخروج من جلسة أخرى؛ حدّث السجل.")
+        conn.execute("INSERT INTO audit_logs(happened_at,user_id,action,target_type,target_id,description) VALUES(?,?,?,?,?,?)",
+                     (happened,actor["id"],"تأكيد تنفيذ خروج التلميذ عند الحاجب","record",str(record_id),
+                      f"الرخصة: {row['record_no']}؛ التلميذ: {row['student_name']}"))
+        updated=conn.execute("SELECT * FROM records WHERE id=?",(int(record_id),)).fetchone()
+    return updated
+
+
+def get_gatekeeper_log(user_id, date_from: str = "", date_to: str = "", state: str = "all") -> list[dict]:
+    """List exit permits with separate issued, actually-exited and returned events."""
+    require_user(user_id)
+    if state not in {"all","pending","executed","returned","cancelled"}:
+        raise ValueError("حالة سجل الحاجب غير صحيحة.")
+    first,last=str(date_from or "").strip(),str(date_to or "").strip()
+    for value in (first,last):
+        if value:
+            try: date.fromisoformat(value)
+            except ValueError as exc: raise ValueError("تاريخ سجل الحاجب غير صحيح؛ استعمل YYYY-MM-DD.") from exc
+    if first and last and last<first: raise ValueError("تاريخ النهاية يجب أن يكون بعد تاريخ البداية.")
+    issue="COALESCE(NULLIF(r.issued_at,''),r.created_at)"
+    where,params=["r.kind='exit_permit'"],[]
+    if first: where.append(f"substr({issue},1,10)>=?");params.append(first)
+    if last: where.append(f"substr({issue},1,10)<=?");params.append(last)
+    if state=="pending":where.append("r.status='valid' AND TRIM(COALESCE(r.exit_executed_at,''))=''")
+    elif state=="executed":where.append("r.status='valid' AND TRIM(COALESCE(r.exit_executed_at,''))<>''")
+    elif state=="returned":where.append("r.status='returned'")
+    elif state=="cancelled":where.append("r.status='cancelled'")
+    with db_connect() as conn:
+        rows=conn.execute(
+            f"""SELECT r.*,COALESCE(issuer.display_name,'غير معروف') AS issuer_name,
+                       COALESCE(executor.display_name,'—') AS exit_executor_name,
+                       COALESCE(returner.display_name,'—') AS returner_name
+                FROM records r LEFT JOIN users issuer ON issuer.id=r.user_id
+                LEFT JOIN users executor ON executor.id=r.exit_executed_by
+                LEFT JOIN users returner ON returner.id=r.returned_by
+                WHERE {' AND '.join(where)} ORDER BY {issue} DESC,r.id DESC LIMIT 2000""",
+            tuple(params)).fetchall()
+    return [dict(r) for r in rows]
 
 
 def record_by_token(token: str) -> sqlite3.Row | None:
@@ -2862,22 +3013,18 @@ def _academic_year(value: datetime | None = None) -> str:
 
 def _draw_admin_signature_box(c, x: float, y: float, font: str, border_color: tuple[float, float, float],
                               line_color: tuple[float, float, float], *,
-                              width: float = 43.0 * MM, height: float = 29.0 * MM) -> None:
-    """Draw a generous blank area for a handwritten administration signature.
-
-    QR verification is kept elsewhere on the slip. This box is intentionally not
-    labelled as a stamp, digital signature, or cryptographic authenticity mark.
-    """
+                              width: float = 48.0 * MM, height: float = 32.0 * MM) -> None:
+    """Draw a larger blank area reserved for the school's physical stamp and signature."""
     c.saveState()
     c.setStrokeColorRGB(*border_color)
-    c.setLineWidth(0.7)
-    c.roundRect(x, y, width, height, 1.4 * MM, stroke=1, fill=0)
+    c.setLineWidth(0.9)
+    c.roundRect(x, y, width, height, 1.7 * MM, stroke=1, fill=0)
     c.setFillColorRGB(*border_color)
-    c.setFont(font, 6.8)
-    c.drawCentredString(x + width / 2, y + height - 6.3 * MM, _arabic_visual("توقيع الإدارة"))
+    c.setFont(font, 8.0)
+    c.drawCentredString(x + width / 2, y + height - 7.0 * MM, _arabic_visual("ختم الإدارة"))
     c.setStrokeColorRGB(*line_color)
-    c.setLineWidth(0.45)
-    c.line(x + 4.0 * MM, y + 5.2 * MM, x + width - 4.0 * MM, y + 5.2 * MM)
+    c.setLineWidth(0.55)
+    c.line(x + 4.0 * MM, y + 5.5 * MM, x + width - 4.0 * MM, y + 5.5 * MM)
     c.restoreState()
 
 
@@ -3075,15 +3222,15 @@ def _draw_entry_page(c, row, details: dict, reprint: bool, font: str, school: st
         c.roundRect(margin, y_bottom, usable, row_h - 0.6 * mm, 0.7 * mm, stroke=0, fill=1)
         c.setFillColorRGB(*dark_muted)
         baseline = y_top - 2.35 * mm
-        label_size = 6.2 if row_h <= 5.2 * mm else 6.8
-        value_size = 6.6 if row_h <= 5.2 * mm else 7.6
+        label_size = 6.5 if row_h <= 5.2 * mm else 7.2
+        value_size = 6.9 if row_h <= 5.2 * mm else 8.1
         if not label_b:
             # Full-width field for long reason / guardian details; reduce the
             # font slightly rather than silently dropping the end of a value.
             c.setFillColorRGB(*dark_muted)
             c.setFont(font, label_size)
             c.drawRightString(right - 1.8 * mm, baseline, _arabic_visual(label_a + ":"))
-            value_font = 7.0 if row_h > 5.2 * mm else 6.1
+            value_font = 7.4 if row_h > 5.2 * mm else 6.3
             max_value_w = usable - 24 * mm
             while value_font > 5.2 and _text_width(value_a, font, value_font) > max_value_w:
                 value_font -= 0.2
@@ -3128,8 +3275,8 @@ def _draw_entry_page(c, row, details: dict, reprint: bool, font: str, school: st
     c.setFont(font, 5.1)
     c.drawCentredString(qr_x + qr_size / 2, qr_y - 2.0 * mm, _arabic_visual("امسح للتحقق"))
 
-    signature_w, signature_h = 43.0 * mm, 29.0 * mm
-    sx, sy = right - signature_w, 6.5 * mm
+    signature_w, signature_h = 48.0 * mm, 32.0 * mm
+    sx, sy = right - signature_w, 3.5 * mm
     _draw_admin_signature_box(c, sx, sy, font, green, line, width=signature_w, height=signature_h)
     if cancelled:
         c.saveState()
@@ -3175,7 +3322,7 @@ def _draw_page(c, row, details: dict, copy_type: str | None, reprint: bool, font
     c.setFillColorRGB(0.055, 0.31, 0.53)
     c.roundRect(margin + 2 * MM, H - 36.5 * MM, usable - 4 * MM, 8.2 * MM, 1.7 * MM, stroke=0, fill=1)
     c.setFillColorRGB(1, 1, 1)
-    c.setFont(font, 10.0)
+    c.setFont(font, 10.8)
     c.drawCentredString(W / 2, H - 33.6 * MM, _arabic_visual(kind_label(row["kind"])))
     c.restoreState()
     y = H - 41.5 * MM
@@ -3219,7 +3366,7 @@ def _draw_page(c, row, details: dict, copy_type: str | None, reprint: bool, font
     if audit_user:
         items.append((f"المشرف: {audit_user}", 7.2, 4.1, False))
     if copy_type:
-        items.append((f"النسخة: {copy_type}", 6.6, 3.8, False))
+        items.append((f"النسخة: {copy_type}", 9.6, 5.2, False))
 
     # --- bottom zones
     qr_x, qr_y, qr_size = margin, 8 * MM, 24 * MM
@@ -3236,7 +3383,7 @@ def _draw_page(c, row, details: dict, copy_type: str | None, reprint: bool, font
     def build(scale: float, max_reason_lines: int):
         out = []
         for text, size, gap, red in items:
-            s = size * scale * 1.12
+            s = size * scale * 1.16
             lines = _wrap_to_width(text, font, s, usable)
             if text.startswith(("السبب:", "سبب الإلغاء:")) and len(lines) > max_reason_lines:
                 lines = lines[:max_reason_lines]
@@ -3251,6 +3398,15 @@ def _draw_page(c, row, details: dict, copy_type: str | None, reprint: bool, font
     else:
         raise ValueError("بيانات الرخصة طويلة جدًا ولا تتسع في ورقة A6؛ اختصر السبب أو اسم ولي الأمر.")
     for idx, (text, size, gap, red) in enumerate(built):
+        if text.startswith("النسخة:"):
+            c.setFillColorRGB(0.91, 0.95, 0.98)
+            c.roundRect(margin + 0.7 * MM, y - 2.1 * MM, usable - 1.4 * MM, 5.5 * MM,
+                        1.0 * MM, stroke=0, fill=1)
+            c.setFillColorRGB(0.055, 0.22, 0.39)
+            c.setFont(font, size)
+            c.drawCentredString(W / 2, y - 0.15 * MM, _arabic_visual(text))
+            y -= gap * MM
+            continue
         # Soft alternating information rows improve scanning without wasting A6 space.
         row_h = max(3.0 * MM, gap * MM * 0.82)
         if idx % 2 == 0 and not red:
@@ -3281,9 +3437,9 @@ def _draw_page(c, row, details: dict, copy_type: str | None, reprint: bool, font
     c.setFont(font, 5.6)
     c.drawString(qr_x, qr_y - 2.6 * MM, "SchoolPass " + row["record_no"])
 
-    # --- enlarged administration signature area; the school does not require a stamp field.
-    signature_w, signature_h = 43.0 * MM, 29.0 * MM
-    sx, sy = x_right - signature_w, 6.5 * MM
+    # --- larger area reserved for the school's physical administration stamp.
+    signature_w, signature_h = 48.0 * MM, 32.0 * MM
+    sx, sy = x_right - signature_w, 3.5 * MM
     _draw_admin_signature_box(
         c, sx, sy, font, (0.08, 0.25, 0.42), (0.55, 0.62, 0.69),
         width=signature_w, height=signature_h,
@@ -3351,33 +3507,32 @@ def create_pdf(record_id: int, copy_types: list[str | None] | None = None, repri
     return out
 
 
-def print_record(record_id: int, user_id, launch: bool = True) -> list[Path]:
-    """Create the PDF (re-print = same record, never a new number) and optionally hand it to Windows."""
-    user = require_user(user_id)
-    row = record_by_id(record_id)
-    if not row:
-        raise ValueError("السجل غير موجود.")
+def print_record(record_id: int, user_id, launch: bool = True, mode: str = "auto") -> list[Path]:
+    """Print the original once or explicitly reprint the same numbered permit."""
+    user=require_user(user_id)
+    if mode not in {"auto","initial","reprint"}: raise ValueError("وضع الطباعة غير معروف.")
+    row=record_by_id(record_id)
+    if not row: raise ValueError("السجل غير موجود.")
     with db_connect() as conn:
-        latest = conn.execute("SELECT record_no,printed_count FROM records WHERE id=?", (record_id,)).fetchone()
-    if not latest:
-        raise ValueError("السجل غير موجود.")
-    is_reprint = int(latest["printed_count"] or 0) > 0
-    print_at = now_iso()
-    path = create_pdf(record_id, reprint=is_reprint, reprint_at=print_at if is_reprint else "")
+        latest=conn.execute("SELECT record_no,printed_count FROM records WHERE id=?",(record_id,)).fetchone()
+    if not latest: raise ValueError("السجل غير موجود.")
+    already=int(latest["printed_count"] or 0)>0
+    if mode=="initial" and already: raise ValueError("هذه الرخصة طُبعت سابقًا؛ استخدم زر إعادة طباعة الرخصة.")
+    if mode=="reprint" and not already: raise ValueError("لم تُطبع هذه الرخصة من قبل؛ استخدم زر طباعة الرخصة.")
+    print_at=now_iso()
+    path=create_pdf(record_id,reprint=already,reprint_at=print_at if already else "")
     with db_connect() as conn:
         conn.execute("BEGIN IMMEDIATE")
-        latest = conn.execute("SELECT record_no,printed_count FROM records WHERE id=?", (record_id,)).fetchone()
-        if not latest:
-            raise ValueError("السجل غير موجود.")
-        # If another workstation printed concurrently, preserve the record but expose that this is a reprint.
-        is_reprint_now = int(latest["printed_count"] or 0) > 0
-        changed = conn.execute("UPDATE records SET printed_count=printed_count+1 WHERE id=?", (record_id,)).rowcount
-        if changed != 1:
-            raise RuntimeError("تعذر تحديث عدد مرات الطباعة.")
+        latest=conn.execute("SELECT record_no,printed_count FROM records WHERE id=?",(record_id,)).fetchone()
+        if not latest: raise ValueError("السجل غير موجود.")
+        reprint_now=int(latest["printed_count"] or 0)>0
+        if mode=="initial" and reprint_now: raise ValueError("بدأت عملية طباعة أخرى لهذه الرخصة؛ حدّث السجل.")
+        if mode=="reprint" and not reprint_now: raise ValueError("لم تعد هذه الرخصة مؤهلة لإعادة الطباعة؛ حدّث السجل.")
+        changed=conn.execute("UPDATE records SET printed_count=printed_count+1 WHERE id=?",(record_id,)).rowcount
+        if changed!=1: raise RuntimeError("تعذر تحديث عدد مرات الطباعة.")
         conn.execute("INSERT INTO audit_logs(happened_at,user_id,action,target_type,target_id,description) VALUES(?,?,?,?,?,?)",
-                     (print_at, user["id"], "إعادة طباعة رخصة" if is_reprint_now else "طباعة رخصة", "record", str(record_id), latest["record_no"]))
-    if launch:
-        open_pdf(path)
+                     (print_at,user["id"],"إعادة طباعة رخصة" if reprint_now else "طباعة رخصة","record",str(record_id),latest["record_no"]))
+    if launch: open_pdf(path)
     return [path]
 
 
@@ -4107,4 +4262,110 @@ def create_a4_two_record_sheet(record_ids: list[int]) -> Path:
     c.drawCentredString(page_w / 2, half_h + 2 * MM, _arabic_visual("خط القص"))
     c.restoreState()
     c.save()
+    return out
+
+
+
+def create_annual_report_pdf(dest_path, year: int, user_id) -> Path:
+    """Create a paginated A4-landscape annual archive and grouped totals."""
+    require_user(user_id)
+    year=int(year)
+    if not 2000<=year<=2100:
+        raise ValueError("السنة المحددة غير صحيحة.")
+    from reportlab.pdfgen import canvas
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib.units import mm
+    from reportlab.lib import colors
+    issue="COALESCE(NULLIF(r.issued_at,''),r.created_at)"
+    with db_connect() as conn:
+        rows=conn.execute(
+            f"""SELECT r.*,COALESCE(u.display_name,'غير معروف') AS supervisor
+                FROM records r LEFT JOIN users u ON u.id=r.user_id
+                WHERE substr({issue},1,4)=? ORDER BY {issue},r.record_no""",
+            (f"{year:04d}",)).fetchall()
+    out=Path(dest_path);out.parent.mkdir(parents=True,exist_ok=True)
+    page_w,page_h=landscape(A4);margin=10*mm
+    c=canvas.Canvas(str(out),pagesize=landscape(A4),pageCompression=1)
+    c.setTitle(f"SchoolPass Annual Archive {year}");c.setAuthor(APP_NAME)
+    font=_font_setup()
+    active=[r for r in rows if r["status"]!="cancelled"]
+    by_month=Counter(str((r["issued_at"] or r["created_at"])[:7]) for r in active)
+    by_class=Counter((r["class_name"] or "—") for r in active)
+    by_supervisor=Counter((r["supervisor"] or "—") for r in active)
+    by_kind=Counter(kind_label(r["kind"]) for r in active)
+    month_names=["جانفي","فيفري","مارس","أفريل","ماي","جوان","جويلية","أوت","سبتمبر","أكتوبر","نوفمبر","ديسمبر"]
+    y=page_h-margin
+    visual=lambda value:_arabic_visual(str(value))
+    def footer():
+        c.setStrokeColor(colors.HexColor("#B7C4BE"));c.line(margin,13*mm,page_w-margin,13*mm)
+        c.setFont(font,6.5);c.setFillColor(colors.HexColor("#52645D"))
+        c.drawString(margin,8*mm,visual(f"SchoolPass — الأرشيف السنوي {year}"))
+        c.drawRightString(page_w-margin,8*mm,visual(f"تاريخ الإنشاء: {now_iso()}"))
+    columns=[(68,"الرقم المرجعي"),(100,"التاريخ والوقت"),(120,"نوع الرخصة"),
+             (165,"التلميذ"),(105,"القسم"),(110,"المشرف"),(75,"الحالة")]
+    table_width=sum(width for width,_ in columns)
+    table_right=page_w-margin-(page_w-2*margin-table_width)/2
+    def draw_table_header():
+        nonlocal y
+        h=7*mm;c.setFillColor(colors.HexColor("#DDE8E2"))
+        c.rect(table_right-table_width,y-h,table_width,h,stroke=0,fill=1)
+        c.setFillColor(colors.HexColor("#173D36"));c.setFont(font,7.2);xr=table_right
+        for width,title in columns:
+            c.drawRightString(xr-3,y-4.8*mm,visual(title));xr-=width
+        y-=h
+    def draw_header(first=False):
+        nonlocal y
+        c.setFillColor(colors.HexColor("#173D36"))
+        c.roundRect(margin,page_h-24*mm,page_w-2*margin,13*mm,2*mm,stroke=0,fill=1)
+        c.setFillColor(colors.white);c.setFont(font,13)
+        c.drawCentredString(page_w/2,page_h-19*mm,visual(f"الأرشيف السنوي للرخص — {year}"))
+        c.setFillColor(colors.HexColor("#263B35"));c.setFont(font,8)
+        c.drawRightString(page_w-margin,page_h-31*mm,
+            visual(f"إجمالي السجلات: {len(rows)} | غير الملغاة: {len(active)} | الملغاة: {len(rows)-len(active)}"))
+        y=page_h-39*mm
+        if first:
+            sections=[
+                ("الإحصاء حسب الشهر",[f"{month_names[int(k[5:7])-1]}: {v}" for k,v in sorted(by_month.items())]),
+                ("حسب نوع الرخصة",[f"{k}: {v}" for k,v in by_kind.most_common()]),
+                ("حسب القسم",[f"{k}: {v}" for k,v in by_class.most_common(12)]),
+                ("حسب المشرف",[f"{k}: {v}" for k,v in by_supervisor.most_common(12)]),
+            ]
+            for title,values in sections:
+                c.setFillColor(colors.HexColor("#EAF0ED"))
+                c.roundRect(margin,y-5*mm,page_w-2*margin,6*mm,1*mm,stroke=0,fill=1)
+                c.setFillColor(colors.HexColor("#173D36"));c.setFont(font,8.5)
+                c.drawRightString(page_w-margin-2*mm,y-3.4*mm,visual(title));y-=8*mm
+                content=" ؛ ".join(values) if values else "لا توجد بيانات."
+                c.setFillColor(colors.HexColor("#253B35"));c.setFont(font,7.2)
+                for line in _wrap_to_width(content,font,7.2,page_w-2*margin-4*mm):
+                    if y<22*mm:
+                        footer();c.showPage();draw_header(False)
+                    c.drawRightString(page_w-margin-2*mm,y,visual(line));y-=4.4*mm
+                y-=1.5*mm
+        draw_table_header()
+    draw_header(True)
+    for index,row in enumerate(rows):
+        values=[row["record_no"],row["issued_at"] or row["created_at"],kind_label(row["kind"]),
+                row["student_name"],row["class_name"],row["supervisor"],status_label(row["status"])]
+        cells=[_wrap_to_width(str(value or "—"),font,6.8,width-6)
+               for (width,_),value in zip(columns,values)]
+        lines=max(1,max(len(cell) for cell in cells))
+        row_height=max(7*mm,lines*7.7+3)
+        if y-row_height<17*mm:
+            footer();c.showPage();draw_header(False)
+        if index%2:
+            c.setFillColor(colors.HexColor("#F5F8F6"))
+            c.rect(table_right-table_width,y-row_height,table_width,row_height,stroke=0,fill=1)
+        right=table_right
+        for (width,_),cell in zip(columns,cells):
+            baseline=y-4.5*mm
+            for line in cell:
+                c.setFillColor(colors.HexColor("#263B35"));c.setFont(font,6.8)
+                c.drawRightString(right-3,baseline,visual(line));baseline-=7.7
+            right-=width
+        c.setStrokeColor(colors.HexColor("#D8E1DC"))
+        c.line(table_right-table_width,y-row_height,table_right,y-row_height)
+        y-=row_height
+    footer();c.save()
+    audit(_uid(user_id),"إنشاء أرشيف سنوي PDF","report",str(year),f"عدد السجلات: {len(rows)}")
     return out

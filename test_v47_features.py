@@ -125,7 +125,7 @@ class TestV47Features:
 
         core.restore_database(legacy, self.admin)
 
-        assert core.setting("schema_version") == "8"
+        assert core.setting("schema_version") == "9"
         assert core.get_student("S-470-01")["student_key"] == "S-470-01"
         assert core.record_by_id(record["id"])["reason"] == "سجل قبل التحديث"
         assert core.list_teachers(active_only=False) == []

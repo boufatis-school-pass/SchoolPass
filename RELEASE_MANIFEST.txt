@@ -1,8 +1,8 @@
-SchoolPass Release 4.7.1
-Version: 4.7.1
-Base: 4.7.0
-Database schema: 7 (unchanged)
+SchoolPass Release 4.8.0
+Version: 4.8.0
+Base: 4.7.7
+Database schema: 9 (additive)
 Platform: Windows 10/11 x64
 Installer: SchoolPass_Setup.exe
-Scope: sidebar submenu placement, focus-safe autocomplete, teacher Excel template, compact dialogs, Arabic UI and dashboard spacing.
-Data migration: none
+Scope: monthly repeated-lateness and recorded-absence alerts, append-only pupil administrative notes, separate first print/reprint, gatekeeper-confirmed physical exit and return ledger, selectable monthly/annual PDF archive, and clearer A6 print hierarchy with larger administration stamp area.
+Data migration: adds student_notes and exit execution metadata; retains existing student, permit, user and audit records.
