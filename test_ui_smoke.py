@@ -39,6 +39,9 @@ class Widget:
         self.rows = {}
         self._sel = ()
         self.headings = {}
+        self.columns_cfg = {}
+        self.tags = {}
+        self.tag_ranges = []
         self.insertions = []
         self.canvas_texts = []
         self.canvas_config = {}
@@ -56,6 +59,15 @@ class Widget:
     def heading(self, column, option=None, **kwargs):
         self.headings.setdefault(str(column), {}).update(kwargs)
         return self.headings[str(column)].get(option) if option else self.headings[str(column)]
+    def column(self, column, option=None, **kwargs):
+        self.columns_cfg.setdefault(str(column), {}).update(kwargs)
+        return self.columns_cfg[str(column)].get(option) if option else self.columns_cfg[str(column)]
+    def index(self, value):
+        return '1.0' if value == 'end' else str(value)
+    def tag_configure(self, tag, **kwargs):
+        self.tags.setdefault(tag, {}).update(kwargs)
+    def tag_add(self, tag, start, end):
+        self.tag_ranges.append((tag, start, end))
     def create_text(self, *args, **kwargs):
         self.canvas_texts.append(dict(kwargs))
         return len(self.canvas_texts)
@@ -551,6 +563,8 @@ class TestGuiSmoke(unittest.TestCase):
         text = self.app._tk.Text(owner)
         text.insert('end', 'ملاحظات الإدارة')
         self.assertEqual(text.insertions[-1][1], self.app.rtl_display('ملاحظات الإدارة'))
+        self.assertEqual(text.tags['_schoolpass_rtl']['justify'], 'right')
+        self.assertEqual(text.tag_ranges[-1][0], '_schoolpass_rtl')
 
         canvas = self.app._tk.Canvas(owner)
         canvas.create_text(20, 20, text='إحصائيات الدخول')
@@ -562,8 +576,10 @@ class TestGuiSmoke(unittest.TestCase):
         owner = self.app._tk.Tk()
         tree = self.app.ttk.Treeview(owner, columns=('student',), show='headings')
         tree.heading('student', text='اسم التلميذ')
+        tree.column('student', width=220)
         self.assertEqual(tree.headings['student']['text'], self.app.rtl_display('اسم التلميذ'))
-        self.assertEqual(tree.kw.get('style'), None)
+        self.assertEqual(tree.headings['student']['anchor'], 'e')
+        self.assertEqual(tree.columns_cfg['student']['anchor'], 'e')
 
     def test_mixed_arabic_latin_digits_and_multiline_text_remain_idempotent(self):
         original = 'رقم الرخصة: SP-2026-001\nاسم التلميذ: أحمد بن علي\nالتاريخ: 04-11-2026'
