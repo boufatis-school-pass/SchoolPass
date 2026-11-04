@@ -511,7 +511,7 @@ def make_style(root: Tk, primary: str | None = None, secondary: str | None = Non
     style.configure('Treeview', font=('Segoe UI', 10), rowheight=39, background=surface,
                     fieldbackground=surface, foreground=ink, borderwidth=0, relief='flat')
     style.configure('Treeview.Heading', font=('Segoe UI', 9, 'bold'), background=palette['heading'],
-                    foreground=ink, padding=(12, 12), relief='flat')
+                    foreground=ink, padding=(12, 12), relief='flat', anchor='e')
     style.map('Treeview', background=[('selected', palette['selected'])],
               foreground=[('selected', ink)])
     style.configure('Horizontal.TProgressbar', troughcolor=palette['border'], background=palette['accent'])
@@ -872,9 +872,15 @@ def _install_rtl_widget_adapters():
             super().__init__(master, *args, **kwargs)
 
         def heading(self, column, option=None, **kwargs):
+            kwargs.setdefault('anchor', 'e')
             if isinstance(kwargs.get('text'), str):
                 kwargs['text'] = rtl_display(kwargs['text'])
             base_method = getattr(super(), 'heading', None)
+            return base_method(column, option, **kwargs) if base_method else None
+
+        def column(self, column, option=None, **kwargs):
+            kwargs.setdefault('anchor', 'e')
+            base_method = getattr(super(), 'column', None)
             return base_method(column, option, **kwargs) if base_method else None
 
         def _schoolpass_save_logical_values(self, iid, values):
@@ -927,9 +933,28 @@ def _install_rtl_widget_adapters():
     original_text_insert = getattr(tk.Text, 'insert', None)
     if callable(original_text_insert) and not getattr(tk.Text, '_schoolpass_rtl_insert', False):
         def rtl_text_insert(self, index, chars, *args):
-            if isinstance(chars, str):
-                chars = rtl_display(chars)
-            return original_text_insert(self, index, chars, *args)
+            if not isinstance(chars, str):
+                return original_text_insert(self, index, chars, *args)
+            has_arabic = any(0x0600 <= ord(ch) <= 0x06FF or 0x0750 <= ord(ch) <= 0x077F or
+                             0x08A0 <= ord(ch) <= 0x08FF or 0xFB50 <= ord(ch) <= 0xFDFF or
+                             0xFE70 <= ord(ch) <= 0xFEFF for ch in chars)
+            try:
+                start = self.index(index) if has_arabic else None
+            except Exception:
+                start = None
+            shaped = rtl_display(chars)
+            result = original_text_insert(self, index, shaped, *args)
+            if has_arabic:
+                try:
+                    self.tag_configure('_schoolpass_rtl', justify='right')
+                    if start is not None:
+                        end = self.index(f'{start}+{len(shaped)}c')
+                        self.tag_add('_schoolpass_rtl', start, end)
+                except Exception:
+                    # Older/custom Text implementations still receive shaped text;
+                    # lack of tag support must not break reports.
+                    pass
+            return result
         tk.Text.insert = rtl_text_insert
         tk.Text._schoolpass_rtl_insert = True
 
