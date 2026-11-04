@@ -1807,6 +1807,10 @@ class RecordForm:
             self._saving = False
             show_error(self.win, 'تعذر إنشاء السجل', exc)
             return
+        if hasattr(self, 'student_suggestions'):
+            self.student_suggestions.hide()
+        if hasattr(self, 'teacher_suggestions'):
+            self.teacher_suggestions.hide()
         self.win.destroy()
         self.app.refresh_records()
         self.app.show_record(row['id'], offer_print=True)
@@ -3084,7 +3088,7 @@ class SchoolPassApp:
         win.minsize(780, 540)
         win.transient(self.root)
         ttk.Label(win, text='إدارة الأساتذة والمواد الدراسية', style='Title.TLabel').pack(pady=(12, 6))
-        ttk.Label(win, text='أضف الأستاذ يدويًا أو استورد قائمة Excel. لا يتم استبدال سجل موجود عند تكرار الاسم والمادة.',
+        ttk.Label(win, text='أضف الأستاذ يدويًا، أو نزّل النموذج واملأه ثم استورده مع معاينة وكشف التكرارات قبل الحفظ.',
                   style='Hint.TLabel').pack(anchor=E, padx=18, pady=(0, 8))
 
         form = ttk.Frame(win, style='Surface.TFrame', padding=12)
@@ -3161,6 +3165,39 @@ class SchoolPassApp:
             except USER_ERRORS as exc:
                 show_error(win, 'تعذر تغيير حالة الأستاذ', exc)
 
+        def download_template():
+            target = filedialog.asksaveasfilename(
+                parent=win, title='حفظ نموذج قائمة الأساتذة',
+                defaultextension='.xlsx', initialfile='قالب_قائمة_الأساتذة.xlsx',
+                filetypes=[('ملف Excel', '*.xlsx')])
+            if not target:
+                return
+            try:
+                from openpyxl import Workbook
+                from openpyxl.styles import Alignment, Font, PatternFill
+                workbook = Workbook()
+                sheet = workbook.active
+                sheet.title = 'قائمة الأساتذة'
+                sheet.append(['اسم الأستاذ', 'المادة', 'الأقسام'])
+                for cell in sheet[1]:
+                    cell.font = Font(name='Arial', bold=True, color='FFFFFF')
+                    cell.fill = PatternFill('solid', fgColor='185A8D')
+                    cell.alignment = Alignment(horizontal='center', vertical='center')
+                sheet.column_dimensions['A'].width = 34
+                sheet.column_dimensions['B'].width = 24
+                sheet.column_dimensions['C'].width = 38
+                sheet.freeze_panes = 'A2'
+                sheet.auto_filter.ref = 'A1:C1'
+                sheet.row_dimensions[1].height = 24
+                workbook.save(target)
+                workbook.close()
+                messagebox.showinfo(
+                    'نموذج الأساتذة جاهز',
+                    'تم حفظ النموذج. اكتب اسم الأستاذ والمادة في كل سطر، ويمكن ترك الأقسام فارغة، ثم اختر «استيراد ملف Excel».',
+                    parent=win)
+            except Exception as exc:
+                show_error(win, 'تعذر إنشاء نموذج الأساتذة', exc)
+
         def import_excel():
             path = filedialog.askopenfilename(parent=win, title='اختيار ملف قائمة الأساتذة',
                 filetypes=[('ملفات Excel', '*.xlsx *.xlsm'), ('ملفات CSV', '*.csv'), ('جميع الملفات', '*.*')])
@@ -3211,7 +3248,8 @@ class SchoolPassApp:
         ttk.Button(buttons,text='إضافة أستاذ',command=add,style='Accent.TButton').pack(side=RIGHT,padx=4)
         ttk.Button(buttons,text='تحديث البيانات المحددة',command=update).pack(side=RIGHT,padx=4)
         ttk.Button(buttons,text='تفعيل / إيقاف',command=toggle_active).pack(side=RIGHT,padx=4)
-        ttk.Button(buttons,text='استيراد من Excel',command=import_excel,style='Gold.TButton').pack(side=RIGHT,padx=4)
+        ttk.Button(buttons,text='تنزيل نموذج Excel',command=download_template,style='Gold.TButton').pack(side=RIGHT,padx=4)
+        ttk.Button(buttons,text='استيراد ملف Excel',command=import_excel,style='Accent.TButton').pack(side=RIGHT,padx=4)
         ttk.Button(buttons,text='تفريغ الحقول',command=clear_form).pack(side=LEFT,padx=4)
         ttk.Button(buttons,text='إغلاق',command=win.destroy).pack(side=LEFT,padx=4)
         refresh()
