@@ -1349,6 +1349,96 @@ class DatePicker:
         render()
 
 
+class SuggestionPopup:
+    """Non-modal suggestion list which leaves keyboard focus in the active search entry."""
+    def __init__(self, anchor, on_select):
+        self.anchor = anchor
+        self.on_select = on_select
+        self.items = []
+        self.popup = Toplevel(anchor.winfo_toplevel())
+        try:
+            self.popup.overrideredirect(True)
+            self.popup.attributes('-topmost', True)
+        except Exception:
+            pass
+        self.listbox = tk.Listbox(
+            self.popup, height=7, exportselection=False, activestyle='none',
+            font=('Segoe UI', 10), justify='right',
+            background=UI_PALETTE.get('surface', '#FFFFFF'),
+            foreground=UI_PALETTE.get('ink', '#17263C'),
+            selectbackground=UI_PALETTE.get('primary', '#185A8D'),
+            selectforeground=UI_PALETTE.get('primary_text', '#FFFFFF'),
+            highlightthickness=1, relief='solid', borderwidth=1)
+        self.listbox.pack(fill=BOTH, expand=True)
+        self.listbox.bind('<ButtonRelease-1>', lambda _event: self.select_first())
+        self.listbox.bind('<Return>', lambda _event: self.select_first())
+        self.listbox.bind('<Escape>', lambda _event: self.hide())
+        self.hide()
+
+    def show(self, items):
+        self.items = list(items or [])
+        self.listbox.delete(0, END)
+        for label, _row in self.items:
+            self.listbox.insert(END, rtl_display(label))
+        if not self.items:
+            self.hide()
+            return
+        try:
+            self.anchor.update_idletasks()
+            x = int(self.anchor.winfo_rootx())
+            y = int(self.anchor.winfo_rooty() + self.anchor.winfo_height())
+            screen_w = int(self.anchor.winfo_screenwidth())
+            screen_h = int(self.anchor.winfo_screenheight())
+            width = min(max(300, int(self.anchor.winfo_width())), max(300, screen_w - 12))
+            height = min(7, len(self.items)) * 28 + 8
+            height = min(height, max(72, screen_h - 16))
+            if y + height > screen_h - 8:
+                y = max(0, int(self.anchor.winfo_rooty()) - height)
+            x = max(0, min(x, screen_w - width - 6))
+            self.popup.geometry(f'{width}x{height}+{x}+{max(0, y)}')
+            self.popup.deiconify()
+            self.popup.lift()
+        except Exception:
+            try:
+                self.popup.deiconify()
+            except Exception:
+                pass
+
+    def move_selection(self):
+        if not self.items:
+            return 'break'
+        try:
+            current = self.listbox.curselection()
+            index = (int(current[0]) + 1) % len(self.items) if current else 0
+            self.listbox.selection_clear(0, END)
+            self.listbox.selection_set(index)
+            self.listbox.activate(index)
+            self.listbox.see(index)
+        except Exception:
+            pass
+        return 'break'
+
+    def select_first(self):
+        if not self.items:
+            return 'break'
+        try:
+            selected = self.listbox.curselection()
+            index = int(selected[0]) if selected else 0
+            label, row = self.items[index]
+            self.hide()
+            self.on_select(row, label)
+            self.anchor.focus_set()
+        except Exception:
+            pass
+        return 'break'
+
+    def hide(self):
+        try:
+            self.popup.withdraw()
+        except Exception:
+            pass
+
+
 class RecordForm:
     def __init__(self, app: 'SchoolPassApp', kind: str):
         self.app = app
