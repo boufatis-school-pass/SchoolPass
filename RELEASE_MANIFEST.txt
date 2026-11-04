@@ -1,10 +1,8 @@
-SchoolPass 4.7.0 — SOURCE RELEASE
-Version: 4.7.0
-Database schema: 6 (unchanged)
-Runtime data directory: %LOCALAPPDATA%\SchoolPass
-Target: Windows 10/11 x64
-Main source: app.py, schoolpass_core.py
-Build command: powershell -ExecutionPolicy Bypass -File .\build_windows.ps1
-Expected Windows output: dist\SchoolPass_Setup.exe
-
-This archive contains source code and test/build instructions. It does not contain a built installer.
+SchoolPass Release 4.7.1
+Version: 4.7.1
+Base: 4.7.0
+Database schema: 7 (unchanged)
+Platform: Windows 10/11 x64
+Installer: SchoolPass_Setup.exe
+Scope: sidebar submenu placement, focus-safe autocomplete, teacher Excel template, compact dialogs, Arabic UI and dashboard spacing.
+Data migration: none

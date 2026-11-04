@@ -108,6 +108,7 @@ def fake_tk():
     m = types.ModuleType("tkinter")
     m.Tk = type("Tk", (Widget,), {}); m.Toplevel = type("Toplevel", (Widget,), {})
     m.Text = type("Text", (Widget,), {})
+    m.Listbox = type("Listbox", (Widget,), {})
     m.Canvas = type("Canvas", (Widget,), {})
     m.StringVar = StrVar; m.BooleanVar = StrVar
     class MB:
@@ -330,6 +331,42 @@ class TestGuiSmoke(unittest.TestCase):
         form._refresh_student_suggestions()
         self.assertIsNone(form.student)
         self.assertEqual(form.student_label.get(), self.app.rtl_display("لم يتم اختيار التلميذ"))
+
+    def test_live_student_entry_keeps_query_text_and_uses_independent_suggestions(self):
+        a = self.make_app(self.sup)
+        form = self.app.RecordForm(a, "late")
+        form.student_var.set("أحمد")
+        form._refresh_student_suggestions()
+        self.assertIsInstance(form.student_combo, self.app.ttk.Entry)
+        self.assertEqual(form.student_var.get(), "أحمد")
+        self.assertTrue(hasattr(form, "student_suggestions"))
+
+    def test_live_teacher_entry_keeps_query_text_and_uses_independent_suggestions(self):
+        a = self.make_app(self.admin)
+        form = self.app.RecordForm(a, "special_entry")
+        form.teacher_var.set("مح")
+        form._refresh_teacher_suggestions()
+        self.assertIsInstance(form.teacher_combo, self.app.ttk.Entry)
+        self.assertEqual(form.teacher_var.get(), "مح")
+        self.assertTrue(hasattr(form, "teacher_suggestions"))
+
+    def test_teacher_template_download_creates_excel_header_file(self):
+        import openpyxl
+        a = self.make_app(self.admin)
+        COMMANDS.clear()
+        a.manage_teachers()
+        self.assertIn("download_template", [getattr(cmd, "__name__", "") for cmd in COMMANDS])
+        target = TEST_ROOT / "teacher-template-test.xlsx"
+        FD = type(self.app._tk.filedialog)
+        FD.answer = str(target)
+        command = next(cmd for cmd in COMMANDS if getattr(cmd, "__name__", "") == "download_template")
+        command()
+        FD.answer = ""
+        self.assertTrue(target.exists())
+        workbook = openpyxl.load_workbook(target, read_only=True)
+        self.assertEqual(tuple(next(workbook.active.iter_rows(values_only=True))),
+                         ("اسم الأستاذ", "المادة", "الأقسام"))
+        workbook.close()
 
     def test_special_entry_form_creates_expulsion_with_teacher_and_subject(self):
         a = self.make_app(self.sup)

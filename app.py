@@ -1,5 +1,5 @@
 ﻿# -*- coding: utf-8 -*-
-"""SchoolPass 4.7.0 — premium Arabic-first school operations interface. Business rules and permission checks live in schoolpass_core.py."""
+"""SchoolPass 4.7.1 — stable UI corrections and Arabic-first school operations interface."""
 from __future__ import annotations
 
 import json
@@ -154,8 +154,11 @@ def _install_toplevel_background():
                 try:
                     screen_w = int(self.winfo_screenwidth() or 1366)
                     screen_h = int(self.winfo_screenheight() or 768)
-                    width = min(int(match.group(1)), max(360, screen_w - 70))
-                    height = min(int(match.group(2)), max(300, screen_h - 90))
+                    requested_w, requested_h = int(match.group(1)), int(match.group(2))
+                    width = int(requested_w * 0.90) if requested_w >= 650 else requested_w
+                    height = int(requested_h * 0.88) if requested_h >= 450 else requested_h
+                    width = min(max(360, width), max(360, screen_w - 70))
+                    height = min(max(260, height), max(260, screen_h - 90))
                     args = (f'{width}x{height}{match.group(3)}',) + args[1:]
                 except Exception:
                     pass
@@ -168,9 +171,13 @@ def _install_toplevel_background():
             screen_w = int(self.winfo_screenwidth() or 1366)
             screen_h = int(self.winfo_screenheight() or 768)
             if width is not None:
-                width = min(int(width), max(360, screen_w - 70))
+                width = int(width)
+                if width >= 650: width = int(width * 0.90)
+                width = min(max(360, width), max(360, screen_w - 70))
             if height is not None:
-                height = min(int(height), max(300, screen_h - 90))
+                height = int(height)
+                if height >= 450: height = int(height * 0.88)
+                height = min(max(260, height), max(260, screen_h - 90))
         except Exception:
             pass
         if callable(original_minsize):
@@ -402,6 +409,18 @@ def make_style(root: Tk, primary: str | None = None, secondary: str | None = Non
     style.map('Nav.TButton', background=[('active', palette['sidebar_hover']),
                                          ('pressed', palette['sidebar_hover'])],
               foreground=[('active', '#FFFFFF')])
+    style.configure('NavHover.TButton', background=palette['sidebar_hover'], foreground='#FFFFFF',
+                    borderwidth=1, focusthickness=1, focuscolor=palette['accent'],
+                    padding=(17, 12), anchor='e', font=('Segoe UI', 10, 'bold'), relief='flat')
+    style.configure('SubNav.TButton', background=palette['surface_alt'], foreground=palette['ink'],
+                    borderwidth=0, padding=(10, 8), anchor='e',
+                    font=('Segoe UI', 9, 'bold'), relief='flat')
+    style.map('SubNav.TButton', background=[('active', palette['primary_soft']),
+                                            ('pressed', palette['primary_soft'])],
+              foreground=[('active', primary_color)])
+    style.configure('SubNavHover.TButton', background=palette['primary_soft'], foreground=primary_color,
+                    borderwidth=1, padding=(10, 8), anchor='e',
+                    font=('Segoe UI', 9, 'bold'), relief='flat')
     style.configure('Link.TButton', background=surface, foreground=primary_color, borderwidth=0,
                     padding=(5, 5), font=('Segoe UI', 9, 'bold'), relief='flat')
     style.map('Link.TButton', foreground=[('active', palette['accent'])])
@@ -461,6 +480,25 @@ def rtl_display(value) -> str:
         return "\n".join(core._arabic_visual(line) if line.strip() else line for line in text.split("\n"))
     except (ImportError, RuntimeError, ValueError):
         return text
+
+def _install_rtl_window_titles():
+    """Shape Arabic window titles once, just like labels and table cells."""
+    for window_class in (Tk, Toplevel):
+        if getattr(window_class, '_schoolpass_rtl_title_installed', False):
+            continue
+        original_title = getattr(window_class, 'title', None)
+        if not callable(original_title):
+            continue
+        def title_with_rtl(self, string=None, _original=original_title):
+            if string is None:
+                return _original(self)
+            return _original(self, rtl_display(string))
+        window_class.title = title_with_rtl
+        window_class._schoolpass_rtl_title_installed = True
+
+
+_install_rtl_window_titles()
+
 
 def _custom_message_dialog(kind: str, title=None, message=None, **options):
     """Render native-looking, fully themed modal dialogs with Arabic RTL content.
@@ -639,7 +677,27 @@ def _install_rtl_widget_adapters():
             def __init__(self, master=None, **kwargs):
                 if isinstance(kwargs.get('text'), str):
                     kwargs['text'] = rtl_display(kwargs['text'])
+                self._schoolpass_text_source = None
+                self._schoolpass_text_display = None
+                source_var = kwargs.get('textvariable')
+                if source_var is not None and hasattr(source_var, 'get') and hasattr(source_var, 'trace_add'):
+                    try:
+                        self._schoolpass_text_source = source_var
+                        self._schoolpass_text_display = StringVar(master=master, value=rtl_display(source_var.get()))
+                        source_var.trace_add('write', self._schoolpass_refresh_textvariable)
+                        kwargs['textvariable'] = self._schoolpass_text_display
+                    except Exception:
+                        self._schoolpass_text_source = None
+                        self._schoolpass_text_display = None
                 super().__init__(master, **kwargs)
+
+            def _schoolpass_refresh_textvariable(self, *_args):
+                if self._schoolpass_text_source is None or self._schoolpass_text_display is None:
+                    return
+                try:
+                    self._schoolpass_text_display.set(rtl_display(self._schoolpass_text_source.get()))
+                except Exception:
+                    pass
 
             def configure(self, cnf=None, **kwargs):
                 if isinstance(cnf, dict):
@@ -1097,8 +1155,8 @@ class LoginDialog:
         self.user = None
         win = Toplevel(root)
         title = 'فتح الجلسة — SchoolPass' if lock_mode else 'تسجيل الدخول — SchoolPass'
-        configure_window(win, title, '820x540')
-        win.minsize(700, 480)
+        configure_window(win, title, '740x480')
+        win.minsize(620, 410)
         win.transient(root)
         win.grab_set()
         win.protocol('WM_DELETE_WINDOW', win.destroy)
@@ -1106,9 +1164,9 @@ class LoginDialog:
 
         body = ttk.Frame(win, style='LoginSurface.TFrame')
         body.pack(fill=BOTH, expand=True, padx=14, pady=14)
-        form_panel = ttk.Frame(body, style='LoginSurface.TFrame', padding=(30, 28))
+        form_panel = ttk.Frame(body, style='LoginSurface.TFrame', padding=(22, 18))
         form_panel.pack(side=LEFT, fill=BOTH, expand=True)
-        brand_panel = ttk.Frame(body, style='LoginBrand.TFrame', padding=(24, 26), width=270)
+        brand_panel = ttk.Frame(body, style='LoginBrand.TFrame', padding=(18, 18), width=235)
         brand_panel.pack(side=RIGHT, fill=Y)
         brand_panel.pack_propagate(False)
 
@@ -1219,7 +1277,7 @@ class StudentPicker:
         self.query.trace_add('write', lambda *_: self.refresh())
         ent.bind('<Return>', lambda _e: self.pick_selected())
         self.refresh()
-        ent.focus_set()
+        self.win.after(100, ent.focus_set)
 
     def refresh(self):
         for item in self.tree.get_children():
@@ -1330,6 +1388,96 @@ class DatePicker:
         render()
 
 
+class SuggestionPopup:
+    """Non-modal suggestion list which leaves keyboard focus in the active search entry."""
+    def __init__(self, anchor, on_select):
+        self.anchor = anchor
+        self.on_select = on_select
+        self.items = []
+        self.popup = Toplevel(anchor.winfo_toplevel())
+        try:
+            self.popup.overrideredirect(True)
+            self.popup.attributes('-topmost', True)
+        except Exception:
+            pass
+        self.listbox = tk.Listbox(
+            self.popup, height=7, exportselection=False, activestyle='none',
+            font=('Segoe UI', 10),
+            background=UI_PALETTE.get('surface', '#FFFFFF'),
+            foreground=UI_PALETTE.get('ink', '#17263C'),
+            selectbackground=UI_PALETTE.get('primary', '#185A8D'),
+            selectforeground=UI_PALETTE.get('primary_text', '#FFFFFF'),
+            highlightthickness=1, relief='solid', borderwidth=1)
+        self.listbox.pack(fill=BOTH, expand=True)
+        self.listbox.bind('<ButtonRelease-1>', lambda _event: self.select_first())
+        self.listbox.bind('<Return>', lambda _event: self.select_first())
+        self.listbox.bind('<Escape>', lambda _event: self.hide())
+        self.hide()
+
+    def show(self, items):
+        self.items = list(items or [])
+        self.listbox.delete(0, END)
+        for label, _row in self.items:
+            self.listbox.insert(END, rtl_display(label))
+        if not self.items:
+            self.hide()
+            return
+        try:
+            self.anchor.update_idletasks()
+            x = int(self.anchor.winfo_rootx())
+            y = int(self.anchor.winfo_rooty() + self.anchor.winfo_height())
+            screen_w = int(self.anchor.winfo_screenwidth())
+            screen_h = int(self.anchor.winfo_screenheight())
+            width = min(max(300, int(self.anchor.winfo_width())), max(300, screen_w - 12))
+            height = min(7, len(self.items)) * 28 + 8
+            height = min(height, max(72, screen_h - 16))
+            if y + height > screen_h - 8:
+                y = max(0, int(self.anchor.winfo_rooty()) - height)
+            x = max(0, min(x, screen_w - width - 6))
+            self.popup.geometry(f'{width}x{height}+{x}+{max(0, y)}')
+            self.popup.deiconify()
+            self.popup.lift()
+        except Exception:
+            try:
+                self.popup.deiconify()
+            except Exception:
+                pass
+
+    def move_selection(self):
+        if not self.items:
+            return 'break'
+        try:
+            current = self.listbox.curselection()
+            index = (int(current[0]) + 1) % len(self.items) if current else 0
+            self.listbox.selection_clear(0, END)
+            self.listbox.selection_set(index)
+            self.listbox.activate(index)
+            self.listbox.see(index)
+        except Exception:
+            pass
+        return 'break'
+
+    def select_first(self):
+        if not self.items:
+            return 'break'
+        try:
+            selected = self.listbox.curselection()
+            index = int(selected[0]) if selected else 0
+            label, row = self.items[index]
+            self.hide()
+            self.on_select(row, label)
+            self.anchor.focus_set()
+        except Exception:
+            pass
+        return 'break'
+
+    def hide(self):
+        try:
+            self.popup.withdraw()
+        except Exception:
+            pass
+
+
 class RecordForm:
     def __init__(self, app: 'SchoolPassApp', kind: str):
         self.app = app
@@ -1349,6 +1497,7 @@ class RecordForm:
         self.win.minsize(580, 500)
         self.win.transient(app.root)
         self.win.grab_set()
+        self.win.protocol('WM_DELETE_WINDOW', self.close)
         ttk.Label(self.win, text=self.title, style='Title.TLabel').pack(pady=(12, 6))
         form_scroll = ScrollableFrame(self.win, inner_style='TFrame')
         form_scroll.pack(fill=BOTH, expand=True, padx=12, pady=4)
@@ -1383,13 +1532,16 @@ class RecordForm:
         ttk.Label(student_row, text='التلميذ', width=29, anchor=E).pack(side=RIGHT, padx=(4, 8))
         self.student_label = DisplayStringVar(value='لم يتم اختيار التلميذ')
         self.student_var = StringVar(value='')
-        self.student_combo = ttk.Combobox(student_row, textvariable=self.student_var, state='normal', justify='right')
+        # Use a real Entry for typing; suggestions live in a separate, non-modal popup.
+        self.student_combo = ttk.Entry(student_row, textvariable=self.student_var, justify='right')
         self.student_combo.pack(side=RIGHT, fill=X, expand=True)
         self.student_option_map = {}
+        self.student_suggestions = SuggestionPopup(self.student_combo, self._choose_student_suggestion)
         self.student_combo.bind('<KeyRelease>', self._refresh_student_suggestions)
-        self.student_combo.bind('<<ComboboxSelected>>', self._student_suggestion_selected)
         self.student_combo.bind('<Return>', self._student_suggestion_selected)
-        ttk.Button(student_row, text='بحث...', command=self.pick_student).pack(side=RIGHT, padx=6)
+        self.student_combo.bind('<Down>', lambda _e: self.student_suggestions.move_selection())
+        self.student_combo.bind('<Escape>', lambda _e: self.student_suggestions.hide())
+        ttk.Button(student_row, text='بحث بالقائمة', command=self.pick_student).pack(side=RIGHT, padx=6)
 
         if kind == 'late':
             ttk.Label(form, text='سبب التأخر', anchor=E).pack(fill=X, pady=(9, 3))
@@ -1459,14 +1611,20 @@ class RecordForm:
             self.teacher_option_map = {}
             teacher_row = ttk.Frame(self.expulsion_frame); teacher_row.pack(fill=X, pady=5)
             ttk.Label(teacher_row, text='اسم الأستاذ', width=29, anchor=E).pack(side=RIGHT, padx=(4, 8))
-            self.teacher_combo = ttk.Combobox(teacher_row, textvariable=self.teacher_var, state='normal', justify='right')
+            self.teacher_combo = ttk.Entry(teacher_row, textvariable=self.teacher_var, justify='right')
             self.teacher_combo.pack(side=RIGHT, fill=X, expand=True)
+            self.teacher_suggestions = SuggestionPopup(self.teacher_combo, self._choose_teacher_suggestion)
             self.teacher_combo.bind('<KeyRelease>', self._refresh_teacher_suggestions)
-            self.teacher_combo.bind('<<ComboboxSelected>>', self._teacher_suggestion_selected)
+            self.teacher_combo.bind('<Return>', self._teacher_suggestion_selected)
+            self.teacher_combo.bind('<Down>', lambda _e: self.teacher_suggestions.move_selection())
+            self.teacher_combo.bind('<Escape>', lambda _e: self.teacher_suggestions.hide())
             self.subject_var = StringVar(value='')
             subject_row = ttk.Frame(self.expulsion_frame); subject_row.pack(fill=X, pady=5)
             ttk.Label(subject_row, text='المادة الدراسية', width=29, anchor=E).pack(side=RIGHT, padx=(4, 8))
             ttk.Entry(subject_row, textvariable=self.subject_var, state='readonly', justify='right').pack(side=RIGHT, fill=X, expand=True)
+            if self.app.current_user['role'] == 'admin':
+                ttk.Button(self.expulsion_frame, text='إدارة الأساتذة واستيراد القائمة',
+                           command=self.app.manage_teachers, style='Link.TButton').pack(anchor=E, padx=8, pady=(0, 6))
             self.special_note = add_row(form, 'special_note', 'ملاحظة (اختياري)')
             self.special_combo.bind('<<ComboboxSelected>>', lambda _e: self._refresh_special_reason())
             self._refresh_special_reason()
@@ -1481,7 +1639,14 @@ class RecordForm:
         bar = ttk.Frame(self.win)
         bar.pack(fill=X, padx=25, pady=16)
         ttk.Button(bar, text='حفظ وإصدار الرخصة', command=self.save, style='Accent.TButton').pack(side=RIGHT, padx=5)
-        ttk.Button(bar, text='إلغاء', command=self.win.destroy).pack(side=RIGHT, padx=5)
+        ttk.Button(bar, text='إلغاء', command=self.close).pack(side=RIGHT, padx=5)
+
+    def close(self):
+        for name in ('student_suggestions', 'teacher_suggestions'):
+            popup = getattr(self, name, None)
+            if popup is not None:
+                popup.hide()
+        self.win.destroy()
 
     def _absence_days_now(self):
         if self.kind != 'absence_return':
@@ -1532,72 +1697,81 @@ class RecordForm:
         else:
             self.expulsion_frame.pack_forget()
 
-    def _refresh_student_suggestions(self, _event=None):
+    def _refresh_student_suggestions(self, event=None):
         if not hasattr(self, 'student_combo'):
+            return
+        if event is not None and getattr(event, 'keysym', '') in ('Return', 'Escape', 'Up', 'Down', 'Tab', 'Shift_L', 'Shift_R'):
             return
         query = self.student_var.get().strip()
         selected_label = getattr(self, '_selected_student_label', '')
         if self.student is not None and query != selected_label:
-            # Never let a changed search string silently retain a different student.
             self.student = None
             self.student_label.set('لم يتم اختيار التلميذ')
             self._selected_student_label = ''
         if not query:
-            self.student_combo.configure(values=())
             self.student_option_map = {}
+            self.student_suggestions.hide()
             return
         try:
             rows = core.search_students(query, 18)
-            options = {}
-            for row in rows:
-                label = f"{student_name(row)} — {row['class_name']} — {row['student_key']}"
-                options[label] = row
-            self.student_option_map = options
-            self.student_combo.configure(values=tuple(options))
-            # Open the native dropdown immediately after typing without changing the query text.
-            if options:
-                try:
-                    self.student_combo.event_generate('<Down>')
-                except Exception:
-                    pass
+            self.student_option_map = {
+                f"{student_name(row)} — {row['class_name']} — {row['student_key']}": row
+                for row in rows
+            }
+            self.student_suggestions.show(list(self.student_option_map.items()))
         except Exception:
             self.student_option_map = {}
+            self.student_suggestions.hide()
+
+    def _choose_student_suggestion(self, row, _label=''):
+        self.set_student(row)
+        self.student_suggestions.hide()
 
     def _student_suggestion_selected(self, _event=None):
         row = self.student_option_map.get(self.student_var.get())
         if row:
             self.set_student(row)
+        else:
+            self.student_suggestions.select_first()
         return 'break'
 
-    def _refresh_teacher_suggestions(self, _event=None):
+    def _refresh_teacher_suggestions(self, event=None):
         if not hasattr(self, 'teacher_combo'):
+            return
+        if event is not None and getattr(event, 'keysym', '') in ('Return', 'Escape', 'Up', 'Down', 'Tab', 'Shift_L', 'Shift_R'):
             return
         query = self.teacher_var.get().strip()
         self.selected_teacher_id = None
         self.subject_var.set('')
+        if len(query) < 2:
+            self.teacher_option_map = {}
+            self.teacher_suggestions.hide()
+            return
         try:
-            rows = core.search_teachers(query, 20) if query else core.list_teachers(active_only=True)
-            options = {}
+            rows = core.search_teachers(query, 20)
+            self.teacher_option_map = {}
             for row in rows:
                 classes = f" — {row['classes']}" if row['classes'] else ''
                 label = f"{row['full_name']} — {row['subject']}{classes}"
-                options[label] = row
-            self.teacher_option_map = options
-            self.teacher_combo.configure(values=tuple(options))
-            if query and options:
-                try:
-                    self.teacher_combo.event_generate('<Down>')
-                except Exception:
-                    pass
+                self.teacher_option_map[label] = row
+            self.teacher_suggestions.show(list(self.teacher_option_map.items()))
         except Exception:
             self.teacher_option_map = {}
+            self.teacher_suggestions.hide()
+
+    def _choose_teacher_suggestion(self, row, _label=''):
+        self.selected_teacher_id = int(row['id'])
+        self.teacher_var.set(f"{row['full_name']} — {row['subject']}")
+        self.subject_var.set(row['subject'])
+        self.teacher_suggestions.hide()
+        self.teacher_combo.focus_set()
 
     def _teacher_suggestion_selected(self, _event=None):
         row = self.teacher_option_map.get(self.teacher_var.get())
         if row:
-            self.selected_teacher_id = int(row['id'])
-            self.teacher_var.set(f"{row['full_name']} — {row['subject']}")
-            self.subject_var.set(row['subject'])
+            self._choose_teacher_suggestion(row)
+        else:
+            self.teacher_suggestions.select_first()
         return 'break'
 
     def pick_student(self):
@@ -1615,6 +1789,10 @@ class RecordForm:
         self._selected_student_label = label
         if hasattr(self, 'student_var'):
             self.student_var.set(label)
+        if hasattr(self, 'student_suggestions'):
+            self.student_suggestions.hide()
+        if hasattr(self, 'student_combo'):
+            self.student_combo.focus_set()
 
     def save(self):
         if self._saving:
@@ -1676,6 +1854,10 @@ class RecordForm:
             self._saving = False
             show_error(self.win, 'تعذر إنشاء السجل', exc)
             return
+        if hasattr(self, 'student_suggestions'):
+            self.student_suggestions.hide()
+        if hasattr(self, 'teacher_suggestions'):
+            self.teacher_suggestions.hide()
         self.win.destroy()
         self.app.refresh_records()
         self.app.show_record(row['id'], offer_print=True)
@@ -2157,9 +2339,15 @@ class SchoolPassApp:
         ttk.Label(brand, text='نظام المتابعة المدرسية', style='SidebarSub.TLabel').pack(anchor=E, pady=(5, 0))
         ttk.Frame(sidebar, height=1, style='Sidebar.TFrame').pack(fill=X, padx=16, pady=(0, 12))
 
-        def nav(label, command, style='Nav.TButton'):
-            button = ttk.Button(sidebar, text=label, command=command, style=style)
-            button.pack(fill=X, padx=10, pady=3)
+        def nav(label, command, style='Nav.TButton', parent=None):
+            button = ttk.Button(parent or sidebar, text=label, command=command, style=style)
+            button.pack(fill=X, padx=10 if parent is None else 7, pady=3 if parent is None else 2)
+            if style == 'Nav.TButton':
+                button.bind('<Enter>', lambda _event, target=button: target.configure(style='NavHover.TButton'))
+                button.bind('<Leave>', lambda _event, target=button: target.configure(style='Nav.TButton'))
+            elif style == 'SubNav.TButton':
+                button.bind('<Enter>', lambda _event, target=button: target.configure(style='SubNavHover.TButton'))
+                button.bind('<Leave>', lambda _event, target=button: target.configure(style='SubNav.TButton'))
             return button
 
         def nav_section(label):
@@ -2168,18 +2356,25 @@ class SchoolPassApp:
         nav('⌂   لوحة التحكم الرئيسية', self.refresh_all)
         nav_section('إجراءات الدخول والخروج')
         entry_group = ttk.Frame(sidebar, style='Sidebar.TFrame')
-        entry_toggle = nav('＋   رخصة الدخول  ▾', lambda: entry_group.pack(fill=X, padx=13, pady=(0, 4))
-                           if not entry_group.winfo_ismapped() else entry_group.pack_forget())
+        entry_toggle = nav('＋   رخص الدخول  ▾', lambda: None)
         entry_items = (
             ('＋  تأخر عن الدخول', 'late'),
             ('↩  عودة بعد الغياب', 'absence_return'),
-            ('⚑  طرد من الحصة / حالة خاصة', 'special_entry'),
+            ('⚑  الطرد من الحصة / حالة خاصة', 'special_entry'),
         )
         for label, kind in entry_items:
-            ttk.Button(entry_group, text=label, command=lambda k=kind: RecordForm(self, k),
-                       style='Nav.TButton').pack(fill=X, padx=(8, 2), pady=2)
-        entry_toggle.bind('<Enter>', lambda _event: entry_group.pack(fill=X, padx=13, pady=(0, 4)))
-        nav('⇥   رخصة خروج استثنائي', lambda: RecordForm(self, 'exit_permit'), 'Gold.TButton')
+            nav(label, lambda k=kind: RecordForm(self, k), 'SubNav.TButton', parent=entry_group)
+        exit_button = nav('⇥   رخصة خروج استثنائي', lambda: RecordForm(self, 'exit_permit'), 'Gold.TButton')
+        def toggle_entry_group(_event=None):
+            if entry_group.winfo_ismapped():
+                entry_group.pack_forget()
+                entry_toggle.configure(text='＋   رخص الدخول  ▾')
+            else:
+                entry_group.pack(fill=X, padx=13, pady=(0, 4), before=exit_button)
+                entry_toggle.configure(text='＋   رخص الدخول  ▴')
+        entry_toggle.configure(command=toggle_entry_group)
+        if self.current_user['role'] == 'admin':
+            nav('♟   إدارة الأساتذة واستيراد القائمة', self.manage_teachers)
         nav_section('المتابعة والتقارير')
         nav('▤   إدارة التلاميذ', self.manage_students)
         nav('▥   سجل التلاميذ المطرودين', self.open_expulsion_report)
@@ -2192,7 +2387,6 @@ class SchoolPassApp:
             ttk.Label(sidebar, text='إدارة النظام', style='SidebarSub.TLabel').pack(anchor=E, padx=18, pady=(0, 4))
             nav('◷   التقرير اليومي التفصيلي A4', self.daily_summary)
             nav('♙   المستخدمون والصلاحيات', self.manage_users)
-            nav('♟   إدارة الأساتذة والمواد', self.manage_teachers)
             nav('▣   النسخ الاحتياطي والاستعادة', self.backup_db)
             nav('⚙   إعدادات المؤسسة والطباعة', self.settings_dialog)
             nav('≡   سجل التدقيق', self.audit_view)
@@ -2212,7 +2406,7 @@ class SchoolPassApp:
         self.content_frame = content
         content.bind('<Configure>', lambda event: self._adapt_dashboard_layout(event.width))
         header = ttk.Frame(content, style='PageHeader.TFrame', padding=(20, 17))
-        header.pack(fill=X, padx=18, pady=(18, 12))
+        header.pack(fill=X, padx=16, pady=(8, 8))
         right_head = ttk.Frame(header, style='PageHeader.TFrame')
         right_head.pack(fill=X, expand=True)
         ttk.Label(right_head, text='لوحة المتابعة الرئيسية', style='PageTitle.TLabel').pack(anchor=E)
@@ -2240,7 +2434,7 @@ class SchoolPassApp:
 
         # High-impact welcome banner inspired by the approved SchoolPass premium concept.
         # It is built from native ttk widgets so it remains crisp at Windows DPI scaling.
-        hero = ttk.Frame(content, style='Hero.TFrame', padding=(22, 18))
+        hero = ttk.Frame(content, style='Hero.TFrame', padding=(18, 12))
         hero.pack(fill=X, padx=22, pady=(0, 12))
         ttk.Frame(hero, style='HeroAccent.TFrame', height=4).pack(fill=X, pady=(0, 14))
         hero_body = ttk.Frame(hero, style='Hero.TFrame')
@@ -2284,7 +2478,7 @@ class SchoolPassApp:
 
         # KPI cards in a responsive 3x2 grid with an icon, a clear metric and context.
         cards = ttk.Frame(content)
-        cards.pack(fill=X, padx=20, pady=(6, 14))
+        cards.pack(fill=X, padx=18, pady=(2, 8))
         self.card_values = {}
         card_specs = [
             ('students', 'إجمالي التلاميذ النشطين', '♙', 'قاعدة بيانات المؤسسة'),
@@ -2299,7 +2493,7 @@ class SchoolPassApp:
         for col in range(3):
             cards.grid_columnconfigure(col, weight=1, uniform='kpi')
         for idx, (key, label, icon, hint) in enumerate(card_specs):
-            card = ttk.Frame(cards, style='MetricCard.TFrame', padding=(15, 12))
+            card = ttk.Frame(cards, style='MetricCard.TFrame', padding=(12, 8))
             self.kpi_cards.append(card)
             card.grid(row=idx // 3, column=2 - (idx % 3), sticky='nsew', padx=7, pady=7)
             ttk.Frame(card, height=3, style='KPIAccent.TFrame').pack(fill=X, pady=(0, 10))
@@ -2941,7 +3135,7 @@ class SchoolPassApp:
         win.minsize(780, 540)
         win.transient(self.root)
         ttk.Label(win, text='إدارة الأساتذة والمواد الدراسية', style='Title.TLabel').pack(pady=(12, 6))
-        ttk.Label(win, text='أضف الأستاذ يدويًا أو استورد قائمة Excel. لا يتم استبدال سجل موجود عند تكرار الاسم والمادة.',
+        ttk.Label(win, text='أضف الأستاذ يدويًا، أو نزّل النموذج واملأه ثم استورده مع معاينة وكشف التكرارات قبل الحفظ.',
                   style='Hint.TLabel').pack(anchor=E, padx=18, pady=(0, 8))
 
         form = ttk.Frame(win, style='Surface.TFrame', padding=12)
@@ -3018,6 +3212,39 @@ class SchoolPassApp:
             except USER_ERRORS as exc:
                 show_error(win, 'تعذر تغيير حالة الأستاذ', exc)
 
+        def download_template():
+            target = filedialog.asksaveasfilename(
+                parent=win, title='حفظ نموذج قائمة الأساتذة',
+                defaultextension='.xlsx', initialfile='قالب_قائمة_الأساتذة.xlsx',
+                filetypes=[('ملف Excel', '*.xlsx')])
+            if not target:
+                return
+            try:
+                from openpyxl import Workbook
+                from openpyxl.styles import Alignment, Font, PatternFill
+                workbook = Workbook()
+                sheet = workbook.active
+                sheet.title = 'قائمة الأساتذة'
+                sheet.append(['اسم الأستاذ', 'المادة', 'الأقسام'])
+                for cell in sheet[1]:
+                    cell.font = Font(name='Arial', bold=True, color='FFFFFF')
+                    cell.fill = PatternFill('solid', fgColor='185A8D')
+                    cell.alignment = Alignment(horizontal='center', vertical='center')
+                sheet.column_dimensions['A'].width = 34
+                sheet.column_dimensions['B'].width = 24
+                sheet.column_dimensions['C'].width = 38
+                sheet.freeze_panes = 'A2'
+                sheet.auto_filter.ref = 'A1:C1'
+                sheet.row_dimensions[1].height = 24
+                workbook.save(target)
+                workbook.close()
+                messagebox.showinfo(
+                    'نموذج الأساتذة جاهز',
+                    'تم حفظ النموذج. اكتب اسم الأستاذ والمادة في كل سطر، ويمكن ترك الأقسام فارغة، ثم اختر «استيراد ملف Excel».',
+                    parent=win)
+            except Exception as exc:
+                show_error(win, 'تعذر إنشاء نموذج الأساتذة', exc)
+
         def import_excel():
             path = filedialog.askopenfilename(parent=win, title='اختيار ملف قائمة الأساتذة',
                 filetypes=[('ملفات Excel', '*.xlsx *.xlsm'), ('ملفات CSV', '*.csv'), ('جميع الملفات', '*.*')])
@@ -3068,7 +3295,8 @@ class SchoolPassApp:
         ttk.Button(buttons,text='إضافة أستاذ',command=add,style='Accent.TButton').pack(side=RIGHT,padx=4)
         ttk.Button(buttons,text='تحديث البيانات المحددة',command=update).pack(side=RIGHT,padx=4)
         ttk.Button(buttons,text='تفعيل / إيقاف',command=toggle_active).pack(side=RIGHT,padx=4)
-        ttk.Button(buttons,text='استيراد من Excel',command=import_excel,style='Gold.TButton').pack(side=RIGHT,padx=4)
+        ttk.Button(buttons,text='تنزيل نموذج Excel',command=download_template,style='Gold.TButton').pack(side=RIGHT,padx=4)
+        ttk.Button(buttons,text='استيراد ملف Excel',command=import_excel,style='Accent.TButton').pack(side=RIGHT,padx=4)
         ttk.Button(buttons,text='تفريغ الحقول',command=clear_form).pack(side=LEFT,padx=4)
         ttk.Button(buttons,text='إغلاق',command=win.destroy).pack(side=LEFT,padx=4)
         refresh()
