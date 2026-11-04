@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from unittest import mock
 from pathlib import Path
 
 import pytest
@@ -109,24 +110,105 @@ class TestV47Features:
         assert [r["student_key"] for r in core.search_students("أحمد")] == ["S-470-01"]
         assert [r["student_key"] for r in core.search_students("أولى علوم")] == ["S-470-01"]
 
-    def test_v46_database_upgrade_adds_teacher_table_without_losing_school_data(self, tmp_path):
+    def test_v47_database_upgrade_adds_guardian_tables_without_losing_school_data(self, tmp_path):
         record = core.create_late_slip(self.student, self.supervisor, "سجل قبل التحديث")
         legacy = tmp_path / "schoolpass_4_6_1.sqlite3"
         core._copy_db(core.DB_PATH, legacy)
         with sqlite3.connect(legacy) as conn:
-            conn.execute("DROP TABLE IF EXISTS teachers")
+            conn.execute("DROP TABLE IF EXISTS student_guardians")
+            conn.execute("DROP TABLE IF EXISTS guardians")
             conn.execute("DELETE FROM settings WHERE setting_key='schema_version'")
             conn.execute(
-                "INSERT INTO settings(setting_key,setting_value) VALUES('schema_version','6')"
+                "INSERT INTO settings(setting_key,setting_value) VALUES('schema_version','7')"
             )
             conn.commit()
 
         core.restore_database(legacy, self.admin)
 
-        assert core.setting("schema_version") == "7"
+        assert core.setting("schema_version") == "8"
         assert core.get_student("S-470-01")["student_key"] == "S-470-01"
         assert core.record_by_id(record["id"])["reason"] == "سجل قبل التحديث"
         assert core.list_teachers(active_only=False) == []
+        with core.db_connect() as conn:
+            tables = {row[0] for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )}
+        assert {"guardians", "student_guardians"} <= tables
+        assert core.list_student_guardians(self.student["id"], self.admin) == []
+
+    def test_guardian_profiles_are_encrypted_reused_and_linkable_to_multiple_students(self):
+        full_id = "123456789012345678"
+        with mock.patch.object(core, "protect_sensitive_text",
+                               side_effect=lambda value: "DPAPI1:" + value[::-1]), \
+             mock.patch.object(core, "reveal_sensitive_text",
+                               side_effect=lambda value: value.split(":", 1)[1][::-1]):
+            father = core.create_guardian_for_student(
+                self.supervisor, self.student["id"], "محمد تجريبي", "الأب",
+                full_id, "0550123456", make_primary=True,
+            )
+            assert father["national_id"] == full_id
+            assert father["is_primary"] == 1
+            assert father["relationship"] == "الأب"
+
+            with core.db_connect() as conn:
+                stored = conn.execute("SELECT * FROM guardians WHERE id=?", (father["id"],)).fetchone()
+            assert full_id not in stored["national_id_enc"]
+            assert stored["national_id_enc"].startswith("DPAPI1:")
+            assert stored["national_id_hash"] != full_id
+            assert stored["national_id_last4"] == full_id[-4:]
+
+            with core.db_connect() as conn:
+                conn.execute(
+                    """INSERT INTO students(student_key,last_name,first_name,class_name,active,imported_at)
+                       VALUES(?,?,?,?,1,?)""",
+                    ("S-470-02", "تجريبي", "سارة", "ثانية علوم 1", core.now_iso()),
+                )
+            second_student = core.get_student("S-470-02")
+            linked = core.create_guardian_for_student(
+                self.supervisor, second_student["id"], "محمد تجريبي", "الأب", full_id,
+                "0550123456", make_primary=True,
+            )
+            assert linked["id"] == father["id"]
+
+            mother = core.create_guardian_for_student(
+                self.supervisor, self.student["id"], "فاطمة تجريبية", "الأم",
+                "987654321012345678", make_primary=True,
+            )
+            first_links = core.list_student_guardians(self.student["id"], self.supervisor)
+            assert len(first_links) == 2
+            assert next(row for row in first_links if row["id"] == father["id"])["is_primary"] == 0
+            assert next(row for row in first_links if row["id"] == mother["id"])["is_primary"] == 1
+
+            second_links = core.list_student_guardians(second_student["id"], self.supervisor)
+            assert len(second_links) == 1
+            assert second_links[0]["national_id"] == full_id
+
+            directory = core.list_guardians_as_admin(self.admin)
+            father_row = next(row for row in directory if row["id"] == father["id"])
+            assert father_row["student_count"] == 2
+            assert "أحمد" in father_row["linked_students"]
+            assert "سارة" in father_row["linked_students"]
+
+        with pytest.raises(core.PermissionDenied):
+            core.list_guardians_as_admin(self.supervisor)
+        with pytest.raises(core.PermissionDenied):
+            core.get_guardian_as_admin(self.supervisor, father["id"])
+        with pytest.raises(core.PermissionDenied):
+            core.update_guardian_as_admin(self.supervisor, father["id"], "محمد تجريبي")
+
+    def test_guardian_id_cannot_be_reused_for_a_different_person(self):
+        full_id = "123456789012345678"
+        with mock.patch.object(core, "protect_sensitive_text",
+                               side_effect=lambda value: "DPAPI1:" + value[::-1]), \
+             mock.patch.object(core, "reveal_sensitive_text",
+                               side_effect=lambda value: value.split(":", 1)[1][::-1]):
+            core.create_guardian_for_student(
+                self.supervisor, self.student["id"], "محمد تجريبي", "الأب", full_id
+            )
+            with pytest.raises(ValueError, match="مسجل سابقًا باسم"):
+                core.create_guardian_for_student(
+                    self.supervisor, self.student["id"], "شخص آخر", "الأم", full_id
+                )
 
     def test_login_selector_returns_active_accounts_without_credentials(self):
         accounts = core.list_active_accounts()
