@@ -1,5 +1,5 @@
 ﻿# -*- coding: utf-8 -*-
-"""SchoolPass 4.7.1 — stable UI corrections and Arabic-first school operations interface."""
+"""SchoolPass 4.7.5 — focused dashboard and navigation redesign."""
 from __future__ import annotations
 
 import json
@@ -405,7 +405,7 @@ def make_style(root: Tk, primary: str | None = None, secondary: str | None = Non
     style.configure('CardTitle.TLabel', background=surface, foreground=muted,
                     font=('Segoe UI', 9, 'bold'), anchor='e')
     style.configure('CardValue.TLabel', background=surface, foreground=primary_color,
-                    font=('Segoe UI', 21, 'bold'), anchor='e')
+                    font=('Segoe UI', 31, 'bold'), anchor='center')
     style.configure('Badge.TLabel', background=palette['primary_soft'], foreground=primary_color,
                     padding=(13, 8), font=('Segoe UI', 9, 'bold'))
     style.configure('Status.TLabel', background=palette['surface_alt'], foreground=muted,
@@ -2425,11 +2425,28 @@ class SchoolPassApp:
             return button
 
         def nav_group(label, frame_style, title_style):
+            # Keep the sidebar calm: category contents stay folded until the user opens them.
             group = ttk.Frame(sidebar, style=frame_style)
             group.pack(fill=X, padx=8, pady=4)
-            ttk.Label(group, text=label, style=title_style).pack(fill=X, padx=7, pady=(6, 3))
-            ttk.Frame(group, height=1, style='SidebarSeparator.TFrame').pack(fill=X, padx=8, pady=(0, 4))
-            return group
+            expanded = {'value': False}
+            body = ttk.Frame(group, style=frame_style)
+            toggle = ttk.Button(group, text='＋   ' + label + '   ▾', style='Nav.TButton')
+            toggle.pack(fill=X, padx=6, pady=(4, 3))
+
+            def toggle_group():
+                if expanded['value']:
+                    body.pack_forget()
+                    expanded['value'] = False
+                    toggle.configure(text='＋   ' + label + '   ▾')
+                else:
+                    body.pack(fill=X, padx=4, pady=(0, 5))
+                    expanded['value'] = True
+                    toggle.configure(text='−   ' + label + '   ▴')
+
+            toggle.configure(command=toggle_group)
+            toggle.bind('<Enter>', lambda _event, target=toggle: target.configure(style='NavHover.TButton'))
+            toggle.bind('<Leave>', lambda _event, target=toggle: target.configure(style='Nav.TButton'))
+            return body
 
         nav('⌂   لوحة التحكم الرئيسية', self.refresh_all)
         operations_group = nav_group('إجراءات الدخول والخروج', 'SidebarGroupOps.TFrame', 'SidebarGroupOpsTitle.TLabel')
@@ -2635,6 +2652,21 @@ class SchoolPassApp:
         self.alert_label.pack(fill=X, pady=3)
         ttk.Button(alert_panel, text='عرض حالات الخروج المفتوحة', command=self.show_open_exits).pack(fill=X, pady=(7, 2))
         ttk.Button(alert_panel, text='فتح سجل العمليات', command=self.open_logs).pack(fill=X, pady=2)
+        self.stats_toggle_button = ttk.Button(alert_panel, text='＋  عرض الإحصائيات والرسوم', style='Accent.TButton')
+        self.stats_toggle_button.pack(fill=X, pady=(9, 2))
+
+        def toggle_dashboard_stats():
+            if self.chart_panel.winfo_ismapped():
+                self.chart_panel.pack_forget()
+                self.stats_toggle_button.configure(text='＋  عرض الإحصائيات والرسوم')
+            else:
+                self.chart_panel.pack(side=LEFT, fill=BOTH, expand=True, padx=(0, 5))
+                self.stats_toggle_button.configure(text='−  إخفاء الإحصائيات والرسوم')
+
+        self.stats_toggle_button.configure(command=toggle_dashboard_stats)
+        # Alerts and follow-up lead the page; detailed chart statistics are opt-in.
+        chart_panel.pack_forget()
+        overview.pack_configure(before=cards)
 
         action_row = ttk.Frame(content)
         action_row.pack(fill=X, padx=18, pady=(0, 7))
