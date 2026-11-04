@@ -117,3 +117,12 @@ def test_exit_receipt_two_copies_keep_qr_workflow_and_large_admin_signature(tmp_
         assert "123456789012" not in text
         assert "9012" in text
     assert texts[0] != texts[1]
+
+
+def test_arabic_bidi_preserves_numeric_dates_times_and_reference_codes():
+    visual = core._arabic_visual(
+        "التاريخ: 04-11-2026 — المرجع: SP-2026-001 — الوقت: 17:06"
+    )
+    assert "04-11-2026" in visual
+    assert "SP-2026-001" in visual
+    assert "17:06" in visual
