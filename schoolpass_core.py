@@ -2721,8 +2721,8 @@ def _draw_entry_page(c, row, details: dict, reprint: bool, font: str, school: st
     c.setFillColorRGB(*green)
     c.setFont(font, 17.0)
     time_visual = _arabic_visual(issue_time)
-    c.drawCentredString(right_x + tile_w / 2 - 0.10 * mm, tile_y - 9.2 * mm, time_visual)
-    c.drawCentredString(right_x + tile_w / 2 + 0.10 * mm, tile_y - 9.2 * mm, time_visual)
+    # Draw once: offset overprinting made the printed time visually heavier but
+    # duplicated digits in PDF text extraction and could reduce print clarity.
     c.drawCentredString(right_x + tile_w / 2, tile_y - 9.2 * mm, time_visual)
     c.setFillColorRGB(*dark_muted)
     c.setFont(font, 7.0)
