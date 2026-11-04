@@ -4262,3 +4262,109 @@ def create_a4_two_record_sheet(record_ids: list[int]) -> Path:
     c.restoreState()
     c.save()
     return out
+
+
+
+def create_annual_report_pdf(dest_path, year: int, user_id) -> Path:
+    """Create a paginated A4-landscape annual archive and grouped totals."""
+    require_user(user_id)
+    year=int(year)
+    if not 2000<=year<=2100:
+        raise ValueError("السنة المحددة غير صحيحة.")
+    from reportlab.pdfgen import canvas
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib.units import mm
+    from reportlab.lib import colors
+    issue="COALESCE(NULLIF(r.issued_at,''),r.created_at)"
+    with db_connect() as conn:
+        rows=conn.execute(
+            f"""SELECT r.*,COALESCE(u.display_name,'غير معروف') AS supervisor
+                FROM records r LEFT JOIN users u ON u.id=r.user_id
+                WHERE substr({issue},1,4)=? ORDER BY {issue},r.record_no""",
+            (f"{year:04d}",)).fetchall()
+    out=Path(dest_path);out.parent.mkdir(parents=True,exist_ok=True)
+    page_w,page_h=landscape(A4);margin=10*mm
+    c=canvas.Canvas(str(out),pagesize=landscape(A4),pageCompression=1)
+    c.setTitle(f"SchoolPass Annual Archive {year}");c.setAuthor(APP_NAME)
+    font=_font_setup()
+    active=[r for r in rows if r["status"]!="cancelled"]
+    by_month=Counter(str((r["issued_at"] or r["created_at"])[:7]) for r in active)
+    by_class=Counter((r["class_name"] or "—") for r in active)
+    by_supervisor=Counter((r["supervisor"] or "—") for r in active)
+    by_kind=Counter(kind_label(r["kind"]) for r in active)
+    month_names=["جانفي","فيفري","مارس","أفريل","ماي","جوان","جويلية","أوت","سبتمبر","أكتوبر","نوفمبر","ديسمبر"]
+    y=page_h-margin
+    visual=lambda value:_arabic_visual(str(value))
+    def footer():
+        c.setStrokeColor(colors.HexColor("#B7C4BE"));c.line(margin,13*mm,page_w-margin,13*mm)
+        c.setFont(font,6.5);c.setFillColor(colors.HexColor("#52645D"))
+        c.drawString(margin,8*mm,visual(f"SchoolPass — الأرشيف السنوي {year}"))
+        c.drawRightString(page_w-margin,8*mm,visual(f"تاريخ الإنشاء: {now_iso()}"))
+    columns=[(68,"الرقم المرجعي"),(100,"التاريخ والوقت"),(120,"نوع الرخصة"),
+             (165,"التلميذ"),(105,"القسم"),(110,"المشرف"),(75,"الحالة")]
+    table_width=sum(width for width,_ in columns)
+    table_right=page_w-margin-(page_w-2*margin-table_width)/2
+    def draw_table_header():
+        nonlocal y
+        h=7*mm;c.setFillColor(colors.HexColor("#DDE8E2"))
+        c.rect(table_right-table_width,y-h,table_width,h,stroke=0,fill=1)
+        c.setFillColor(colors.HexColor("#173D36"));c.setFont(font,7.2);xr=table_right
+        for width,title in columns:
+            c.drawRightString(xr-3,y-4.8*mm,visual(title));xr-=width
+        y-=h
+    def draw_header(first=False):
+        nonlocal y
+        c.setFillColor(colors.HexColor("#173D36"))
+        c.roundRect(margin,page_h-24*mm,page_w-2*margin,13*mm,2*mm,stroke=0,fill=1)
+        c.setFillColor(colors.white);c.setFont(font,13)
+        c.drawCentredString(page_w/2,page_h-19*mm,visual(f"الأرشيف السنوي للرخص — {year}"))
+        c.setFillColor(colors.HexColor("#263B35"));c.setFont(font,8)
+        c.drawRightString(page_w-margin,page_h-31*mm,
+            visual(f"إجمالي السجلات: {len(rows)} | غير الملغاة: {len(active)} | الملغاة: {len(rows)-len(active)}"))
+        y=page_h-39*mm
+        if first:
+            sections=[
+                ("الإحصاء حسب الشهر",[f"{month_names[int(k[5:7])-1]}: {v}" for k,v in sorted(by_month.items())]),
+                ("حسب نوع الرخصة",[f"{k}: {v}" for k,v in by_kind.most_common()]),
+                ("حسب القسم",[f"{k}: {v}" for k,v in by_class.most_common(12)]),
+                ("حسب المشرف",[f"{k}: {v}" for k,v in by_supervisor.most_common(12)]),
+            ]
+            for title,values in sections:
+                c.setFillColor(colors.HexColor("#EAF0ED"))
+                c.roundRect(margin,y-5*mm,page_w-2*margin,6*mm,1*mm,stroke=0,fill=1)
+                c.setFillColor(colors.HexColor("#173D36"));c.setFont(font,8.5)
+                c.drawRightString(page_w-margin-2*mm,y-3.4*mm,visual(title));y-=8*mm
+                content=" ؛ ".join(values) if values else "لا توجد بيانات."
+                c.setFillColor(colors.HexColor("#253B35"));c.setFont(font,7.2)
+                for line in _wrap_to_width(content,font,7.2,page_w-2*margin-4*mm):
+                    if y<22*mm:
+                        footer();c.showPage();draw_header(False)
+                    c.drawRightString(page_w-margin-2*mm,y,visual(line));y-=4.4*mm
+                y-=1.5*mm
+        draw_table_header()
+    draw_header(True)
+    for index,row in enumerate(rows):
+        values=[row["record_no"],row["issued_at"] or row["created_at"],kind_label(row["kind"]),
+                row["student_name"],row["class_name"],row["supervisor"],status_label(row["status"])]
+        cells=[_wrap_to_width(str(value or "—"),font,6.8,width-6)
+               for (width,_),value in zip(columns,values)]
+        lines=max(1,max(len(cell) for cell in cells))
+        row_height=max(7*mm,lines*7.7+3)
+        if y-row_height<17*mm:
+            footer();c.showPage();draw_header(False)
+        if index%2:
+            c.setFillColor(colors.HexColor("#F5F8F6"))
+            c.rect(table_right-table_width,y-row_height,table_width,row_height,stroke=0,fill=1)
+        right=table_right
+        for (width,_),cell in zip(columns,cells):
+            baseline=y-4.5*mm
+            for line in cell:
+                c.setFillColor(colors.HexColor("#263B35"));c.setFont(font,6.8)
+                c.drawRightString(right-3,baseline,visual(line));baseline-=7.7
+            right-=width
+        c.setStrokeColor(colors.HexColor("#D8E1DC"))
+        c.line(table_right-table_width,y-row_height,table_right,y-row_height)
+        y-=row_height
+    footer();c.save()
+    audit(_uid(user_id),"إنشاء أرشيف سنوي PDF","report",str(year),f"عدد السجلات: {len(rows)}")
+    return out
