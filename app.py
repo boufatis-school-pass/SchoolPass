@@ -872,14 +872,16 @@ def _install_rtl_widget_adapters():
             super().__init__(master, *args, **kwargs)
 
         def heading(self, column, option=None, **kwargs):
-            kwargs.setdefault('anchor', 'e')
+            if kwargs:
+                kwargs.setdefault('anchor', 'e')
             if isinstance(kwargs.get('text'), str):
                 kwargs['text'] = rtl_display(kwargs['text'])
             base_method = getattr(super(), 'heading', None)
             return base_method(column, option, **kwargs) if base_method else None
 
         def column(self, column, option=None, **kwargs):
-            kwargs.setdefault('anchor', 'e')
+            if kwargs:
+                kwargs.setdefault('anchor', 'e')
             base_method = getattr(super(), 'column', None)
             return base_method(column, option, **kwargs) if base_method else None
 
