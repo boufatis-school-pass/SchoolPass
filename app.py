@@ -1402,7 +1402,7 @@ class SuggestionPopup:
             pass
         self.listbox = tk.Listbox(
             self.popup, height=7, exportselection=False, activestyle='none',
-            font=('Segoe UI', 10), justify='right',
+            font=('Segoe UI', 10),
             background=UI_PALETTE.get('surface', '#FFFFFF'),
             foreground=UI_PALETTE.get('ink', '#17263C'),
             selectbackground=UI_PALETTE.get('primary', '#185A8D'),
