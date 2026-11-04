@@ -1511,7 +1511,7 @@ def list_guardians_as_admin(actor, query: str = "") -> list[dict]:
                 ORDER BY g.full_name COLLATE NOCASE LIMIT 1000""",
             params,
         ).fetchall()
-    audit(admin["id"], "استعراض سجل الأولياء", "guardian", "", f"عدد النتائج: {len(rows)}")
+    # Directory filtering runs on every keystroke; only full-ID disclosure is audit-logged.
     return [dict(row) for row in rows]
 
 
