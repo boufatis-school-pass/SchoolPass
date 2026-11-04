@@ -481,6 +481,25 @@ def rtl_display(value) -> str:
     except (ImportError, RuntimeError, ValueError):
         return text
 
+def _install_rtl_window_titles():
+    """Shape Arabic window titles once, just like labels and table cells."""
+    for window_class in (Tk, Toplevel):
+        if getattr(window_class, '_schoolpass_rtl_title_installed', False):
+            continue
+        original_title = getattr(window_class, 'title', None)
+        if not callable(original_title):
+            continue
+        def title_with_rtl(self, string=None, _original=original_title):
+            if string is None:
+                return _original(self)
+            return _original(self, rtl_display(string))
+        window_class.title = title_with_rtl
+        window_class._schoolpass_rtl_title_installed = True
+
+
+_install_rtl_window_titles()
+
+
 def _custom_message_dialog(kind: str, title=None, message=None, **options):
     """Render native-looking, fully themed modal dialogs with Arabic RTL content.
 
@@ -658,7 +677,27 @@ def _install_rtl_widget_adapters():
             def __init__(self, master=None, **kwargs):
                 if isinstance(kwargs.get('text'), str):
                     kwargs['text'] = rtl_display(kwargs['text'])
+                self._schoolpass_text_source = None
+                self._schoolpass_text_display = None
+                source_var = kwargs.get('textvariable')
+                if source_var is not None and hasattr(source_var, 'get') and hasattr(source_var, 'trace_add'):
+                    try:
+                        self._schoolpass_text_source = source_var
+                        self._schoolpass_text_display = StringVar(master=master, value=rtl_display(source_var.get()))
+                        source_var.trace_add('write', self._schoolpass_refresh_textvariable)
+                        kwargs['textvariable'] = self._schoolpass_text_display
+                    except Exception:
+                        self._schoolpass_text_source = None
+                        self._schoolpass_text_display = None
                 super().__init__(master, **kwargs)
+
+            def _schoolpass_refresh_textvariable(self, *_args):
+                if self._schoolpass_text_source is None or self._schoolpass_text_display is None:
+                    return
+                try:
+                    self._schoolpass_text_display.set(rtl_display(self._schoolpass_text_source.get()))
+                except Exception:
+                    pass
 
             def configure(self, cnf=None, **kwargs):
                 if isinstance(cnf, dict):
