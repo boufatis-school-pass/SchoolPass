@@ -1,5 +1,5 @@
 ﻿# -*- coding: utf-8 -*-
-"""SchoolPass 4.7.5 — focused dashboard and navigation redesign."""
+"""SchoolPass 4.7.6 — guardian records, permit autofill and dashboard improvements."""
 from __future__ import annotations
 
 import json
@@ -3056,8 +3056,6 @@ class SchoolPassApp:
             self.hero_entry_button.configure(text='＋ دخول' if compact else '＋  إصدار رخصة دخول')
             self.hero_exit_button.configure(text='⇥ خروج' if compact else '⇥  خروج استثنائي')
             self.hero_open_button.configure(text='الحالات المفتوحة' if compact else 'متابعة حالات الخروج')
-            if hasattr(self, 'hero_teacher_button'):
-                self.hero_teacher_button.configure(text='♟ الأساتذة' if compact else '♟ إدارة الأساتذة واستيراد Excel')
         if hasattr(self, 'hero_description'):
             self.hero_description.configure(wraplength=max(220, min(660, width - 360)))
         if hasattr(self, 'maximize_button'):
