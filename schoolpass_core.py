@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 APP_NAME = "SchoolPass"
-APP_VERSION = "4.7.5"
+APP_VERSION = "4.7.6"
 SCHOOL_NAME = "ثانوية المجاهد بسجراري لخضر بوفاطيس"
 MINISTRY_NAME = "الجمهورية الجزائرية الديمقراطية الشعبية — وزارة التربية الوطنية"
 SERVER_PORT = 8765
@@ -198,7 +198,7 @@ def db_connect() -> sqlite3.Connection:
     return conn
 
 
-SCHEMA_VERSION = "7"
+SCHEMA_VERSION = "8"
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -226,6 +226,38 @@ CREATE TABLE IF NOT EXISTS students (
     active INTEGER NOT NULL DEFAULT 1,
     imported_at TEXT NOT NULL
 );
+-- Guardian identity is encrypted with Windows DPAPI; the HMAC is used only for duplicate detection.
+CREATE TABLE IF NOT EXISTS guardians (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    full_name TEXT NOT NULL,
+    national_id_enc TEXT NOT NULL,
+    national_id_hash TEXT NOT NULL UNIQUE,
+    national_id_last4 TEXT NOT NULL,
+    national_id_length INTEGER NOT NULL,
+    phone TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    created_by INTEGER,
+    updated_by INTEGER,
+    FOREIGN KEY(created_by) REFERENCES users(id),
+    FOREIGN KEY(updated_by) REFERENCES users(id)
+);
+CREATE TABLE IF NOT EXISTS student_guardians (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    student_id INTEGER NOT NULL,
+    guardian_id INTEGER NOT NULL,
+    relationship TEXT NOT NULL CHECK(relationship IN ('الأب','الأم','الوصي بالكفالة','أخرى')),
+    relationship_other TEXT NOT NULL DEFAULT '',
+    is_primary INTEGER NOT NULL DEFAULT 0 CHECK(is_primary IN (0,1)),
+    created_at TEXT NOT NULL,
+    created_by INTEGER,
+    UNIQUE(student_id, guardian_id),
+    FOREIGN KEY(student_id) REFERENCES students(id),
+    FOREIGN KEY(guardian_id) REFERENCES guardians(id),
+    FOREIGN KEY(created_by) REFERENCES users(id)
+);
+CREATE INDEX IF NOT EXISTS idx_student_guardians_student ON student_guardians(student_id, is_primary DESC);
+CREATE INDEX IF NOT EXISTS idx_student_guardians_guardian ON student_guardians(guardian_id);
 CREATE TABLE IF NOT EXISTS teachers (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     full_name TEXT NOT NULL,
@@ -1304,6 +1336,239 @@ def validate_national_id(value: str) -> str:
     if not nid.isdigit() or not (6 <= len(nid) <= 20):
         raise ValueError("أدخل رقم بطاقة الهوية الوطنية أرقامًا فقط (6 إلى 20 رقمًا).")
     return nid
+
+
+GUARDIAN_RELATIONSHIPS = ("الأب", "الأم", "الوصي بالكفالة", "أخرى")
+
+
+def _guardian_national_id_hash(national_id: str) -> str:
+    """Keyed digest used to detect duplicate guardian identities without storing an ID in clear text."""
+    secret = setting("secret")
+    if not secret:
+        raise RuntimeError("مفتاح حماية قاعدة البيانات غير موجود؛ أعد تشغيل تهيئة SchoolPass قبل تسجيل ولي جديد.")
+    return hmac.new(secret.encode("utf-8"), national_id.encode("ascii"), hashlib.sha256).hexdigest()
+
+
+def list_student_guardians(student_id: int, user_id) -> list[dict]:
+    """Return linked guardians for permit forms; full IDs are decrypted only in memory and access is audited."""
+    user = require_user(user_id)
+    with db_connect() as conn:
+        rows = conn.execute(
+            """SELECT g.id,g.full_name,g.national_id_enc,g.national_id_last4,g.national_id_length,g.phone,
+                      sg.relationship,sg.relationship_other,sg.is_primary
+               FROM student_guardians sg JOIN guardians g ON g.id=sg.guardian_id
+               WHERE sg.student_id=? ORDER BY sg.is_primary DESC, g.full_name COLLATE NOCASE""",
+            (int(student_id),),
+        ).fetchall()
+    result = []
+    for row in rows:
+        item = dict(row)
+        try:
+            item["national_id"] = reveal_sensitive_text(item.pop("national_id_enc"))
+        except Exception as exc:
+            raise RuntimeError(
+                "تعذر فك تشفير رقم بطاقة الولي على حساب Windows الحالي. "
+                "استعمل حساب Windows الذي سُجلت به البيانات أو اطلب من المدير نقلها بطريقة آمنة."
+            ) from exc
+        item["national_id_masked"] = "*" * max(4, int(item["national_id_length"] or 0) - 4) + item["national_id_last4"]
+        item["relationship_label"] = item["relationship_other"] if item["relationship"] == "أخرى" else item["relationship"]
+        result.append(item)
+    if rows:
+        audit(user["id"], "عرض بيانات أولياء التلميذ", "student", student_id,
+              f"عدد الأولياء المعروضين: {len(rows)}؛ أرقام الهوية لم تُدرج في سجل التدقيق.")
+    return result
+
+
+def create_guardian_for_student(actor, student_id: int, full_name: str, relationship: str,
+                                national_id: str, phone: str = "", relationship_other: str = "",
+                                make_primary: bool = False) -> dict:
+    """Create or reuse a guardian profile, link it to a student, and optionally mark it primary.
+    
+    Supervisors may add guardians while issuing a permit. The full ID is never stored in clear text.
+    """
+    user = require_user(actor)
+    name = re.sub(r"\s+", " ", str(full_name or "")).strip()
+    rel = str(relationship or "").strip()
+    other = re.sub(r"\s+", " ", str(relationship_other or "")).strip()
+    phone_text = re.sub(r"\s+", " ", str(phone or "")).strip()
+    if not name or len(name) > 120:
+        raise ValueError("أدخل الاسم الكامل للولي (حتى 120 حرفًا).")
+    if rel not in GUARDIAN_RELATIONSHIPS:
+        raise ValueError("اختر صلة القرابة من القائمة.")
+    if rel == "أخرى" and (not other or len(other) > 80):
+        raise ValueError("حدد صلة القرابة الأخرى (حتى 80 حرفًا).")
+    if len(phone_text) > 30:
+        raise ValueError("رقم الهاتف طويل جدًا (الحد الأقصى 30 حرفًا).")
+    nid = validate_national_id(national_id)
+    try:
+        encrypted = protect_sensitive_text(nid)
+    except Exception as exc:
+        raise RuntimeError(f"تعذر تشفير رقم بطاقة الولي على حساب Windows الحالي؛ لم تُحفظ البيانات.\n{exc}") from exc
+    digest = _guardian_national_id_hash(nid)
+    stamp = now_iso()
+    student_id = int(student_id)
+    with db_connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        if not conn.execute("SELECT 1 FROM students WHERE id=?", (student_id,)).fetchone():
+            raise ValueError("التلميذ غير موجود؛ حدّث قائمة التلاميذ ثم أعد المحاولة.")
+        guardian = conn.execute("SELECT * FROM guardians WHERE national_id_hash=?", (digest,)).fetchone()
+        if guardian and guardian["full_name"].casefold() != name.casefold():
+            raise ValueError(
+                f"رقم بطاقة التعريف مسجل سابقًا باسم «{guardian['full_name']}». "
+                "اختر بيانات الولي المسجل بدل إنشاء شخص مكرر."
+            )
+        if guardian:
+            guardian_id = int(guardian["id"])
+            if phone_text and not guardian["phone"]:
+                conn.execute("UPDATE guardians SET phone=?,updated_at=?,updated_by=? WHERE id=?",
+                             (phone_text, stamp, user["id"], guardian_id))
+        else:
+            cur = conn.execute(
+                """INSERT INTO guardians(full_name,national_id_enc,national_id_hash,national_id_last4,
+                       national_id_length,phone,created_at,updated_at,created_by,updated_by)
+                   VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                (name, encrypted, digest, nid[-4:], len(nid), phone_text,
+                 stamp, stamp, user["id"], user["id"]),
+            )
+            guardian_id = int(cur.lastrowid)
+        linked = conn.execute(
+            "SELECT id,is_primary FROM student_guardians WHERE student_id=? AND guardian_id=?",
+            (student_id, guardian_id),
+        ).fetchone()
+        primary = bool(make_primary or not conn.execute(
+            "SELECT 1 FROM student_guardians WHERE student_id=? AND is_primary=1", (student_id,)
+        ).fetchone())
+        if primary:
+            conn.execute("UPDATE student_guardians SET is_primary=0 WHERE student_id=?", (student_id,))
+        if linked:
+            conn.execute(
+                """UPDATE student_guardians SET relationship=?,relationship_other=?,is_primary=?
+                   WHERE id=?""",
+                (rel, other if rel == "أخرى" else "", 1 if primary else int(linked["is_primary"]), linked["id"]),
+            )
+        else:
+            conn.execute(
+                """INSERT INTO student_guardians(student_id,guardian_id,relationship,relationship_other,
+                       is_primary,created_at,created_by) VALUES(?,?,?,?,?,?,?)""",
+                (student_id, guardian_id, rel, other if rel == "أخرى" else "", 1 if primary else 0,
+                 stamp, user["id"]),
+            )
+        conn.execute(
+            "INSERT INTO audit_logs(happened_at,user_id,action,target_type,target_id,description) VALUES(?,?,?,?,?,?)",
+            (stamp, user["id"], "إضافة أو ربط ولي بتلميذ", "guardian", str(guardian_id),
+             f"{name}؛ التلميذ #{student_id}؛ الصلة: {other if rel == 'أخرى' else rel}؛ ولي أساسي: {'نعم' if primary else 'لا'}"),
+        )
+    for item in list_student_guardians(student_id, user["id"]):
+        if item["id"] == guardian_id:
+            return item
+    raise RuntimeError("تم حفظ بيانات الولي لكن تعذر استرجاعها؛ أعد فتح نموذج الرخصة.")
+
+
+def set_primary_student_guardian(actor, student_id: int, guardian_id: int) -> None:
+    user = require_user(actor)
+    with db_connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        link = conn.execute(
+            "SELECT 1 FROM student_guardians WHERE student_id=? AND guardian_id=?",
+            (int(student_id), int(guardian_id)),
+        ).fetchone()
+        if not link:
+            raise ValueError("هذا الولي غير مرتبط بالتلميذ المحدد.")
+        conn.execute("UPDATE student_guardians SET is_primary=0 WHERE student_id=?", (int(student_id),))
+        conn.execute("UPDATE student_guardians SET is_primary=1 WHERE student_id=? AND guardian_id=?",
+                     (int(student_id), int(guardian_id)))
+        conn.execute(
+            "INSERT INTO audit_logs(happened_at,user_id,action,target_type,target_id,description) VALUES(?,?,?,?,?,?)",
+            (now_iso(), user["id"], "تعيين الولي الأساسي", "student", str(student_id),
+             f"الولي #{guardian_id} أصبح الولي الأساسي."),
+        )
+
+
+def list_guardians_as_admin(actor, query: str = "") -> list[dict]:
+    admin = require_admin(actor)
+    term = re.sub(r"\s+", " ", str(query or "")).strip()
+    params: list[object] = []
+    where = ""
+    if term:
+        where = "WHERE g.full_name LIKE ? OR g.phone LIKE ? OR g.national_id_last4 LIKE ?"
+        params.extend([f"%{term}%", f"%{term}%", f"%{term[-4:]}%"])
+        if term.isdigit() and 6 <= len(term) <= 20:
+            where = "(" + where[6:] + " OR g.national_id_hash=?)"
+            params.append(_guardian_national_id_hash(validate_national_id(term)))
+    with db_connect() as conn:
+        rows = conn.execute(
+            f"""SELECT g.id,g.full_name,g.national_id_last4,g.national_id_length,g.phone,
+                       COUNT(DISTINCT sg.student_id) AS student_count,
+                       GROUP_CONCAT(DISTINCT s.last_name||' '||s.first_name||' — '||
+                           CASE WHEN sg.relationship='أخرى' THEN sg.relationship_other ELSE sg.relationship END,'؛ ') AS linked_students
+                FROM guardians g
+                LEFT JOIN student_guardians sg ON sg.guardian_id=g.id
+                LEFT JOIN students s ON s.id=sg.student_id
+                {where}
+                GROUP BY g.id
+                ORDER BY g.full_name COLLATE NOCASE LIMIT 1000""",
+            params,
+        ).fetchall()
+    audit(admin["id"], "استعراض سجل الأولياء", "guardian", "", f"عدد النتائج: {len(rows)}")
+    return [dict(row) for row in rows]
+
+
+def get_guardian_as_admin(actor, guardian_id: int) -> dict:
+    admin = require_admin(actor)
+    with db_connect() as conn:
+        row = conn.execute("SELECT * FROM guardians WHERE id=?", (int(guardian_id),)).fetchone()
+    if not row:
+        raise ValueError("الولي غير موجود.")
+    result = dict(row)
+    try:
+        result["national_id"] = reveal_sensitive_text(result.pop("national_id_enc"))
+    except Exception as exc:
+        raise RuntimeError("تعذر فك تشفير رقم بطاقة الولي على حساب Windows الحالي.") from exc
+    audit(admin["id"], "عرض رقم بطاقة ولي كامل", "guardian", guardian_id,
+          "تم عرض الرقم للمدير في نافذة تعديل بيانات الولي.")
+    return result
+
+
+def update_guardian_as_admin(actor, guardian_id: int, full_name: str, phone: str = "",
+                             national_id: str = "") -> dict:
+    admin = require_admin(actor)
+    name = re.sub(r"\s+", " ", str(full_name or "")).strip()
+    phone_text = re.sub(r"\s+", " ", str(phone or "")).strip()
+    if not name or len(name) > 120:
+        raise ValueError("أدخل الاسم الكامل للولي (حتى 120 حرفًا).")
+    if len(phone_text) > 30:
+        raise ValueError("رقم الهاتف طويل جدًا (الحد الأقصى 30 حرفًا).")
+    stamp = now_iso()
+    with db_connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        old = conn.execute("SELECT * FROM guardians WHERE id=?", (int(guardian_id),)).fetchone()
+        if not old:
+            raise ValueError("الولي غير موجود.")
+        if str(national_id or "").strip():
+            nid = validate_national_id(national_id)
+            digest = _guardian_national_id_hash(nid)
+            duplicate = conn.execute("SELECT id FROM guardians WHERE national_id_hash=? AND id<>?",
+                                     (digest, int(guardian_id))).fetchone()
+            if duplicate:
+                raise ValueError("رقم بطاقة التعريف مرتبط بملف ولي آخر.")
+            try:
+                encrypted = protect_sensitive_text(nid)
+            except Exception as exc:
+                raise RuntimeError(f"تعذر تشفير رقم بطاقة الولي؛ لم تُحفظ التعديلات.\n{exc}") from exc
+            conn.execute(
+                """UPDATE guardians SET full_name=?,phone=?,national_id_enc=?,national_id_hash=?,
+                       national_id_last4=?,national_id_length=?,updated_at=?,updated_by=? WHERE id=?""",
+                (name, phone_text, encrypted, digest, nid[-4:], len(nid), stamp, admin["id"], int(guardian_id)),
+            )
+        else:
+            conn.execute("UPDATE guardians SET full_name=?,phone=?,updated_at=?,updated_by=? WHERE id=?",
+                         (name, phone_text, stamp, admin["id"], int(guardian_id)))
+        conn.execute(
+            "INSERT INTO audit_logs(happened_at,user_id,action,target_type,target_id,description) VALUES(?,?,?,?,?,?)",
+            (stamp, admin["id"], "تعديل بيانات ولي", "guardian", str(guardian_id),
+             f"{old['full_name']} ← {name}؛ لم يُسجل رقم الهوية في سجل التدقيق."),
+        )
+    return get_guardian_as_admin(admin["id"], guardian_id)
 
 
 def create_exit_permit(student, user_id, reason: str, guardian_name: str, relationship: str, national_id: str) -> sqlite3.Row:
@@ -3114,6 +3379,10 @@ def purge_old_prints(days: int = 30) -> int:
 _REQUIRED_COLUMNS = {
     "users": {"id", "username", "display_name", "role", "salt", "password_hash", "active", "failed_count", "lock_until", "created_at"},
     "teachers": {"id", "full_name", "subject", "classes", "active", "created_at", "updated_at", "created_by", "updated_by"},
+    "guardians": {"id", "full_name", "national_id_enc", "national_id_hash", "national_id_last4", "national_id_length",
+                  "phone", "created_at", "updated_at", "created_by", "updated_by"},
+    "student_guardians": {"id", "student_id", "guardian_id", "relationship", "relationship_other", "is_primary",
+                          "created_at", "created_by"},
     "students": {"id", "student_key", "last_name", "first_name", "gender", "year", "branch", "section", "class_name", "active", "imported_at"},
     "records": {"id", "record_no", "qr_token", "kind", "student_key", "student_name", "class_name", "created_at", "issued_at", "user_id", "reason", "status",
                 "details_json", "related_record_id", "cancelled_reason", "cancelled_at", "cancelled_by", "returned_at", "returned_by", "printed_count"},
