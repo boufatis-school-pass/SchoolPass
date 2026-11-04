@@ -2992,7 +2992,8 @@ class SchoolPassApp:
         nav('▥   سجل التلاميذ المطرودين', self.open_expulsion_report, parent=reports_group)
         nav('▥   سجل العمليات والتصفية', self.open_logs, parent=reports_group)
         nav('▦   الإحصائيات والرسوم البيانية', self.show_stats, parent=reports_group)
-        nav('▧   التقارير الشهرية', self.monthly_report, parent=reports_group)
+        nav('▧   الأرشيف الشهري والسنوي', self.archive_reports, parent=reports_group)
+        nav('▤   سجل الحاجب — تنفيذ الخروج والعودة', self.gatekeeper_log, parent=reports_group)
         nav('!   تنبيهات الخروج دون عودة', self.show_open_exits, parent=reports_group)
         if self.current_user['role'] == 'admin':
             admin_group = nav_group('admin', 'إدارة النظام', 'SidebarGroupAdmin.TFrame', 'SidebarGroupAdminTitle.TLabel')
@@ -3500,6 +3501,75 @@ class SchoolPassApp:
             show_error(self.root, 'تعذر إنشاء التقرير اليومي', exc)
             return
         self._show_print_options(out, self.root, title='التقرير اليومي — ورقة A4 للمدير')
+
+    def gatekeeper_log(self):
+        """Show permits issued, physical exit confirmed at the gate and subsequent return."""
+        win=Toplevel(self.root)
+        win.title('سجل الحاجب — تنفيذ الخروج والعودة')
+        win.geometry('1380x650')
+        win.minsize(1000,520)
+        win.transient(self.root)
+        top=ttk.Frame(win);top.pack(fill=X,padx=12,pady=(12,6))
+        states={'الكل':'all','لم ينفذ الخروج':'pending','نُفذ الخروج':'executed',
+                'عاد التلميذ':'returned','ملغاة':'cancelled'}
+        state_var=ComboStringVar(list(states),value='الكل')
+        ttk.Label(top,text='الحالة:').pack(side=RIGHT,padx=5)
+        ttk.Combobox(top,textvariable=state_var,values=list(states),state='readonly',
+                     width=18,justify='right').pack(side=RIGHT,padx=4)
+        count_var=DisplayStringVar(value='')
+        ttk.Label(top,textvariable=count_var).pack(side=LEFT,padx=8)
+        cols=('record_no','student','class_name','issued','guardian','executed','executor','returned','returner','state')
+        tree=ttk.Treeview(win,columns=cols,show='headings')
+        heads=[('record_no','رقم الرخصة',120),('student','التلميذ',160),('class_name','القسم',125),
+               ('issued','وقت إصدار الرخصة',145),('guardian','ولي الأمر',140),('executed','وقت الخروج الفعلي',145),
+               ('executor','من سجّل التنفيذ',125),('returned','وقت العودة',145),('returner','من سجّل العودة',125),('state','الحالة',105)]
+        for col,title,width in heads:
+            tree.heading(col,text=title);tree.column(col,width=width,anchor=E,stretch=True)
+        tree.pack(fill=BOTH,expand=True,padx=12,pady=6)
+        def refresh():
+            try: rows=core.get_gatekeeper_log(self.current_user['id'],state=states[state_var.get()])
+            except USER_ERRORS as exc:
+                show_error(win,'تعذر تحميل سجل الحاجب',exc);return
+            for item in tree.get_children():tree.delete(item)
+            for r in rows:
+                details=json.loads(r.get('details_json') or '{}')
+                state=('ملغاة' if r['status']=='cancelled' else
+                       ('عاد التلميذ' if r['status']=='returned' else
+                        ('نُفذ الخروج' if r.get('exit_executed_at') else 'لم ينفذ الخروج')))
+                tree.insert('',END,iid=str(r['id']),values=(
+                    r['record_no'],r['student_name'],r['class_name'],r['issued_at'] or r['created_at'],
+                    details.get('guardian_name','—'),r.get('exit_executed_at') or '—',
+                    r.get('exit_executor_name') or '—',r.get('returned_at') or '—',
+                    r.get('returner_name') or '—',state))
+            count_var.set(f'عدد رخص الخروج: {len(rows)}')
+        def selected():
+            return int(tree.selection()[0]) if tree.selection() else None
+        def mark_executed():
+            rid=selected()
+            if not rid:
+                messagebox.showinfo('اختيار رخصة','حدد رخصة خروج أولًا.',parent=win);return
+            try:core.mark_exit_executed(rid,self.current_user['id'])
+            except USER_ERRORS as exc:
+                show_error(win,'تعذر تأكيد تنفيذ الخروج',exc);return
+            self.refresh_records();refresh()
+        def returned():
+            rid=selected()
+            if not rid:
+                messagebox.showinfo('اختيار رخصة','حدد رخصة خروج أولًا.',parent=win);return
+            self._return_exit(rid)
+            self.refresh_records();refresh()
+        def details():
+            rid=selected()
+            if rid:self.show_record(rid)
+            else:messagebox.showinfo('اختيار رخصة','حدد رخصة أولًا.',parent=win)
+        bar=ttk.Frame(win);bar.pack(fill=X,padx=12,pady=(2,12))
+        ttk.Button(bar,text='تأكيد تنفيذ الخروج فعليًا',command=mark_executed,style='Accent.TButton').pack(side=RIGHT,padx=4)
+        ttk.Button(bar,text='تسجيل عودة التلميذ',command=returned).pack(side=RIGHT,padx=4)
+        ttk.Button(bar,text='عرض الرخصة المحددة',command=details).pack(side=RIGHT,padx=4)
+        ttk.Button(bar,text='تحديث السجل',command=refresh).pack(side=LEFT,padx=4)
+        state_var.trace_add('write',lambda *_:refresh())
+        tree.bind('<Double-1>',lambda _e:details())
+        refresh()
 
     def show_open_exits(self):
         with db_connect() as conn:
@@ -4441,6 +4511,43 @@ class SchoolPassApp:
             show_error(self.root, 'تعذر إنشاء التقرير', exc)
             return
         self._show_print_options(out, self.root, title='التقرير الشهري — معاينة وطباعة')
+
+    def archive_reports(self):
+        """Select a month or full year and create a shareable, printable PDF archive."""
+        win=Toplevel(self.root)
+        win.title('الأرشيف الشهري والسنوي')
+        win.geometry('540x300')
+        win.transient(self.root)
+        ttk.Label(win,text='اختيار فترة الأرشيف',style='Title.TLabel').pack(pady=(18,10))
+        today=date.today()
+        years=[str(y) for y in range(today.year,max(2000,today.year-15)-1,-1)]
+        year_var=ComboStringVar(years,value=str(today.year))
+        month_names=['جانفي','فيفري','مارس','أفريل','ماي','جوان','جويلية','أوت','سبتمبر','أكتوبر','نوفمبر','ديسمبر']
+        month_options=['كل السنة']+month_names
+        month_var=ComboStringVar(month_options,value=month_names[today.month-1])
+        row=ttk.Frame(win);row.pack(fill=X,padx=24,pady=9)
+        ttk.Label(row,text='السنة:',width=12,anchor=E).pack(side=RIGHT,padx=4)
+        ttk.Combobox(row,textvariable=year_var,values=years,state='readonly',width=12,justify='center').pack(side=RIGHT,padx=4)
+        ttk.Label(row,text='الشهر:',width=12,anchor=E).pack(side=RIGHT,padx=4)
+        ttk.Combobox(row,textvariable=month_var,values=month_options,state='readonly',width=16,justify='right').pack(side=RIGHT,padx=4)
+        ttk.Label(win,text='ينشئ التقرير PDF قابلًا للحفظ والطباعة والمشاركة، ويشمل السجلات والإحصاءات.',
+                  wraplength=470,justify='right').pack(fill=X,padx=26,pady=10)
+        def generate():
+            year=int(year_var.get());selected=month_var.get()
+            month=month_names.index(selected)+1 if selected in month_names else None
+            initial=f"SchoolPass_Archive_{year}_{month:02d}.pdf" if month else f"SchoolPass_Annual_Archive_{year}.pdf"
+            path=filedialog.asksaveasfilename(parent=win,title='حفظ أرشيف PDF',initialfile=initial,
+                defaultextension='.pdf',filetypes=[('تقرير PDF','*.pdf')])
+            if not path:return
+            try:
+                out=(core.create_monthly_report_pdf(path,year,month,self.current_user['id'])
+                     if month else core.create_annual_report_pdf(path,year,self.current_user['id']))
+            except Exception as exc:
+                show_error(win,'تعذر إنشاء الأرشيف',exc);return
+            self._show_print_options(out,win,title=f'الأرشيف {selected} — {year}')
+        bar=ttk.Frame(win);bar.pack(fill=X,padx=20,pady=12)
+        ttk.Button(bar,text='إنشاء ملف PDF',command=generate,style='Accent.TButton').pack(side=RIGHT,padx=4)
+        ttk.Button(bar,text='إغلاق',command=win.destroy).pack(side=RIGHT,padx=4)
 
     def open_expulsion_report(self):
         """Browse and export class-expulsion records by teacher and date interval."""
