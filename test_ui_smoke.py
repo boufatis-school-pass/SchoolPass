@@ -144,6 +144,7 @@ def fake_tk():
     m = types.ModuleType("tkinter")
     m.Tk = type("Tk", (Widget,), {}); m.Toplevel = type("Toplevel", (Widget,), {})
     m.Text = type("Text", (Widget,), {})
+    m.LabelFrame = type("LabelFrame", (Widget,), {})
     m.Listbox = type("Listbox", (Widget,), {})
     m.Canvas = type("Canvas", (Widget,), {})
     m.StringVar = StrVar; m.BooleanVar = StrVar
