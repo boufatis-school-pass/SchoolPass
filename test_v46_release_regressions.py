@@ -15,12 +15,12 @@ def test_administration_signature_box_is_substantially_larger_and_unlabelled_for
             canvas, 10.0, 12.0, "Helvetica", (0.08, 0.25, 0.42), (0.55, 0.62, 0.69)
         )
     args = canvas.roundRect.call_args.args
-    assert args[2] == 43.0 * core.MM
-    assert args[3] == 29.0 * core.MM
+    assert args[2] == 48.0 * core.MM
+    assert args[3] == 32.0 * core.MM
     assert args[2] > 30.0 * core.MM
     assert args[3] > 22.0 * core.MM
     labels = [call.args[2] for call in canvas.drawCentredString.call_args_list]
-    assert labels == ["توقيع الإدارة"]
+    assert labels == ["ختم الإدارة"]
 
 
 def test_receipt_renderers_use_the_same_signature_component_and_no_removed_labels():
@@ -43,18 +43,18 @@ def test_keyboard_help_lists_only_bound_shortcuts_and_has_f1_entry_point():
 
 def test_database_schema_and_version_metadata_are_consistent():
     core_source = (ROOT / "schoolpass_core.py").read_text(encoding="utf-8")
-    assert 'APP_VERSION = "4.7.7"' in core_source
-    assert 'SCHEMA_VERSION = "8"' in core_source
-    assert (ROOT / "VERSION.txt").read_text(encoding="ascii").strip() == "4.7.7"
+    assert 'APP_VERSION = "4.8.0"' in core_source
+    assert 'SCHEMA_VERSION = "9"' in core_source
+    assert (ROOT / "VERSION.txt").read_text(encoding="ascii").strip() == "4.8.0"
     setup = (ROOT / "SchoolPass_Setup.iss").read_text(encoding="utf-8-sig")
-    assert '#define MyAppVersion "4.7.7"' in setup
+    assert '#define MyAppVersion "4.8.0"' in setup
 
 
 def _ascii_for_pdf_tests(value):
     """Stand in for the Arabic shaping layer while keeping report text extractable."""
     value = str(value)
     replacements = {
-        "توقيع الإدارة": "ADMINISTRATION SIGNATURE",
+        "ختم الإدارة": "ADMINISTRATION STAMP",
         "ختم المؤسسة": "INSTITUTION STAMP",
         "إمضاء المسؤول": "OFFICER SIGNATURE",
     }
@@ -89,7 +89,7 @@ def test_entry_receipt_pdf_contains_only_large_admin_signature_area(tmp_path):
     assert abs(float(page.mediabox.width) - (105 / 25.4 * 72)) < 0.2
     assert abs(float(page.mediabox.height) - (148 / 25.4 * 72)) < 0.2
     text = page.extract_text() or ""
-    assert "ADMINISTRATION SIGNATURE" in text
+    assert "ADMINISTRATION STAMP" in text
     assert "INSTITUTION STAMP" not in text
     assert "OFFICER SIGNATURE" not in text
     assert "DIGITAL" not in text
@@ -111,7 +111,7 @@ def test_exit_receipt_two_copies_keep_qr_workflow_and_large_admin_signature(tmp_
     for page, text in zip(pages, texts):
         assert abs(float(page.mediabox.width) - (105 / 25.4 * 72)) < 0.2
         assert abs(float(page.mediabox.height) - (148 / 25.4 * 72)) < 0.2
-        assert "ADMINISTRATION SIGNATURE" in text
+        assert "ADMINISTRATION STAMP" in text
         assert "INSTITUTION STAMP" not in text
         assert "OFFICER SIGNATURE" not in text
         assert "123456789012" not in text

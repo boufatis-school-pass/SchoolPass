@@ -4311,7 +4311,7 @@ class SchoolPassApp:
             box = ttk.Frame(cards, style='Surface.TFrame', padding=(8, 7)); box.pack(side=RIGHT, fill=X, expand=True, padx=3)
             ttk.Label(box, text=title, style='CardTitle.TLabel').pack(anchor=E)
             ttk.Label(box, text=str(val), style='CardValue.TLabel').pack(anchor=E)
-        notes_box = ttk.LabelFrame(win, text='الملاحظات الإدارية السابقة')
+        notes_box = tk.LabelFrame(win, text='الملاحظات الإدارية السابقة')
         notes_box.pack(fill=X, padx=14, pady=(5, 7))
         notes_text = tk.Text(notes_box, height=3, wrap='word', font=('Segoe UI', 9), bd=0,
                              highlightthickness=1, highlightbackground='#D7E0E8')
