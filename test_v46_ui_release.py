@@ -96,3 +96,22 @@ def test_guardian_directory_and_permit_autofill_are_present():
         "تعيين الولي المختار كأساسي",
     ):
         assert marker in APP
+
+
+def test_arabic_rtl_adapters_cover_window_titles_widgets_and_right_aligned_reports():
+    for marker in (
+        "_install_rtl_window_titles",
+        "kwargs.setdefault('justify', 'right')",
+        "kwargs.setdefault('anchor', 'e')",
+        "def column(self, column, option=None, **kwargs):",
+        "tag_configure('_schoolpass_rtl', justify='right')",
+        "base_dir=\"R\"",
+    ):
+        assert marker in APP
+    ui_tests = (ROOT / "test_ui_smoke.py").read_text(encoding="utf-8-sig")
+    for marker in (
+        "def test_arabic_rtl_rendering_covers_titles_labels_text_canvas_and_entries(self):",
+        "def test_arabic_tree_headings_are_shaped_and_right_aligned(self):",
+        "def test_mixed_arabic_latin_digits_and_multiline_text_remain_idempotent(self):",
+    ):
+        assert marker in ui_tests
