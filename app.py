@@ -1622,7 +1622,7 @@ class RecordForm:
             subject_row = ttk.Frame(self.expulsion_frame); subject_row.pack(fill=X, pady=5)
             ttk.Label(subject_row, text='المادة الدراسية', width=29, anchor=E).pack(side=RIGHT, padx=(4, 8))
             ttk.Entry(subject_row, textvariable=self.subject_var, state='readonly', justify='right').pack(side=RIGHT, fill=X, expand=True)
-            if self.app.current_user.get('role') == 'admin':
+            if self.app.current_user['role'] == 'admin':
                 ttk.Button(self.expulsion_frame, text='إدارة الأساتذة واستيراد القائمة',
                            command=self.app.manage_teachers, style='Link.TButton').pack(anchor=E, padx=8, pady=(0, 6))
             self.special_note = add_row(form, 'special_note', 'ملاحظة (اختياري)')
