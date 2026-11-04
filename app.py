@@ -1996,7 +1996,7 @@ class RecordForm:
             return entry
 
         name_var, id_var, phone_var = StringVar(), StringVar(), StringVar()
-        relationship_var = StringVar(value='الأب')
+        relationship_var = ComboStringVar(core.GUARDIAN_RELATIONSHIPS, value='الأب')
         other_var = StringVar()
         primary_var = BooleanVar(value=not bool(getattr(self, 'guardian_option_map', {})))
         field('الاسم واللقب الكامل', name_var)
@@ -2811,9 +2811,6 @@ class SchoolPassApp:
             hero_actions, text='متابعة حالات الخروج', style='TButton',
             command=self.show_open_exits)
         self.hero_open_button.pack(side=LEFT, padx=(7, 0))
-        if self.current_user['role'] == 'admin':
-            # Teacher imports live in Data Management; keep the welcome area focused on daily actions.
-            pass
         self.hero_frame = hero
 
         # KPI cards in a responsive 3x2 grid with an icon, a clear metric and context.
