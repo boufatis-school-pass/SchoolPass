@@ -1,5 +1,5 @@
 ﻿# -*- coding: utf-8 -*-
-"""SchoolPass 4.7.6 — guardian records, permit autofill and dashboard improvements."""
+"""SchoolPass 4.7.7 — rounded surfaces, clearly outlined input fields and visual polish."""
 from __future__ import annotations
 
 import json
@@ -128,6 +128,169 @@ def _shade(hex_color: str, factor: float = 0.82) -> str:
 
 def _text_on(hex_color: str) -> str:
     return core.text_color_for(hex_color)
+
+
+def _rounded_photo_image(root, fill: str, border: str, fallback: str):
+    """Create a scalable 9-slice rounded rectangle image for ttk surfaces."""
+    size, radius, border_width = 36, 12, 2
+    try:
+        image = tk.PhotoImage(master=root, width=size, height=size)
+    except Exception:
+        return None
+
+    def inside(x, y, left, top, right, bottom, corner_radius):
+        cx = left + corner_radius if x < left + corner_radius else right - corner_radius if x > right - corner_radius else x
+        cy = top + corner_radius if y < top + corner_radius else bottom - corner_radius if y > bottom - corner_radius else y
+        return (x - cx) ** 2 + (y - cy) ** 2 <= corner_radius ** 2
+
+    for y in range(size):
+        for x in range(size):
+            if not inside(x, y, 0, 0, size - 1, size - 1, radius):
+                try:
+                    image.transparency_set(x, y, True)
+                except Exception:
+                    image.put(fallback, (x, y))
+                continue
+            is_inner = inside(
+                x, y, border_width, border_width,
+                size - 1 - border_width, size - 1 - border_width,
+                radius - border_width,
+            )
+            image.put(fill if is_inner else border, (x, y))
+    return image
+
+
+def _replace_ttk_layout_element(layout, suffixes, replacement):
+    """Replace the outer ttk drawing element while preserving its children."""
+    replaced = False
+    suffixes = tuple(str(value).lower() for value in suffixes)
+
+    def visit(nodes):
+        nonlocal replaced
+        result = []
+        for element, options in nodes or ():
+            options = dict(options or {})
+            element_name = str(element)
+            if not replaced and any(element_name.lower().endswith(suffix) for suffix in suffixes):
+                element_name = replacement
+                replaced = True
+            children = options.get('children')
+            if children is not None:
+                options['children'] = visit(children)
+            result.append((element_name, options))
+        return result
+
+    return visit(layout), replaced
+
+
+def _install_rounded_ttk_style(
+    root, style, style_name: str, element_label: str, fill: str, border: str,
+    fallback: str, *, focus_border: str | None = None, hover_fill: str | None = None,
+    disabled_fill: str | None = None, suffixes=('.field', '.border', '.button', '.background'),
+):
+    """Install a rounded 9-slice element into one ttk style without changing widget APIs."""
+    fingerprint = ''.join(ch if ch.isalnum() else '_' for ch in
+                          f'{style_name}_{fill}_{border}_{focus_border}_{hover_fill}_{disabled_fill}')
+    element_name = f'SchoolPassRounded_{element_label}_{fingerprint}'
+    normal = _rounded_photo_image(root, fill, border, fallback)
+    if normal is None:
+        return False
+    images = [normal]
+    states = []
+    if focus_border:
+        focused = _rounded_photo_image(root, fill, focus_border, fallback)
+        if focused is not None:
+            images.append(focused)
+            states.append(('focus', focused))
+    if hover_fill:
+        hovered = _rounded_photo_image(root, hover_fill, border, fallback)
+        if hovered is not None:
+            images.append(hovered)
+            states.append(('active', hovered))
+    if disabled_fill:
+        disabled = _rounded_photo_image(root, disabled_fill, border, fallback)
+        if disabled is not None:
+            images.append(disabled)
+            states.append(('disabled', disabled))
+    try:
+        # Retain Python references: Tk image elements are blanked if their PhotoImage
+        # objects are garbage-collected while the window remains open.
+        retained = list(getattr(root, '_schoolpass_rounded_images', ()))
+        retained.extend(images)
+        root._schoolpass_rounded_images = retained
+        style.element_create(
+            element_name, 'image', normal, *states,
+            border=(12, 12, 12, 12), sticky='nswe',
+        )
+    except Exception:
+        # The element may already exist after a theme refresh; its previous image
+        # references are retained on the root and can safely be reused.
+        pass
+    try:
+        layout = style.layout(style_name)
+        rounded_layout, changed = _replace_ttk_layout_element(layout, suffixes, element_name)
+        if changed:
+            style.layout(style_name, rounded_layout)
+            return True
+        return False
+    except Exception:
+        return False
+
+
+def _install_rounded_widget_surfaces(root, style, palette: dict[str, str]):
+    """Apply rounded, high-contrast styling to inputs, cards and action buttons."""
+    bg = palette.get('bg', '#F3F6FB')
+    field = palette.get('field', '#FFFFFF')
+    border = palette.get('border', '#D9E2EF')
+    primary = palette.get('primary', '#185A8D')
+    surface = palette.get('surface', '#FFFFFF')
+    _install_rounded_ttk_style(
+        root, style, 'TEntry', 'Entry', field, border, bg,
+        focus_border=primary, disabled_fill=palette.get('surface_alt', field),
+        suffixes=('.field', '.border'),
+    )
+    _install_rounded_ttk_style(
+        root, style, 'TCombobox', 'Combo', field, border, bg,
+        focus_border=primary, disabled_fill=palette.get('surface_alt', field),
+        suffixes=('.field', '.border'),
+    )
+
+    for style_name, fill, edge in (
+        ('Card.TFrame', surface, border),
+        ('MetricCard.TFrame', surface, border),
+        ('DialogCard.TFrame', surface, border),
+        ('PageHeader.TFrame', surface, border),
+        ('Hero.TFrame', palette.get('sidebar', '#142B49'), palette.get('sidebar_hover', border)),
+        ('HeroBadge.TFrame', palette.get('sidebar_hover', '#24466E'), palette.get('sidebar_hover', border)),
+        ('SidebarProfile.TFrame', palette.get('sidebar_hover', '#24466E'), palette.get('sidebar_hover', border)),
+    ):
+        _install_rounded_ttk_style(
+            root, style, style_name, 'Surface', fill, edge, bg,
+            suffixes=('.border', '.background'),
+        )
+
+    button_styles = (
+        # Install derived styles before TButton so each keeps its own image element
+        # rather than inheriting the base button's background image.
+        ('Accent.TButton', primary, primary, palette.get('primary_hover', primary)),
+        ('Gold.TButton', palette.get('gold', '#E6B24F'), palette.get('gold', '#E6B24F'), _shade(palette.get('gold', '#E6B24F'), 0.92)),
+        ('NavGroupOps.TButton', '#245B86', '#245B86', '#3475A5'),
+        ('NavGroupData.TButton', '#286B62', '#286B62', '#34877A'),
+        ('NavGroupReports.TButton', '#66518A', '#66518A', '#7A65A1'),
+        ('NavGroupAdmin.TButton', '#8A6435', '#8A6435', '#A47A45'),
+        ('Nav.TButton', palette.get('sidebar', '#142B49'), palette.get('sidebar', '#142B49'), palette.get('sidebar_hover', '#24466E')),
+        ('NavHover.TButton', palette.get('sidebar_hover', '#24466E'), palette.get('sidebar_hover', '#24466E'), palette.get('primary', primary)),
+        ('SubNav.TButton', palette.get('surface_alt', '#F8FAFD'), border, palette.get('primary_soft', '#E9F1FC')),
+        ('SubNavHover.TButton', palette.get('primary_soft', '#E9F1FC'), border, palette.get('primary_soft', '#E9F1FC')),
+        ('Link.TButton', surface, surface, palette.get('primary_soft', '#E9F1FC')),
+        ('TButton', palette.get('heading', '#EDF2F8'), border, palette.get('selected', '#E4EEFC')),
+    )
+    for style_name, fill, edge, hover in button_styles:
+        _install_rounded_ttk_style(
+            root, style, style_name, 'Button', fill, edge, bg,
+            hover_fill=hover, suffixes=('.border', '.button', '.background'),
+        )
+
 
 
 def _center_toplevel_window(win):
@@ -493,14 +656,28 @@ def make_style(root: Tk, primary: str | None = None, secondary: str | None = Non
 
     # Forms and data grids
     style.configure('TLabel', background=bg, foreground=ink, font=('Segoe UI', 10), anchor='e')
-    style.configure('TEntry', padding=(11, 9), fieldbackground=palette['field'], foreground=ink,
-                    borderwidth=1, relief='flat')
-    style.map('TEntry', fieldbackground=[('readonly', palette['surface_alt']), ('disabled', palette['surface_alt'])],
-              bordercolor=[('focus', primary_color), ('!focus', palette['border'])])
-    style.configure('TCombobox', padding=(10, 8), fieldbackground=palette['field'], foreground=ink,
-                    arrowsize=15, borderwidth=1, relief='flat')
-    style.map('TCombobox', fieldbackground=[('readonly', palette['field'])],
-              foreground=[('readonly', ink)], bordercolor=[('focus', primary_color)])
+    style.configure(
+        'TEntry', padding=(13, 10), fieldbackground=palette['field'], foreground=ink,
+        borderwidth=2, relief='solid', bordercolor=palette['border'],
+        lightcolor=palette['border'], darkcolor=palette['border'],
+        insertwidth=2,
+    )
+    style.map('TEntry',
+              fieldbackground=[('readonly', palette['surface_alt']), ('disabled', palette['surface_alt'])],
+              bordercolor=[('focus', primary_color), ('!focus', palette['border'])],
+              lightcolor=[('focus', primary_color), ('!focus', palette['border'])],
+              darkcolor=[('focus', primary_color), ('!focus', palette['border'])])
+    style.configure(
+        'TCombobox', padding=(12, 9), fieldbackground=palette['field'], foreground=ink,
+        arrowsize=16, borderwidth=2, relief='solid', bordercolor=palette['border'],
+        lightcolor=palette['border'], darkcolor=palette['border'],
+    )
+    style.map('TCombobox',
+              fieldbackground=[('readonly', palette['field'])],
+              foreground=[('readonly', ink)],
+              bordercolor=[('focus', primary_color), ('!focus', palette['border'])],
+              lightcolor=[('focus', primary_color), ('!focus', palette['border'])],
+              darkcolor=[('focus', primary_color), ('!focus', palette['border'])])
     style.configure('TCheckbutton', background=surface, foreground=ink, font=('Segoe UI', 9), padding=4)
     style.map('TCheckbutton', foreground=[('disabled', muted), ('active', primary_color)])
     style.configure('TRadiobutton', background=surface, foreground=ink, font=('Segoe UI', 9), padding=4)
@@ -539,6 +716,10 @@ def make_style(root: Tk, primary: str | None = None, secondary: str | None = Non
         'Treeview.Heading': 10, 'TCheckbutton': 10, 'TRadiobutton': 10,
     }.items():
         style.configure(style_name, font=('Segoe UI', font_size, 'bold'))
+
+    # The outer image elements give all entry boxes, combo boxes and main cards
+    # genuinely rounded corners. Entry focus and disabled states remain distinct.
+    _install_rounded_widget_surfaces(root, style, palette)
 
 
 RTL_SHAPING_ENABLED = True
@@ -4291,7 +4472,16 @@ class SchoolPassApp:
                 chart.create_rectangle(x-88,3,x-80,11,fill=color,outline=''); chart.create_text(x-92,7,text=label,anchor='e',font=('Segoe UI',8),fill='#52665E'); x-=110
         combo.bind('<<ComboboxSelected>>',draw_chart)
         frame=ttk.Frame(win);frame.pack(fill=BOTH,expand=True,padx=18,pady=8)
-        text_widget=__import__('tkinter').Text(frame,wrap='word',font=('Segoe UI',10),height=18)
+        text_widget=__import__('tkinter').Text(
+            frame, wrap='word', font=('Segoe UI', 10), height=18,
+            background=UI_PALETTE.get('field', '#FFFFFF'),
+            foreground=UI_PALETTE.get('ink', '#17263C'),
+            insertbackground=UI_PALETTE.get('ink', '#17263C'),
+            highlightthickness=2,
+            highlightbackground=UI_PALETTE.get('border', '#E4EAF2'),
+            highlightcolor=UI_PALETTE.get('primary', '#185A8D'),
+            bd=0, relief='flat', padx=12, pady=10,
+        )
         sb=ttk.Scrollbar(frame,command=text_widget.yview);text_widget.configure(yscrollcommand=sb.set)
         text_widget.pack(side=LEFT,fill=BOTH,expand=True);sb.pack(side=RIGHT,fill=Y)
         def refresh_text():

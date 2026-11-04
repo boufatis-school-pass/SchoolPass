@@ -1,5 +1,5 @@
 ﻿#define MyAppName "SchoolPass"
-#define MyAppVersion "4.7.6"
+#define MyAppVersion "4.7.7"
 #define MyAppPublisher "SchoolPass"
 
 [Setup]

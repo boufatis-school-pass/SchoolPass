@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-EXPECTED = "4.7.6"
+EXPECTED = "4.7.7"
 
 
 def main() -> int:
@@ -35,7 +35,7 @@ def main() -> int:
         errors.append("requirements_dev.txt must pin the reviewed PyInstaller 6.22.3 release")
     schema = re.search(r"^SCHEMA_VERSION\s*=\s*[\"\']?(\d+)[\"\']?", core, re.M)
     if not schema or schema.group(1) != "8":
-        errors.append("SchoolPass 4.7.6 must use schema version 8 with additive guardian and student-guardian tables")
+        errors.append("SchoolPass 4.7.7 must use schema version 8 with additive guardian and student-guardian tables")
     if not setup_version:
         errors.append("MyAppVersion is missing from SchoolPass_Setup.iss")
     elif setup_version.group(1) != EXPECTED:
@@ -89,6 +89,7 @@ def main() -> int:
     app_source = (ROOT / "app.py").read_text(encoding="utf-8-sig")
     test_ui_source = (ROOT / "test_ui_smoke.py").read_text(encoding="utf-8-sig")
     for marker, description in (
+        ("def test_rounded_entry_layout_replacement_keeps_text_elements(self):", "rounded field rendering layout regression test"),
         ("def test_student_search_labels_show_only_full_name_and_class(self):", "student search display regression test"),
         ("def test_arabic_rtl_rendering_covers_titles_labels_text_canvas_and_entries(self):", "Arabic rendering coverage for windows and text controls"),
         ("def test_arabic_tree_headings_are_shaped_and_right_aligned(self):", "Arabic right-aligned grid regression test"),
@@ -104,6 +105,10 @@ def main() -> int:
         errors.append("Combobox Down-key injection may interrupt continuous typing")
 
     for marker, description in (
+        ("def _rounded_photo_image(", "rounded 9-slice field and card rendering"),
+        ("def _replace_ttk_layout_element(", "safe ttk rounded-element layout replacement"),
+        ("def _install_rounded_widget_surfaces(", "global rounded input and surface theme"),
+        ("highlightthickness=2", "visible outline for multiline text fields"),
         ("class LoginDialog:", "redesigned Arabic login dialog"),
         ("class SetupDialog:", "redesigned first-run setup dialog"),
         ("class RecoveryDialog:", "redesigned recovery dialog"),
@@ -152,7 +157,7 @@ def main() -> int:
         ("اختيار الحساب", "account selector on login"),
     ):
         if marker not in app_source:
-            errors.append(f"SchoolPass 4.7.6 visual design marker missing: {description}")
+            errors.append(f"SchoolPass 4.7.7 visual design marker missing: {description}")
     for marker, description in (
         ("def _schoolpass_map_values", "dynamic Arabic combobox values"),
         ("def _schoolpass_save_logical_values", "logical Treeview value preservation"),
@@ -177,7 +182,7 @@ def main() -> int:
         ("idx_student_guardians_one_primary", "single primary guardian constraint"),
     ):
         if marker not in core:
-            errors.append(f"SchoolPass 4.7.6 guardian feature missing: {description}")
+            errors.append(f"SchoolPass 4.7.7 guardian feature missing: {description}")
     for marker, description in (
         ("def manage_guardians(self):", "guardian management directory"),
         ("def _refresh_guardian_choices(self, preferred_id=None):", "guardian selection and auto-fill"),
@@ -186,7 +191,7 @@ def main() -> int:
         ("تعيين الولي المختار كأساسي", "primary guardian selection"),
     ):
         if marker not in app_source:
-            errors.append(f"SchoolPass 4.7.6 guardian UI missing: {description}")
+            errors.append(f"SchoolPass 4.7.7 guardian UI missing: {description}")
     if "expelling_teacher_id" not in core:
         errors.append("Expulsion records do not preserve a stable teacher reference")
     if "def preview_teacher_import(" not in core or "def import_teachers_as(" not in core:

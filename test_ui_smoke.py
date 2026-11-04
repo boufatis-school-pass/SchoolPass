@@ -532,9 +532,32 @@ class TestGuiSmoke(unittest.TestCase):
         self.assertEqual(self.app.rtl_display(displayed), displayed)
         self.assertEqual(self.app.rtl_display('SchoolPass 2.5.1'), 'SchoolPass 2.5.1')
 
+    def test_rounded_entry_layout_replacement_keeps_text_elements(self):
+        layout = [
+            ('Entry.border', {
+                'sticky': 'nswe',
+                'children': [
+                    ('Entry.padding', {
+                        'sticky': 'nswe',
+                        'children': [('Entry.textarea', {'sticky': 'nswe'})],
+                    }),
+                ],
+            }),
+        ]
+        rounded, replaced = self.app._replace_ttk_layout_element(
+            layout, ('.field', '.border'), 'SchoolPassRounded_Entry_Test'
+        )
+        self.assertTrue(replaced)
+        self.assertEqual(rounded[0][0], 'SchoolPassRounded_Entry_Test')
+        self.assertEqual(rounded[0][1]['children'][0][0], 'Entry.padding')
+        self.assertEqual(
+            rounded[0][1]['children'][0][1]['children'][0][0],
+            'Entry.textarea',
+        )
+
     def test_arabic_rtl_rendering_covers_titles_labels_text_canvas_and_entries(self):
         owner = self.app._tk.Tk()
-        title = 'لوحة المتابعة — SchoolPass 4.7.6'
+        title = 'لوحة المتابعة — SchoolPass 4.7.7'
         owner.title(title)
         self.assertEqual(owner.title(), self.app.rtl_display(title))
 
