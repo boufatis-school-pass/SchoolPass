@@ -8,8 +8,8 @@ APP = (ROOT / "app.py").read_text(encoding="utf-8-sig")
 CORE = (ROOT / "schoolpass_core.py").read_text(encoding="utf-8")
 
 
-def test_release_version_is_470():
-    assert re.search(r'^APP_VERSION\s*=\s*["\']4\.7\.0["\']', CORE, re.M)
+def test_release_version_is_471():
+    assert re.search(r'^APP_VERSION\s*=\s*["\']4\.7\.1["\']', CORE, re.M)
     assert (ROOT / "VERSION.txt").read_text(encoding="ascii").strip() == "4.7.0"
     setup = (ROOT / "SchoolPass_Setup.iss").read_text(encoding="utf-8-sig")
     assert '#define MyAppVersion "4.7.0"' in setup
