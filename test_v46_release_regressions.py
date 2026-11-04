@@ -43,11 +43,11 @@ def test_keyboard_help_lists_only_bound_shortcuts_and_has_f1_entry_point():
 
 def test_database_schema_and_version_metadata_are_consistent():
     core_source = (ROOT / "schoolpass_core.py").read_text(encoding="utf-8")
-    assert 'APP_VERSION = "4.7.5"' in core_source
-    assert 'SCHEMA_VERSION = "7"' in core_source
-    assert (ROOT / "VERSION.txt").read_text(encoding="ascii").strip() == "4.7.5"
+    assert 'APP_VERSION = "4.7.6"' in core_source
+    assert 'SCHEMA_VERSION = "8"' in core_source
+    assert (ROOT / "VERSION.txt").read_text(encoding="ascii").strip() == "4.7.6"
     setup = (ROOT / "SchoolPass_Setup.iss").read_text(encoding="utf-8-sig")
-    assert '#define MyAppVersion "4.7.5"' in setup
+    assert '#define MyAppVersion "4.7.6"' in setup
 
 
 def _ascii_for_pdf_tests(value):
@@ -117,3 +117,12 @@ def test_exit_receipt_two_copies_keep_qr_workflow_and_large_admin_signature(tmp_
         assert "123456789012" not in text
         assert "9012" in text
     assert texts[0] != texts[1]
+
+
+def test_arabic_bidi_preserves_numeric_dates_times_and_reference_codes():
+    visual = core._arabic_visual(
+        "التاريخ: 04-11-2026 — المرجع: SP-2026-001 — الوقت: 17:06"
+    )
+    assert "04-11-2026" in visual
+    assert "SP-2026-001" in visual
+    assert "17:06" in visual

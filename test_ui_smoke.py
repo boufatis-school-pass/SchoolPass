@@ -38,11 +38,44 @@ class Widget:
         self.kw = k
         self.rows = {}
         self._sel = ()
+        self.headings = {}
+        self.columns_cfg = {}
+        self.tags = {}
+        self.tag_ranges = []
+        self.insertions = []
+        self.canvas_texts = []
+        self.canvas_config = {}
+        self._title = ""
         if "command" in k: COMMANDS.append(k["command"])
         Widget.registry.append(self)
     def __getattr__(self, name):
         if name.startswith("__"): raise AttributeError(name)
         return lambda *a, **k: None
+    def title(self, value=None):
+        if value is None:
+            return self._title
+        self._title = value
+        return value
+    def heading(self, column, option=None, **kwargs):
+        self.headings.setdefault(str(column), {}).update(kwargs)
+        return self.headings[str(column)].get(option) if option else self.headings[str(column)]
+    def column(self, column, option=None, **kwargs):
+        self.columns_cfg.setdefault(str(column), {}).update(kwargs)
+        return self.columns_cfg[str(column)].get(option) if option else self.columns_cfg[str(column)]
+    def index(self, value):
+        return '1.0' if value == 'end' else str(value)
+    def tag_configure(self, tag, **kwargs):
+        self.tags.setdefault(tag, {}).update(kwargs)
+    def tag_add(self, tag, start, end):
+        self.tag_ranges.append((tag, start, end))
+    def create_text(self, *args, **kwargs):
+        self.canvas_texts.append(dict(kwargs))
+        return len(self.canvas_texts)
+    def itemconfigure(self, tag_or_id, cnf=None, **kwargs):
+        if isinstance(cnf, dict):
+            self.canvas_config.update(cnf)
+        self.canvas_config.update(kwargs)
+        return self.canvas_config
     def pack(self, *a, **k): return None
     grid = place = pack
     def bind(self, *a, **k): return None
@@ -86,7 +119,10 @@ class Widget:
     def winfo_height(self): return 160
     def update_idletasks(self): return None
     def insert(self, parent, index=None, iid=None, values=(), **k):
-        if isinstance(parent, str) and iid is not None: self.rows[iid] = values
+        if isinstance(parent, str) and iid is not None:
+            self.rows[iid] = values
+        else:
+            self.insertions.append((parent, index, iid, values, dict(k)))
     def delete(self, *a): self.rows.clear()
     def get_children(self, *a): return list(self.rows)
     def selection(self): return self._sel
@@ -322,6 +358,23 @@ class TestGuiSmoke(unittest.TestCase):
         COMMANDS.clear(); self.app.SetupDialog(root); self.press_all("setup")     # empty fields -> error message, no crash
         self.assertFalse(core.has_admin())
 
+    def test_saved_primary_guardian_autofills_exit_permit_form(self):
+        a = self.make_app(self.sup)
+        full_id = "123456789012345678"
+        with mock.patch.object(core, "protect_sensitive_text", lambda value: "DPAPI1:" + value[::-1]), \
+             mock.patch.object(core, "reveal_sensitive_text", lambda value: value.split(":", 1)[1][::-1]):
+            core.create_guardian_for_student(
+                self.sup, self.s1["id"], "محمد ولي تجريبي", "الأب", full_id,
+                "0550123456", make_primary=True,
+            )
+            form = self.app.RecordForm(a, "exit_permit")
+            form.set_student(self.s1)
+            self.assertEqual(form.vars["guardian_name"].get(), "محمد ولي تجريبي")
+            self.assertEqual(form.vars["relationship"].get(), "الأب")
+            self.assertEqual(form.vars["national_id"].get(), full_id)
+            self.assertEqual(form.guardian_id_var.get(), full_id)
+            self.assertTrue(form.guardian_combo.get())
+
     def test_student_autocomplete_clears_selection_when_query_changes(self):
         a = self.make_app(self.sup)
         form = self.app.RecordForm(a, "late")
@@ -478,6 +531,64 @@ class TestGuiSmoke(unittest.TestCase):
         displayed = self.app.rtl_display('رخصة الدخول — SchoolPass 2.5.1')
         self.assertEqual(self.app.rtl_display(displayed), displayed)
         self.assertEqual(self.app.rtl_display('SchoolPass 2.5.1'), 'SchoolPass 2.5.1')
+
+    def test_arabic_rtl_rendering_covers_titles_labels_text_canvas_and_entries(self):
+        owner = self.app._tk.Tk()
+        title = 'لوحة المتابعة — SchoolPass 4.7.6'
+        owner.title(title)
+        self.assertEqual(owner.title(), self.app.rtl_display(title))
+
+        child = self.app._tk.Toplevel(owner)
+        child_title = 'إصدار رخصة الدخول'
+        child.title(child_title)
+        self.assertEqual(child.title(), self.app.rtl_display(child_title))
+
+        label_text = 'إدارة التلاميذ'
+        label = self.app.ttk.Label(owner, text=label_text)
+        self.assertEqual(label.kw['text'], self.app.rtl_display(label_text))
+        self.assertEqual(label.kw['justify'], 'right')
+        self.assertEqual(label.kw['anchor'], 'e')
+        label.configure(text='إدارة الأولياء')
+        self.assertEqual(label.kw['text'], self.app.rtl_display('إدارة الأولياء'))
+
+        source = self.app.StringVar(value='اسم التلميذ')
+        dynamic_label = self.app.ttk.Label(owner, textvariable=source)
+        source.set('بيانات الولي')
+        dynamic_label._schoolpass_refresh_textvariable()
+        self.assertEqual(dynamic_label._schoolpass_text_display.get(), self.app.rtl_display('بيانات الولي'))
+
+        entry = self.app.ttk.Entry(owner)
+        self.assertEqual(entry.kw['justify'], 'right')
+
+        text = self.app._tk.Text(owner)
+        text.insert('end', 'ملاحظات الإدارة')
+        self.assertEqual(text.insertions[-1][1], self.app.rtl_display('ملاحظات الإدارة'))
+        self.assertEqual(text.tags['_schoolpass_rtl']['justify'], 'right')
+        self.assertEqual(text.tag_ranges[-1][0], '_schoolpass_rtl')
+
+        canvas = self.app._tk.Canvas(owner)
+        canvas.create_text(20, 20, text='إحصائيات الدخول')
+        self.assertEqual(canvas.canvas_texts[-1]['text'], self.app.rtl_display('إحصائيات الدخول'))
+        canvas.itemconfigure('chart-label', text='عدد التلاميذ')
+        self.assertEqual(canvas.canvas_config['text'], self.app.rtl_display('عدد التلاميذ'))
+
+    def test_arabic_tree_headings_are_shaped_and_right_aligned(self):
+        owner = self.app._tk.Tk()
+        tree = self.app.ttk.Treeview(owner, columns=('student',), show='headings')
+        tree.heading('student', text='اسم التلميذ')
+        self.assertEqual(tree.column('student')['anchor'], 'e')
+        tree.column('student', width=220)
+        self.assertEqual(tree.headings['student']['text'], self.app.rtl_display('اسم التلميذ'))
+        self.assertEqual(tree.headings['student']['anchor'], 'e')
+        self.assertEqual(tree.columns_cfg['student']['anchor'], 'e')
+
+    def test_mixed_arabic_latin_digits_and_multiline_text_remain_idempotent(self):
+        original = 'رقم الرخصة: SP-2026-001\nاسم التلميذ: أحمد بن علي\nالتاريخ: 04-11-2026'
+        displayed = self.app.rtl_display(original)
+        self.assertNotEqual(displayed, original)
+        self.assertEqual(self.app.rtl_display(displayed), displayed)
+        self.assertIn('SP-2026-001', displayed)
+        self.assertIn('04-11-2026', displayed)
 
     def test_dashboard_reflows_for_small_and_large_windows(self):
         app = self.make_app(self.admin)

@@ -700,7 +700,7 @@ class TestBackupRestore(Base):
         restored = json.loads(core.record_by_id(row["id"])["details_json"])
         self.assertEqual(restored["days_count"], 2)
         self.assertEqual(restored["date_difference_days"], 2)
-        self.assertEqual(core.setting("schema_version"), "7")
+        self.assertEqual(core.setting("schema_version"), core.SCHEMA_VERSION)
 
     def test_external_daily_backup_is_mirrored_and_verified(self):
         external = self.tmp / "usb"; external.mkdir()

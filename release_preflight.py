@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-EXPECTED = "4.7.5"
+EXPECTED = "4.7.6"
 
 
 def main() -> int:
@@ -34,8 +34,8 @@ def main() -> int:
     if "pyinstaller==6.22.3" not in (ROOT / "requirements_dev.txt").read_text(encoding="utf-8"):
         errors.append("requirements_dev.txt must pin the reviewed PyInstaller 6.22.3 release")
     schema = re.search(r"^SCHEMA_VERSION\s*=\s*[\"\']?(\d+)[\"\']?", core, re.M)
-    if not schema or schema.group(1) != "7":
-        errors.append("SchoolPass 4.7.5 must use schema version 7 with an additive teachers table migration")
+    if not schema or schema.group(1) != "8":
+        errors.append("SchoolPass 4.7.6 must use schema version 8 with additive guardian and student-guardian tables")
     if not setup_version:
         errors.append("MyAppVersion is missing from SchoolPass_Setup.iss")
     elif setup_version.group(1) != EXPECTED:
@@ -88,8 +88,14 @@ def main() -> int:
 
     app_source = (ROOT / "app.py").read_text(encoding="utf-8-sig")
     test_ui_source = (ROOT / "test_ui_smoke.py").read_text(encoding="utf-8-sig")
-    if "def test_student_search_labels_show_only_full_name_and_class(self):" not in test_ui_source:
-        errors.append("Student search display regression test is missing")
+    for marker, description in (
+        ("def test_student_search_labels_show_only_full_name_and_class(self):", "student search display regression test"),
+        ("def test_arabic_rtl_rendering_covers_titles_labels_text_canvas_and_entries(self):", "Arabic rendering coverage for windows and text controls"),
+        ("def test_arabic_tree_headings_are_shaped_and_right_aligned(self):", "Arabic right-aligned grid regression test"),
+        ("def test_mixed_arabic_latin_digits_and_multiline_text_remain_idempotent(self):", "mixed Arabic/Latin/date rendering regression test"),
+    ):
+        if marker not in test_ui_source:
+            errors.append(f"UI regression test missing: {description}")
 
     if "requested_w * 0.90" in app_source or "requested_h * 0.88" in app_source:
         errors.append("Dialog geometry must not be arbitrarily scaled down; this clips buttons on school screens.")
@@ -139,23 +145,48 @@ def main() -> int:
         ("NavHover.TButton", "mouse-over navigation glow"),
         ("_install_rtl_window_titles", "consistent RTL window titles"),
         ("_schoolpass_refresh_textvariable", "live RTL display text variables"),
+        ("kwargs.setdefault('justify', 'right')", "right-aligned Arabic labels and actions"),
+        ("kwargs.setdefault('anchor', 'e')", "right-anchored Arabic labels and actions"),
+        ("style.configure('Treeview.Heading'", "consistent data-grid heading style"),
         ("سجل التلاميذ المطرودين", "dedicated class-expulsion log navigation"),
         ("اختيار الحساب", "account selector on login"),
     ):
         if marker not in app_source:
-            errors.append(f"SchoolPass 4.7.5 visual design marker missing: {description}")
+            errors.append(f"SchoolPass 4.7.6 visual design marker missing: {description}")
     for marker, description in (
         ("def _schoolpass_map_values", "dynamic Arabic combobox values"),
         ("def _schoolpass_save_logical_values", "logical Treeview value preservation"),
         ("original_text_insert", "centralized RTL Text insertion"),
         ("original_canvas_create_text", "RTL canvas labels"),
+        ("def column(self, column, option=None, **kwargs):", "right-aligned Treeview data columns"),
+        ("tag_configure('_schoolpass_rtl', justify='right')", "right-aligned statistics text blocks"),
         ("self.chart_period_var = ComboStringVar", "logical dashboard period selection"),
     ):
         if marker not in app_source:
             errors.append(f"Arabic UI regression guard missing: {description}")
 
+    if "held_tokens: list[tuple[str, str]]" not in core or "ltr_numeric = re.compile(" not in core:
+        errors.append("Arabic RTL renderer must preserve dates, times and reference numbers as LTR tokens")
     if "CREATE TABLE IF NOT EXISTS teachers" not in core:
         errors.append("Teacher directory table migration is missing")
+    for marker, description in (
+        ("CREATE TABLE IF NOT EXISTS guardians", "encrypted guardian directory migration"),
+        ("CREATE TABLE IF NOT EXISTS student_guardians", "student-to-guardian relationship migration"),
+        ("def create_guardian_for_student(", "guardian registration and linking logic"),
+        ("def list_student_guardians(", "guardian auto-selection query"),
+        ("idx_student_guardians_one_primary", "single primary guardian constraint"),
+    ):
+        if marker not in core:
+            errors.append(f"SchoolPass 4.7.6 guardian feature missing: {description}")
+    for marker, description in (
+        ("def manage_guardians(self):", "guardian management directory"),
+        ("def _refresh_guardian_choices(self, preferred_id=None):", "guardian selection and auto-fill"),
+        ("def add_guardian_dialog(self):", "guardian registration from permit form"),
+        ("إدارة الأولياء", "guardian management navigation"),
+        ("تعيين الولي المختار كأساسي", "primary guardian selection"),
+    ):
+        if marker not in app_source:
+            errors.append(f"SchoolPass 4.7.6 guardian UI missing: {description}")
     if "expelling_teacher_id" not in core:
         errors.append("Expulsion records do not preserve a stable teacher reference")
     if "def preview_teacher_import(" not in core or "def import_teachers_as(" not in core:
