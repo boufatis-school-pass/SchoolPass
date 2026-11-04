@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - 'fix/**'
+      - 'release/**'
     tags:
       - 'v*'
   pull_request:
@@ -51,11 +52,23 @@ jobs:
         shell: powershell
         run: .\build_windows.ps1
 
+      - name: Resolve release tag
+        if: startsWith(github.ref, 'refs/tags/') || startsWith(github.ref, 'refs/heads/release/')
+        id: release_tag
+        shell: powershell
+        run: |
+          $tag = "${{ github.ref_name }}"
+          if ($tag.StartsWith('release/')) { $tag = $tag.Substring(8) }
+          if (-not $tag.StartsWith('v')) { $tag = "v$tag" }
+          "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
       - name: Publish release installer
-        if: startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/') || startsWith(github.ref, 'refs/heads/release/')
         uses: softprops/action-gh-release@v2
         with:
-          name: SchoolPass ${{ github.ref_name }}
+          tag_name: ${{ steps.release_tag.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: SchoolPass ${{ steps.release_tag.outputs.tag }}
           generate_release_notes: true
           files: |
             dist/SchoolPass_Setup.exe
