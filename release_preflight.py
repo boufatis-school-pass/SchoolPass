@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-EXPECTED = "4.7.2"
+EXPECTED = "4.7.5"
 
 
 def main() -> int:
@@ -35,7 +35,7 @@ def main() -> int:
         errors.append("requirements_dev.txt must pin the reviewed PyInstaller 6.22.3 release")
     schema = re.search(r"^SCHEMA_VERSION\s*=\s*[\"\']?(\d+)[\"\']?", core, re.M)
     if not schema or schema.group(1) != "7":
-        errors.append("SchoolPass 4.7.2 must use schema version 7 with an additive teachers table migration")
+        errors.append("SchoolPass 4.7.5 must use schema version 7 with an additive teachers table migration")
     if not setup_version:
         errors.append("MyAppVersion is missing from SchoolPass_Setup.iss")
     elif setup_version.group(1) != EXPECTED:
@@ -120,7 +120,14 @@ def main() -> int:
         ("def _refresh_teacher_suggestions(self, event=None):", "focus-preserving live teacher autocomplete"),
         ("class SuggestionPopup:", "independent autocomplete results popup"),
         ("def _center_toplevel_window(win):", "centered popup and dialog placement"),
-        ("def nav_group(label, frame_style, title_style):", "colored grouped sidebar navigation"),
+        ("def nav_group(key, label, frame_style, title_style):", "collapsible colored grouped sidebar navigation"),
+        ("NavGroupOps.TButton", "large operations group heading"),
+        ("NavGroupData.TButton", "large data group heading"),
+        ("NavGroupReports.TButton", "large reports group heading"),
+        ("NavGroupAdmin.TButton", "large system group heading"),
+        ("sidebar_open_groups", "persistent saved sidebar preferences"),
+        ("def sidebar_preferences(self):", "user-selectable default open sidebar groups"),
+        ("self._sidebar_group_setters", "live sidebar preference application"),
         ("SidebarGroupOps.TFrame", "distinct operations sidebar group"),
         ("SidebarGroupData.TFrame", "distinct data sidebar group"),
         ("SidebarGroupReports.TFrame", "distinct reports sidebar group"),
@@ -136,7 +143,7 @@ def main() -> int:
         ("اختيار الحساب", "account selector on login"),
     ):
         if marker not in app_source:
-            errors.append(f"SchoolPass 4.7.2 visual design marker missing: {description}")
+            errors.append(f"SchoolPass 4.7.5 visual design marker missing: {description}")
     for marker, description in (
         ("def _schoolpass_map_values", "dynamic Arabic combobox values"),
         ("def _schoolpass_save_logical_values", "logical Treeview value preservation"),

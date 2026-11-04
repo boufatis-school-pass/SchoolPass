@@ -1,5 +1,5 @@
 ﻿# -*- coding: utf-8 -*-
-"""SchoolPass 4.7.1 — stable UI corrections and Arabic-first school operations interface."""
+"""SchoolPass 4.7.5 — focused dashboard and navigation redesign."""
 from __future__ import annotations
 
 import json
@@ -405,7 +405,7 @@ def make_style(root: Tk, primary: str | None = None, secondary: str | None = Non
     style.configure('CardTitle.TLabel', background=surface, foreground=muted,
                     font=('Segoe UI', 9, 'bold'), anchor='e')
     style.configure('CardValue.TLabel', background=surface, foreground=primary_color,
-                    font=('Segoe UI', 21, 'bold'), anchor='e')
+                    font=('Segoe UI', 31, 'bold'), anchor='center')
     style.configure('Badge.TLabel', background=palette['primary_soft'], foreground=primary_color,
                     padding=(13, 8), font=('Segoe UI', 9, 'bold'))
     style.configure('Status.TLabel', background=palette['surface_alt'], foreground=muted,
@@ -455,6 +455,20 @@ def make_style(root: Tk, primary: str | None = None, secondary: str | None = Non
                     padding=(13, 9), font=('Segoe UI', 9, 'bold'), relief='flat')
     style.map('Gold.TButton', background=[('active', _shade(palette['gold'], 0.92)),
                                          ('pressed', _shade(palette['gold'], 0.82))])
+    # Large, high-contrast category headers remain prominent while their contents are folded.
+    style.configure('NavGroupOps.TButton', background='#245B86', foreground='#FFFFFF',
+                    borderwidth=0, padding=(16, 14), anchor='e', font=('Segoe UI', 13, 'bold'), relief='flat')
+    style.configure('NavGroupData.TButton', background='#286B62', foreground='#FFFFFF',
+                    borderwidth=0, padding=(16, 14), anchor='e', font=('Segoe UI', 13, 'bold'), relief='flat')
+    style.configure('NavGroupReports.TButton', background='#66518A', foreground='#FFFFFF',
+                    borderwidth=0, padding=(16, 14), anchor='e', font=('Segoe UI', 13, 'bold'), relief='flat')
+    style.configure('NavGroupAdmin.TButton', background='#8A6435', foreground='#FFFFFF',
+                    borderwidth=0, padding=(16, 14), anchor='e', font=('Segoe UI', 13, 'bold'), relief='flat')
+    for _group_style, _group_color in (
+        ('NavGroupOps.TButton', '#3475A5'), ('NavGroupData.TButton', '#34877A'),
+        ('NavGroupReports.TButton', '#7A65A1'), ('NavGroupAdmin.TButton', '#A47A45')):
+        style.map(_group_style, background=[('active', _group_color), ('pressed', _group_color)],
+                  foreground=[('active', '#FFFFFF'), ('pressed', '#FFFFFF')])
     style.configure('Nav.TButton', background=palette['sidebar'], foreground=palette['sidebar_muted'],
                     borderwidth=0, focusthickness=0, padding=(17, 12), anchor='e',
                     font=('Segoe UI', 10, 'bold'), relief='flat')
@@ -2395,6 +2409,55 @@ class SchoolPassApp:
     def touch(self, _event=None):
         self.last_activity = time.time()
 
+    def sidebar_preferences(self):
+        """Choose which sidebar sections should reopen automatically next time."""
+        options = [
+            ('operations', 'إجراءات الدخول والخروج'),
+            ('data', 'إدارة البيانات'),
+            ('reports', 'المتابعة والتقارير'),
+        ]
+        if self.current_user['role'] == 'admin':
+            options.append(('admin', 'إدارة النظام'))
+        try:
+            saved = json.loads(core.setting('sidebar_open_groups', '[]'))
+            if not isinstance(saved, list):
+                saved = []
+        except (TypeError, ValueError):
+            saved = []
+        dialog = Toplevel(self.root)
+        configure_window(dialog, 'تخصيص القائمة الجانبية', '520x430')
+        dialog.transient(self.root)
+        dialog.configure(bg=_window_background())
+        outer = ttk.Frame(dialog, padding=22)
+        outer.pack(fill=BOTH, expand=True)
+        ttk.Label(outer, text='المجموعات المفتوحة افتراضيًا', font=('Segoe UI', 16, 'bold')).pack(anchor=E, pady=(0, 8))
+        ttk.Label(outer, text='اختر الأقسام التي تريد ظهور عناصرها تلقائيًا عند تشغيل البرنامج. يمكنك تغيير الاختيار في أي وقت.',
+                  wraplength=460, justify='right').pack(fill=X, anchor=E, pady=(0, 16))
+        variables = {}
+        for key, label in options:
+            variable = BooleanVar(master=dialog, value=key in saved)
+            variables[key] = variable
+            ttk.Checkbutton(outer, text=label, variable=variable).pack(fill=X, anchor=E, pady=7)
+        ttk.Label(outer, text='سيُحفظ اختيارك على هذا الجهاز ويُطبّق في المرة القادمة أيضًا.',
+                  foreground='#64748B').pack(anchor=E, pady=(12, 8))
+
+        def save_preferences():
+            selected = [key for key, variable in variables.items() if bool(variable.get())]
+            try:
+                core.set_setting('sidebar_open_groups', json.dumps(selected, ensure_ascii=False))
+                for key, setter in self._sidebar_group_setters.items():
+                    if key in variables:
+                        setter(key in selected)
+                dialog.destroy()
+                self.status_text.set('تم حفظ تفضيلات القائمة الجانبية.')
+            except Exception as exc:
+                messagebox.showerror('تعذر حفظ التفضيلات', str(exc), parent=dialog)
+
+        footer = ttk.Frame(outer)
+        footer.pack(fill=X, side='bottom', pady=(18, 0))
+        ttk.Button(footer, text='حفظ الاختيارات', command=save_preferences, style='Accent.TButton').pack(side=RIGHT, padx=4)
+        ttk.Button(footer, text='إلغاء', command=dialog.destroy).pack(side=RIGHT, padx=4)
+
     def build_ui(self):
         """Professional dashboard shell: RTL navigation, six KPIs, charts, alerts and recent activity."""
         shell = ttk.Frame(self.root)
@@ -2424,15 +2487,56 @@ class SchoolPassApp:
                 button.bind('<Leave>', lambda _event, target=button: target.configure(style='SubNav.TButton'))
             return button
 
-        def nav_group(label, frame_style, title_style):
+        self._sidebar_group_setters = {}
+        try:
+            _saved_groups = json.loads(core.setting('sidebar_open_groups', '[]'))
+            if not isinstance(_saved_groups, list):
+                _saved_groups = []
+        except (TypeError, ValueError):
+            _saved_groups = []
+        _saved_groups = set(str(item) for item in _saved_groups)
+        _group_styles = {
+            'operations': 'NavGroupOps.TButton',
+            'data': 'NavGroupData.TButton',
+            'reports': 'NavGroupReports.TButton',
+            'admin': 'NavGroupAdmin.TButton',
+        }
+
+        def nav_group(key, label, frame_style, title_style):
+            # Category headers stay large and visible; content is independently collapsible.
             group = ttk.Frame(sidebar, style=frame_style)
-            group.pack(fill=X, padx=8, pady=4)
-            ttk.Label(group, text=label, style=title_style).pack(fill=X, padx=7, pady=(6, 3))
-            ttk.Frame(group, height=1, style='SidebarSeparator.TFrame').pack(fill=X, padx=8, pady=(0, 4))
-            return group
+            group.pack(fill=X, padx=8, pady=5)
+            expanded = {'value': False}
+            body = ttk.Frame(group, style=frame_style)
+            toggle = ttk.Button(group, text='＋   ' + label + '   ▾',
+                                style=_group_styles.get(key, 'Nav.TButton'))
+            toggle.pack(fill=X, padx=5, pady=(4, 3))
+
+            def set_open(opened):
+                if bool(opened) == expanded['value']:
+                    return
+                if opened:
+                    body.pack(fill=X, padx=4, pady=(0, 6))
+                    expanded['value'] = True
+                    toggle.configure(text='−   ' + label + '   ▴')
+                else:
+                    body.pack_forget()
+                    expanded['value'] = False
+                    toggle.configure(text='＋   ' + label + '   ▾')
+
+            def toggle_group():
+                set_open(not expanded['value'])
+
+            toggle.configure(command=toggle_group)
+            toggle.bind('<Enter>', lambda _event, target=toggle, style=_group_styles.get(key, 'Nav.TButton'): target.configure(style=style))
+            toggle.bind('<Leave>', lambda _event, target=toggle, style=_group_styles.get(key, 'Nav.TButton'): target.configure(style=style))
+            self._sidebar_group_setters[key] = set_open
+            if key in _saved_groups:
+                set_open(True)
+            return body
 
         nav('⌂   لوحة التحكم الرئيسية', self.refresh_all)
-        operations_group = nav_group('إجراءات الدخول والخروج', 'SidebarGroupOps.TFrame', 'SidebarGroupOpsTitle.TLabel')
+        operations_group = nav_group('operations', 'إجراءات الدخول والخروج', 'SidebarGroupOps.TFrame', 'SidebarGroupOpsTitle.TLabel')
         entry_group = ttk.Frame(operations_group, style='SidebarGroupOps.TFrame')
         entry_toggle = nav('＋   رخص الدخول  ▾', lambda: None, parent=operations_group)
         entry_items = (
@@ -2452,24 +2556,26 @@ class SchoolPassApp:
                 entry_toggle.configure(text='＋   رخص الدخول  ▴')
         entry_toggle.configure(command=toggle_entry_group)
 
-        data_group = nav_group('إدارة البيانات', 'SidebarGroupData.TFrame', 'SidebarGroupDataTitle.TLabel')
+        data_group = nav_group('data', 'إدارة البيانات', 'SidebarGroupData.TFrame', 'SidebarGroupDataTitle.TLabel')
         if self.current_user['role'] == 'admin':
             nav('♟   إدارة الأساتذة واستيراد Excel', self.manage_teachers, parent=data_group)
         nav('▤   إدارة التلاميذ', self.manage_students, parent=data_group)
 
-        reports_group = nav_group('المتابعة والتقارير', 'SidebarGroupReports.TFrame', 'SidebarGroupReportsTitle.TLabel')
+        reports_group = nav_group('reports', 'المتابعة والتقارير', 'SidebarGroupReports.TFrame', 'SidebarGroupReportsTitle.TLabel')
         nav('▥   سجل التلاميذ المطرودين', self.open_expulsion_report, parent=reports_group)
         nav('▥   سجل العمليات والتصفية', self.open_logs, parent=reports_group)
         nav('▦   الإحصائيات والرسوم البيانية', self.show_stats, parent=reports_group)
         nav('▧   التقارير الشهرية', self.monthly_report, parent=reports_group)
         nav('!   تنبيهات الخروج دون عودة', self.show_open_exits, parent=reports_group)
         if self.current_user['role'] == 'admin':
-            admin_group = nav_group('إدارة النظام', 'SidebarGroupAdmin.TFrame', 'SidebarGroupAdminTitle.TLabel')
+            admin_group = nav_group('admin', 'إدارة النظام', 'SidebarGroupAdmin.TFrame', 'SidebarGroupAdminTitle.TLabel')
             nav('◷   التقرير اليومي التفصيلي A4', self.daily_summary, parent=admin_group)
             nav('♙   المستخدمون والصلاحيات', self.manage_users, parent=admin_group)
             nav('▣   النسخ الاحتياطي والاستعادة', self.backup_db, parent=admin_group)
             nav('⚙   إعدادات المؤسسة والطباعة', self.settings_dialog, parent=admin_group)
             nav('≡   سجل التدقيق', self.audit_view, parent=admin_group)
+        ttk.Button(sidebar, text='⚙  تخصيص القائمة الجانبية', command=self.sidebar_preferences,
+                   style='Accent.TButton').pack(fill=X, padx=10, pady=(10, 8))
         ttk.Frame(sidebar, style='Sidebar.TFrame').pack(fill=BOTH, expand=True)
         profile = ttk.Frame(sidebar, style='SidebarProfile.TFrame', padding=(13, 11))
         profile.pack(fill=X, padx=10, pady=(4, 8))
@@ -2635,6 +2741,21 @@ class SchoolPassApp:
         self.alert_label.pack(fill=X, pady=3)
         ttk.Button(alert_panel, text='عرض حالات الخروج المفتوحة', command=self.show_open_exits).pack(fill=X, pady=(7, 2))
         ttk.Button(alert_panel, text='فتح سجل العمليات', command=self.open_logs).pack(fill=X, pady=2)
+        self.stats_toggle_button = ttk.Button(alert_panel, text='＋  عرض الإحصائيات والرسوم', style='Accent.TButton')
+        self.stats_toggle_button.pack(fill=X, pady=(9, 2))
+
+        def toggle_dashboard_stats():
+            if self.chart_panel.winfo_ismapped():
+                self.chart_panel.pack_forget()
+                self.stats_toggle_button.configure(text='＋  عرض الإحصائيات والرسوم')
+            else:
+                self.chart_panel.pack(side=LEFT, fill=BOTH, expand=True, padx=(0, 5))
+                self.stats_toggle_button.configure(text='−  إخفاء الإحصائيات والرسوم')
+
+        self.stats_toggle_button.configure(command=toggle_dashboard_stats)
+        # Alerts and follow-up lead the page; detailed chart statistics are opt-in.
+        chart_panel.pack_forget()
+        overview.pack_configure(before=cards)
 
         action_row = ttk.Frame(content)
         action_row.pack(fill=X, padx=18, pady=(0, 7))

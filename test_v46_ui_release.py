@@ -1,5 +1,5 @@
 ﻿# -*- coding: utf-8 -*-
-"""Static regression guards for the SchoolPass 4.7.2 UI corrective release."""
+"""Static regression guards for the SchoolPass 4.7.5 UI corrective release."""
 from pathlib import Path
 import re
 
@@ -8,11 +8,11 @@ APP = (ROOT / "app.py").read_text(encoding="utf-8-sig")
 CORE = (ROOT / "schoolpass_core.py").read_text(encoding="utf-8")
 
 
-def test_release_version_is_472():
-    assert re.search(r'^APP_VERSION\s*=\s*["\']4\.7\.2["\']', CORE, re.M)
-    assert (ROOT / "VERSION.txt").read_text(encoding="ascii").strip() == "4.7.2"
+def test_release_version_is_475():
+    assert re.search(r'^APP_VERSION\s*=\s*["\']4\.7\.5["\']', CORE, re.M)
+    assert (ROOT / "VERSION.txt").read_text(encoding="ascii").strip() == "4.7.5"
     setup = (ROOT / "SchoolPass_Setup.iss").read_text(encoding="utf-8-sig")
-    assert '#define MyAppVersion "4.7.2"' in setup
+    assert '#define MyAppVersion "4.7.5"' in setup
 
 
 def test_database_schema_is_additively_migrated():
@@ -54,3 +54,20 @@ def test_a6_receipts_use_large_administration_signature_without_stamp_or_digital
     assert "ختم المؤسسة" not in CORE
     assert "إمضاء المسؤول" not in CORE
     assert "توقيع رقمي" not in CORE
+
+
+def test_sidebar_groups_are_large_colored_and_foldable_with_saved_preferences():
+    for marker in (
+        "NavGroupOps.TButton", "NavGroupData.TButton", "NavGroupReports.TButton",
+        "NavGroupAdmin.TButton", "font=('Segoe UI', 13, 'bold')",
+        "sidebar_open_groups", "def sidebar_preferences(self):",
+        "self._sidebar_group_setters", "_saved_groups", "if key in _saved_groups:",
+        "تخصيص القائمة الجانبية",
+    ):
+        assert marker in APP
+
+
+def test_dashboard_hides_detailed_charts_until_requested():
+    assert "chart_panel.pack_forget()" in APP
+    assert "عرض الإحصائيات والرسوم" in APP
+    assert "overview.pack_configure(before=cards)" in APP
