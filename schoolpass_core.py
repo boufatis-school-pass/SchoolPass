@@ -258,6 +258,8 @@ CREATE TABLE IF NOT EXISTS student_guardians (
 );
 CREATE INDEX IF NOT EXISTS idx_student_guardians_student ON student_guardians(student_id, is_primary DESC);
 CREATE INDEX IF NOT EXISTS idx_student_guardians_guardian ON student_guardians(guardian_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_student_guardians_one_primary
+    ON student_guardians(student_id) WHERE is_primary=1;
 CREATE TABLE IF NOT EXISTS teachers (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     full_name TEXT NOT NULL,
@@ -1500,7 +1502,7 @@ def list_guardians_as_admin(actor, query: str = "") -> list[dict]:
             f"""SELECT g.id,g.full_name,g.national_id_last4,g.national_id_length,g.phone,
                        COUNT(DISTINCT sg.student_id) AS student_count,
                        GROUP_CONCAT(DISTINCT s.last_name||' '||s.first_name||' — '||
-                           CASE WHEN sg.relationship='أخرى' THEN sg.relationship_other ELSE sg.relationship END,'؛ ') AS linked_students
+                           CASE WHEN sg.relationship='أخرى' THEN sg.relationship_other ELSE sg.relationship END) AS linked_students
                 FROM guardians g
                 LEFT JOIN student_guardians sg ON sg.guardian_id=g.id
                 LEFT JOIN students s ON s.id=sg.student_id
