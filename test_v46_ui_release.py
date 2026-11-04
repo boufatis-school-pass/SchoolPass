@@ -1,5 +1,5 @@
 ﻿# -*- coding: utf-8 -*-
-"""Static regression guards for the SchoolPass 4.7.5 UI corrective release."""
+"""Static regression guards for the SchoolPass 4.7.6 guardian and UI release."""
 from pathlib import Path
 import re
 
@@ -8,15 +8,18 @@ APP = (ROOT / "app.py").read_text(encoding="utf-8-sig")
 CORE = (ROOT / "schoolpass_core.py").read_text(encoding="utf-8")
 
 
-def test_release_version_is_475():
-    assert re.search(r'^APP_VERSION\s*=\s*["\']4\.7\.5["\']', CORE, re.M)
-    assert (ROOT / "VERSION.txt").read_text(encoding="ascii").strip() == "4.7.5"
+def test_release_version_is_476():
+    assert re.search(r'^APP_VERSION\s*=\s*["\']4\.7\.6["\']', CORE, re.M)
+    assert (ROOT / "VERSION.txt").read_text(encoding="ascii").strip() == "4.7.6"
     setup = (ROOT / "SchoolPass_Setup.iss").read_text(encoding="utf-8-sig")
-    assert '#define MyAppVersion "4.7.5"' in setup
+    assert '#define MyAppVersion "4.7.6"' in setup
 
 
 def test_database_schema_is_additively_migrated():
-    assert re.search(r'^SCHEMA_VERSION\s*=\s*["\']7["\']', CORE, re.M)
+    assert re.search(r'^SCHEMA_VERSION\s*=\s*["\']8["\']', CORE, re.M)
+    assert "CREATE TABLE IF NOT EXISTS guardians" in CORE
+    assert "CREATE TABLE IF NOT EXISTS student_guardians" in CORE
+    assert "guardians" in CORE[CORE.index("_REQUIRED_COLUMNS"):CORE.index("def _migrate_staged_database")]
 
 
 def test_branded_login_and_first_run_dialogs_exist():
@@ -71,3 +74,25 @@ def test_dashboard_hides_detailed_charts_until_requested():
     assert "chart_panel.pack_forget()" in APP
     assert "عرض الإحصائيات والرسوم" in APP
     assert "overview.pack_configure(before=cards)" in APP
+
+
+def test_guardian_directory_and_permit_autofill_are_present():
+    for marker in (
+        "def create_guardian_for_student(",
+        "def list_student_guardians(",
+        "def set_primary_student_guardian(",
+        "def list_guardians_as_admin(",
+        "def update_guardian_as_admin(",
+        "national_id_enc",
+        "national_id_hash",
+    ):
+        assert marker in CORE
+    for marker in (
+        "def manage_guardians(self):",
+        "def _refresh_guardian_choices(self, preferred_id=None):",
+        "def _guardian_selected(self, _event=None):",
+        "def add_guardian_dialog(self):",
+        "إدارة الأولياء",
+        "تعيين الولي المختار كأساسي",
+    ):
+        assert marker in APP
