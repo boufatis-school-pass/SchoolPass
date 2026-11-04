@@ -120,7 +120,14 @@ def main() -> int:
         ("def _refresh_teacher_suggestions(self, event=None):", "focus-preserving live teacher autocomplete"),
         ("class SuggestionPopup:", "independent autocomplete results popup"),
         ("def _center_toplevel_window(win):", "centered popup and dialog placement"),
-        ("def nav_group(label, frame_style, title_style):", "colored grouped sidebar navigation"),
+        ("def nav_group(key, label, frame_style, title_style):", "collapsible colored grouped sidebar navigation"),
+        ("NavGroupOps.TButton", "large operations group heading"),
+        ("NavGroupData.TButton", "large data group heading"),
+        ("NavGroupReports.TButton", "large reports group heading"),
+        ("NavGroupAdmin.TButton", "large system group heading"),
+        ("sidebar_open_groups", "persistent saved sidebar preferences"),
+        ("def sidebar_preferences(self):", "user-selectable default open sidebar groups"),
+        ("self._sidebar_group_setters", "live sidebar preference application"),
         ("SidebarGroupOps.TFrame", "distinct operations sidebar group"),
         ("SidebarGroupData.TFrame", "distinct data sidebar group"),
         ("SidebarGroupReports.TFrame", "distinct reports sidebar group"),
@@ -136,7 +143,7 @@ def main() -> int:
         ("اختيار الحساب", "account selector on login"),
     ):
         if marker not in app_source:
-            errors.append(f"SchoolPass 4.7.2 visual design marker missing: {description}")
+            errors.append(f"SchoolPass 4.7.5 visual design marker missing: {description}")
     for marker, description in (
         ("def _schoolpass_map_values", "dynamic Arabic combobox values"),
         ("def _schoolpass_save_logical_values", "logical Treeview value preservation"),
