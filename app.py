@@ -270,7 +270,8 @@ def _install_rounded_widget_surfaces(root, style, palette: dict[str, str]):
         )
 
     button_styles = (
-        ('TButton', palette.get('heading', '#EDF2F8'), border, palette.get('selected', '#E4EEFC')),
+        # Install derived styles before TButton so each keeps its own image element
+        # rather than inheriting the base button's background image.
         ('Accent.TButton', primary, primary, palette.get('primary_hover', primary)),
         ('Gold.TButton', palette.get('gold', '#E6B24F'), palette.get('gold', '#E6B24F'), _shade(palette.get('gold', '#E6B24F'), 0.92)),
         ('NavGroupOps.TButton', '#245B86', '#245B86', '#3475A5'),
@@ -282,6 +283,7 @@ def _install_rounded_widget_surfaces(root, style, palette: dict[str, str]):
         ('SubNav.TButton', palette.get('surface_alt', '#F8FAFD'), border, palette.get('primary_soft', '#E9F1FC')),
         ('SubNavHover.TButton', palette.get('primary_soft', '#E9F1FC'), border, palette.get('primary_soft', '#E9F1FC')),
         ('Link.TButton', surface, surface, palette.get('primary_soft', '#E9F1FC')),
+        ('TButton', palette.get('heading', '#EDF2F8'), border, palette.get('selected', '#E4EEFC')),
     )
     for style_name, fill, edge, hover in button_styles:
         _install_rounded_ttk_style(
