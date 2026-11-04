@@ -336,6 +336,7 @@ class TestGuiSmoke(unittest.TestCase):
             self.assertEqual(form.vars["guardian_name"].get(), "محمد ولي تجريبي")
             self.assertEqual(form.vars["relationship"].get(), "الأب")
             self.assertEqual(form.vars["national_id"].get(), full_id)
+            self.assertEqual(form.guardian_id_var.get(), full_id)
             self.assertTrue(form.guardian_combo.get())
 
     def test_student_autocomplete_clears_selection_when_query_changes(self):
