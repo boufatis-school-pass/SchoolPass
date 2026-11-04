@@ -870,6 +870,13 @@ def _install_rtl_widget_adapters():
             self._schoolpass_tree_columns = tuple(kwargs.get('columns', ()))
             self._schoolpass_logical_rows = {}
             super().__init__(master, *args, **kwargs)
+            # Treeview columns default to centered/left-biased platform settings;
+            # set every data column to RTL unless a screen later overrides it.
+            for column_id in self._schoolpass_tree_columns:
+                try:
+                    self.column(column_id, anchor='e')
+                except Exception:
+                    pass
 
         def heading(self, column, option=None, **kwargs):
             if kwargs:
