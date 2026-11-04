@@ -1652,6 +1652,12 @@ class RecordForm:
                   foreground='#526579', wraplength=490, justify='right').pack(side=RIGHT, fill=X, expand=True)
         ttk.Button(guardian_actions, text='تعيين الولي المختار كأساسي',
                    command=self.set_selected_guardian_primary, style='Link.TButton').pack(side=LEFT, padx=4)
+        guardian_id_row = ttk.Frame(guardian_box)
+        guardian_id_row.pack(fill=X, padx=7, pady=(0, 6))
+        ttk.Label(guardian_id_row, text='رقم بطاقة التعريف', width=29, anchor=E).pack(side=RIGHT, padx=(4, 8))
+        self.guardian_id_var = StringVar(value='')
+        ttk.Entry(guardian_id_row, textvariable=self.guardian_id_var,
+                  state='readonly', justify='center').pack(side=RIGHT, fill=X, expand=True)
 
         if kind == 'late':
             ttk.Label(form, text='سبب التأخر', anchor=E).pack(fill=X, pady=(9, 3))
@@ -1918,6 +1924,7 @@ class RecordForm:
             self.guardian_combo.configure(values=())
             self.guardian_var.set('')
             self.guardian_info_var.set('تعذر تحميل بيانات الأولياء المحفوظة.')
+            self.guardian_id_var.set('')
             show_error(self.win, 'تعذر تحميل بيانات الولي', exc)
             return
         self.guardian_option_map = {}
@@ -1930,6 +1937,7 @@ class RecordForm:
         self.guardian_combo.configure(values=tuple(labels))
         if not rows:
             self.guardian_var.set('')
+            self.guardian_id_var.set('')
             self.guardian_info_var.set('لا توجد بيانات ولي محفوظة لهذا التلميذ. أضف الأب أو الأم أو الوصي مرة واحدة لتظهر بياناته تلقائيًا لاحقًا.')
             return
         chosen = next((item for item in rows if preferred_id and int(item['id']) == int(preferred_id)), None)
@@ -1953,9 +1961,10 @@ class RecordForm:
             if key in self.vars:
                 self.vars[key].set(value)
         phone = item.get('phone') or 'غير مسجل'
+        self.guardian_id_var.set(item.get('national_id', ''))
         self.guardian_info_var.set(
             f"الولي المحدد: {item.get('full_name', '')} — {relationship}؛ "
-            f"رقم بطاقة التعريف: {item.get('national_id_masked', 'غير متاح')}؛ الهاتف: {phone}. "
+            f"آخر أربعة أرقام من الهوية: {item.get('national_id_last4', 'غير متاح')}؛ الهاتف: {phone}. "
             "تحديده هنا لا يعني تأكيد حضوره شخصيًا."
         )
 
