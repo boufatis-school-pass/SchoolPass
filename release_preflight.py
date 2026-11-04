@@ -88,8 +88,14 @@ def main() -> int:
 
     app_source = (ROOT / "app.py").read_text(encoding="utf-8-sig")
     test_ui_source = (ROOT / "test_ui_smoke.py").read_text(encoding="utf-8-sig")
-    if "def test_student_search_labels_show_only_full_name_and_class(self):" not in test_ui_source:
-        errors.append("Student search display regression test is missing")
+    for marker, description in (
+        ("def test_student_search_labels_show_only_full_name_and_class(self):", "student search display regression test"),
+        ("def test_arabic_rtl_rendering_covers_titles_labels_text_canvas_and_entries(self):", "Arabic rendering coverage for windows and text controls"),
+        ("def test_arabic_tree_headings_are_shaped_and_right_aligned(self):", "Arabic right-aligned grid regression test"),
+        ("def test_mixed_arabic_latin_digits_and_multiline_text_remain_idempotent(self):", "mixed Arabic/Latin/date rendering regression test"),
+    ):
+        if marker not in test_ui_source:
+            errors.append(f"UI regression test missing: {description}")
 
     if "requested_w * 0.90" in app_source or "requested_h * 0.88" in app_source:
         errors.append("Dialog geometry must not be arbitrarily scaled down; this clips buttons on school screens.")
@@ -139,6 +145,9 @@ def main() -> int:
         ("NavHover.TButton", "mouse-over navigation glow"),
         ("_install_rtl_window_titles", "consistent RTL window titles"),
         ("_schoolpass_refresh_textvariable", "live RTL display text variables"),
+        ("kwargs.setdefault('justify', 'right')", "right-aligned Arabic labels and actions"),
+        ("kwargs.setdefault('anchor', 'e')", "right-anchored Arabic labels and actions"),
+        ("style.configure('Treeview.Heading'", "consistent data-grid heading style"),
         ("سجل التلاميذ المطرودين", "dedicated class-expulsion log navigation"),
         ("اختيار الحساب", "account selector on login"),
     ):
@@ -149,6 +158,8 @@ def main() -> int:
         ("def _schoolpass_save_logical_values", "logical Treeview value preservation"),
         ("original_text_insert", "centralized RTL Text insertion"),
         ("original_canvas_create_text", "RTL canvas labels"),
+        ("def column(self, column, option=None, **kwargs):", "right-aligned Treeview data columns"),
+        ("tag_configure('_schoolpass_rtl', justify='right')", "right-aligned statistics text blocks"),
         ("self.chart_period_var = ComboStringVar", "logical dashboard period selection"),
     ):
         if marker not in app_source:
