@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-EXPECTED = "4.7.2"
+EXPECTED = "4.7.5"
 
 
 def main() -> int:
@@ -35,7 +35,7 @@ def main() -> int:
         errors.append("requirements_dev.txt must pin the reviewed PyInstaller 6.22.3 release")
     schema = re.search(r"^SCHEMA_VERSION\s*=\s*[\"\']?(\d+)[\"\']?", core, re.M)
     if not schema or schema.group(1) != "7":
-        errors.append("SchoolPass 4.7.2 must use schema version 7 with an additive teachers table migration")
+        errors.append("SchoolPass 4.7.5 must use schema version 7 with an additive teachers table migration")
     if not setup_version:
         errors.append("MyAppVersion is missing from SchoolPass_Setup.iss")
     elif setup_version.group(1) != EXPECTED:
