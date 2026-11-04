@@ -409,6 +409,18 @@ def make_style(root: Tk, primary: str | None = None, secondary: str | None = Non
     style.map('Nav.TButton', background=[('active', palette['sidebar_hover']),
                                          ('pressed', palette['sidebar_hover'])],
               foreground=[('active', '#FFFFFF')])
+    style.configure('NavHover.TButton', background=palette['sidebar_hover'], foreground='#FFFFFF',
+                    borderwidth=1, focusthickness=1, focuscolor=palette['accent'],
+                    padding=(17, 12), anchor='e', font=('Segoe UI', 10, 'bold'), relief='flat')
+    style.configure('SubNav.TButton', background=palette['surface_alt'], foreground=palette['ink'],
+                    borderwidth=0, padding=(10, 8), anchor='e',
+                    font=('Segoe UI', 9, 'bold'), relief='flat')
+    style.map('SubNav.TButton', background=[('active', palette['primary_soft']),
+                                            ('pressed', palette['primary_soft'])],
+              foreground=[('active', primary_color)])
+    style.configure('SubNavHover.TButton', background=palette['primary_soft'], foreground=primary_color,
+                    borderwidth=1, padding=(10, 8), anchor='e',
+                    font=('Segoe UI', 9, 'bold'), relief='flat')
     style.configure('Link.TButton', background=surface, foreground=primary_color, borderwidth=0,
                     padding=(5, 5), font=('Segoe UI', 9, 'bold'), relief='flat')
     style.map('Link.TButton', foreground=[('active', palette['accent'])])
@@ -2164,9 +2176,15 @@ class SchoolPassApp:
         ttk.Label(brand, text='نظام المتابعة المدرسية', style='SidebarSub.TLabel').pack(anchor=E, pady=(5, 0))
         ttk.Frame(sidebar, height=1, style='Sidebar.TFrame').pack(fill=X, padx=16, pady=(0, 12))
 
-        def nav(label, command, style='Nav.TButton'):
-            button = ttk.Button(sidebar, text=label, command=command, style=style)
-            button.pack(fill=X, padx=10, pady=3)
+        def nav(label, command, style='Nav.TButton', parent=None):
+            button = ttk.Button(parent or sidebar, text=label, command=command, style=style)
+            button.pack(fill=X, padx=10 if parent is None else 7, pady=3 if parent is None else 2)
+            if style == 'Nav.TButton':
+                button.bind('<Enter>', lambda _event, target=button: target.configure(style='NavHover.TButton'))
+                button.bind('<Leave>', lambda _event, target=button: target.configure(style='Nav.TButton'))
+            elif style == 'SubNav.TButton':
+                button.bind('<Enter>', lambda _event, target=button: target.configure(style='SubNavHover.TButton'))
+                button.bind('<Leave>', lambda _event, target=button: target.configure(style='SubNav.TButton'))
             return button
 
         def nav_section(label):
@@ -2175,18 +2193,25 @@ class SchoolPassApp:
         nav('⌂   لوحة التحكم الرئيسية', self.refresh_all)
         nav_section('إجراءات الدخول والخروج')
         entry_group = ttk.Frame(sidebar, style='Sidebar.TFrame')
-        entry_toggle = nav('＋   رخصة الدخول  ▾', lambda: entry_group.pack(fill=X, padx=13, pady=(0, 4))
-                           if not entry_group.winfo_ismapped() else entry_group.pack_forget())
+        entry_toggle = nav('＋   رخص الدخول  ▾', lambda: None)
         entry_items = (
             ('＋  تأخر عن الدخول', 'late'),
             ('↩  عودة بعد الغياب', 'absence_return'),
-            ('⚑  طرد من الحصة / حالة خاصة', 'special_entry'),
+            ('⚑  الطرد من الحصة / حالة خاصة', 'special_entry'),
         )
         for label, kind in entry_items:
-            ttk.Button(entry_group, text=label, command=lambda k=kind: RecordForm(self, k),
-                       style='Nav.TButton').pack(fill=X, padx=(8, 2), pady=2)
-        entry_toggle.bind('<Enter>', lambda _event: entry_group.pack(fill=X, padx=13, pady=(0, 4)))
-        nav('⇥   رخصة خروج استثنائي', lambda: RecordForm(self, 'exit_permit'), 'Gold.TButton')
+            nav(label, lambda k=kind: RecordForm(self, k), 'SubNav.TButton', parent=entry_group)
+        exit_button = nav('⇥   رخصة خروج استثنائي', lambda: RecordForm(self, 'exit_permit'), 'Gold.TButton')
+        def toggle_entry_group(_event=None):
+            if entry_group.winfo_ismapped():
+                entry_group.pack_forget()
+                entry_toggle.configure(text='＋   رخص الدخول  ▾')
+            else:
+                entry_group.pack(fill=X, padx=13, pady=(0, 4), before=exit_button)
+                entry_toggle.configure(text='＋   رخص الدخول  ▴')
+        entry_toggle.configure(command=toggle_entry_group)
+        if self.current_user['role'] == 'admin':
+            nav('♟   إدارة الأساتذة واستيراد القائمة', self.manage_teachers)
         nav_section('المتابعة والتقارير')
         nav('▤   إدارة التلاميذ', self.manage_students)
         nav('▥   سجل التلاميذ المطرودين', self.open_expulsion_report)
@@ -2199,7 +2224,6 @@ class SchoolPassApp:
             ttk.Label(sidebar, text='إدارة النظام', style='SidebarSub.TLabel').pack(anchor=E, padx=18, pady=(0, 4))
             nav('◷   التقرير اليومي التفصيلي A4', self.daily_summary)
             nav('♙   المستخدمون والصلاحيات', self.manage_users)
-            nav('♟   إدارة الأساتذة والمواد', self.manage_teachers)
             nav('▣   النسخ الاحتياطي والاستعادة', self.backup_db)
             nav('⚙   إعدادات المؤسسة والطباعة', self.settings_dialog)
             nav('≡   سجل التدقيق', self.audit_view)
@@ -2219,7 +2243,7 @@ class SchoolPassApp:
         self.content_frame = content
         content.bind('<Configure>', lambda event: self._adapt_dashboard_layout(event.width))
         header = ttk.Frame(content, style='PageHeader.TFrame', padding=(20, 17))
-        header.pack(fill=X, padx=18, pady=(18, 12))
+        header.pack(fill=X, padx=16, pady=(8, 8))
         right_head = ttk.Frame(header, style='PageHeader.TFrame')
         right_head.pack(fill=X, expand=True)
         ttk.Label(right_head, text='لوحة المتابعة الرئيسية', style='PageTitle.TLabel').pack(anchor=E)
@@ -2247,7 +2271,7 @@ class SchoolPassApp:
 
         # High-impact welcome banner inspired by the approved SchoolPass premium concept.
         # It is built from native ttk widgets so it remains crisp at Windows DPI scaling.
-        hero = ttk.Frame(content, style='Hero.TFrame', padding=(22, 18))
+        hero = ttk.Frame(content, style='Hero.TFrame', padding=(18, 12))
         hero.pack(fill=X, padx=22, pady=(0, 12))
         ttk.Frame(hero, style='HeroAccent.TFrame', height=4).pack(fill=X, pady=(0, 14))
         hero_body = ttk.Frame(hero, style='Hero.TFrame')
@@ -2291,7 +2315,7 @@ class SchoolPassApp:
 
         # KPI cards in a responsive 3x2 grid with an icon, a clear metric and context.
         cards = ttk.Frame(content)
-        cards.pack(fill=X, padx=20, pady=(6, 14))
+        cards.pack(fill=X, padx=18, pady=(2, 8))
         self.card_values = {}
         card_specs = [
             ('students', 'إجمالي التلاميذ النشطين', '♙', 'قاعدة بيانات المؤسسة'),
@@ -2306,7 +2330,7 @@ class SchoolPassApp:
         for col in range(3):
             cards.grid_columnconfigure(col, weight=1, uniform='kpi')
         for idx, (key, label, icon, hint) in enumerate(card_specs):
-            card = ttk.Frame(cards, style='MetricCard.TFrame', padding=(15, 12))
+            card = ttk.Frame(cards, style='MetricCard.TFrame', padding=(12, 8))
             self.kpi_cards.append(card)
             card.grid(row=idx // 3, column=2 - (idx % 3), sticky='nsew', padx=7, pady=7)
             ttk.Frame(card, height=3, style='KPIAccent.TFrame').pack(fill=X, pady=(0, 10))
