@@ -2790,7 +2790,35 @@ def _arabic_visual(text: str) -> str:
         from bidi.algorithm import get_display
     except ImportError:  # pragma: no cover
         from bidi import get_display
-    return get_display(arabic_reshaper.reshape(value), base_dir="R")
+
+    # Hyphens, slashes and colons can be treated as neutral separators by the
+    # Unicode bidi algorithm. In an RTL sentence that may visually reverse a
+    # numeric date such as 04-11-2026 into 2026-11-04. Hold complete LTR tokens
+    # while shaping the Arabic sentence, then restore them unchanged.
+    held_tokens: list[tuple[str, str]] = []
+
+    def hold_numeric_token(match):
+        number = len(held_tokens)
+        suffix = ""
+        while True:
+            suffix = chr(ord("A") + number % 26) + suffix
+            number //= 26
+            if number == 0:
+                break
+        token = f"SCHOOLPASSNUMTOKEN{suffix}"
+        while token in value:
+            token += "X"
+        held_tokens.append((token, match.group(0)))
+        return token
+
+    ltr_numeric = re.compile(
+        r"(?<![A-Za-z0-9])(?:[A-Za-z]{1,12}[-_/])?\\d+(?:[-/:.]\\d+)+(?:[A-Za-z]{0,8})?(?![A-Za-z0-9])"
+    )
+    protected = ltr_numeric.sub(hold_numeric_token, value)
+    displayed = get_display(arabic_reshaper.reshape(protected), base_dir="R")
+    for token, original in held_tokens:
+        displayed = displayed.replace(token, original)
+    return displayed
 
 
 def _text_width(text: str, font: str, size: float) -> float:
