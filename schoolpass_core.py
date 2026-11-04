@@ -2812,7 +2812,7 @@ def _arabic_visual(text: str) -> str:
         return token
 
     ltr_numeric = re.compile(
-        r"(?<![A-Za-z0-9])(?:[A-Za-z]{1,12}[-_/])?\\d+(?:[-/:.]\\d+)+(?:[A-Za-z]{0,8})?(?![A-Za-z0-9])"
+        r"(?<![A-Za-z0-9])(?:[A-Za-z]{1,12}[-_/])?[0-9]+(?:[-/:.][0-9]+)+(?:[A-Za-z]{0,8})?(?![A-Za-z0-9])"
     )
     protected = ltr_numeric.sub(hold_numeric_token, value)
     displayed = get_display(arabic_reshaper.reshape(protected), base_dir="R")
