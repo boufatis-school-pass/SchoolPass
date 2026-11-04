@@ -1,5 +1,5 @@
 ﻿# -*- coding: utf-8 -*-
-"""SchoolPass 4.7.0 — premium Arabic-first school operations interface. Business rules and permission checks live in schoolpass_core.py."""
+"""SchoolPass 4.7.1 — stable UI corrections and Arabic-first school operations interface."""
 from __future__ import annotations
 
 import json
@@ -154,8 +154,11 @@ def _install_toplevel_background():
                 try:
                     screen_w = int(self.winfo_screenwidth() or 1366)
                     screen_h = int(self.winfo_screenheight() or 768)
-                    width = min(int(match.group(1)), max(360, screen_w - 70))
-                    height = min(int(match.group(2)), max(300, screen_h - 90))
+                    requested_w, requested_h = int(match.group(1)), int(match.group(2))
+                    width = int(requested_w * 0.90) if requested_w >= 650 else requested_w
+                    height = int(requested_h * 0.88) if requested_h >= 450 else requested_h
+                    width = min(max(360, width), max(360, screen_w - 70))
+                    height = min(max(260, height), max(260, screen_h - 90))
                     args = (f'{width}x{height}{match.group(3)}',) + args[1:]
                 except Exception:
                     pass
@@ -168,9 +171,13 @@ def _install_toplevel_background():
             screen_w = int(self.winfo_screenwidth() or 1366)
             screen_h = int(self.winfo_screenheight() or 768)
             if width is not None:
-                width = min(int(width), max(360, screen_w - 70))
+                width = int(width)
+                if width >= 650: width = int(width * 0.90)
+                width = min(max(360, width), max(360, screen_w - 70))
             if height is not None:
-                height = min(int(height), max(300, screen_h - 90))
+                height = int(height)
+                if height >= 450: height = int(height * 0.88)
+                height = min(max(260, height), max(260, screen_h - 90))
         except Exception:
             pass
         if callable(original_minsize):
