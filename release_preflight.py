@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-EXPECTED = "4.7.5"
+EXPECTED = "4.7.6"
 
 
 def main() -> int:
@@ -34,8 +34,8 @@ def main() -> int:
     if "pyinstaller==6.22.3" not in (ROOT / "requirements_dev.txt").read_text(encoding="utf-8"):
         errors.append("requirements_dev.txt must pin the reviewed PyInstaller 6.22.3 release")
     schema = re.search(r"^SCHEMA_VERSION\s*=\s*[\"\']?(\d+)[\"\']?", core, re.M)
-    if not schema or schema.group(1) != "7":
-        errors.append("SchoolPass 4.7.5 must use schema version 7 with an additive teachers table migration")
+    if not schema or schema.group(1) != "8":
+        errors.append("SchoolPass 4.7.6 must use schema version 7 with an additive teachers table migration")
     if not setup_version:
         errors.append("MyAppVersion is missing from SchoolPass_Setup.iss")
     elif setup_version.group(1) != EXPECTED:
@@ -143,7 +143,7 @@ def main() -> int:
         ("اختيار الحساب", "account selector on login"),
     ):
         if marker not in app_source:
-            errors.append(f"SchoolPass 4.7.5 visual design marker missing: {description}")
+            errors.append(f"SchoolPass 4.7.6 visual design marker missing: {description}")
     for marker, description in (
         ("def _schoolpass_map_values", "dynamic Arabic combobox values"),
         ("def _schoolpass_save_logical_values", "logical Treeview value preservation"),
@@ -156,6 +156,24 @@ def main() -> int:
 
     if "CREATE TABLE IF NOT EXISTS teachers" not in core:
         errors.append("Teacher directory table migration is missing")
+    for marker, description in (
+        ("CREATE TABLE IF NOT EXISTS guardians", "encrypted guardian directory migration"),
+        ("CREATE TABLE IF NOT EXISTS student_guardians", "student-to-guardian relationship migration"),
+        ("def create_guardian_for_student(", "guardian registration and linking logic"),
+        ("def list_student_guardians(", "guardian auto-selection query"),
+        ("idx_student_guardians_one_primary", "single primary guardian constraint"),
+    ):
+        if marker not in core:
+            errors.append(f"SchoolPass 4.7.6 guardian feature missing: {description}")
+    for marker, description in (
+        ("def manage_guardians(self):", "guardian management directory"),
+        ("def _refresh_guardian_choices(self, preferred_id=None):", "guardian selection and auto-fill"),
+        ("def add_guardian_dialog(self):", "guardian registration from permit form"),
+        ("إدارة الأولياء", "guardian management navigation"),
+        ("تعيين الولي المختار كأساسي", "primary guardian selection"),
+    ):
+        if marker not in app_source:
+            errors.append(f"SchoolPass 4.7.6 guardian UI missing: {description}")
     if "expelling_teacher_id" not in core:
         errors.append("Expulsion records do not preserve a stable teacher reference")
     if "def preview_teacher_import(" not in core or "def import_teachers_as(" not in core:
