@@ -165,6 +165,8 @@ def main() -> int:
         if marker not in app_source:
             errors.append(f"Arabic UI regression guard missing: {description}")
 
+    if "held_tokens: list[tuple[str, str]]" not in core or "ltr_numeric = re.compile(" not in core:
+        errors.append("Arabic RTL renderer must preserve dates, times and reference numbers as LTR tokens")
     if "CREATE TABLE IF NOT EXISTS teachers" not in core:
         errors.append("Teacher directory table migration is missing")
     for marker, description in (
