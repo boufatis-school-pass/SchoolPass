@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-EXPECTED = "4.7.0"
+EXPECTED = "4.7.1"
 
 
 def main() -> int:
@@ -35,7 +35,7 @@ def main() -> int:
         errors.append("requirements_dev.txt must pin the reviewed PyInstaller 6.22.3 release")
     schema = re.search(r"^SCHEMA_VERSION\s*=\s*[\"\']?(\d+)[\"\']?", core, re.M)
     if not schema or schema.group(1) != "7":
-        errors.append("SchoolPass 4.7.0 must use schema version 7 with an additive teachers table migration")
+        errors.append("SchoolPass 4.7.1 must use schema version 7 with an additive teachers table migration")
     if not setup_version:
         errors.append("MyAppVersion is missing from SchoolPass_Setup.iss")
     elif setup_version.group(1) != EXPECTED:
@@ -87,6 +87,9 @@ def main() -> int:
         errors.append("Both A6 receipt renderers must use the shared administration signature component")
 
     app_source = (ROOT / "app.py").read_text(encoding="utf-8-sig")
+    if "event_generate('<Down>')" in app_source:
+        errors.append("Combobox Down-key injection may interrupt continuous typing")
+
     for marker, description in (
         ("class LoginDialog:", "redesigned Arabic login dialog"),
         ("class SetupDialog:", "redesigned first-run setup dialog"),
@@ -106,13 +109,20 @@ def main() -> int:
         ("self.root.bind_all('<F1>'", "F1 keyboard help binding"),
         ("self.shortcuts_button", "visible keyboard shortcut access"),
         ("def manage_teachers(self):", "teacher directory management"),
-        ("def _refresh_student_suggestions(self, _event=None):", "live student autocomplete"),
-        ("def _refresh_teacher_suggestions(self, _event=None):", "live teacher autocomplete"),
+        ("def _refresh_student_suggestions(self, event=None):", "focus-preserving live student autocomplete"),
+        ("def _refresh_teacher_suggestions(self, event=None):", "focus-preserving live teacher autocomplete"),
+        ("class SuggestionPopup:", "independent autocomplete results popup"),
+        ("def download_template():", "downloadable teacher Excel template"),
+        ("إدارة الأساتذة واستيراد القائمة", "visible teacher import entry point"),
+        ("before=exit_button", "correctly positioned entry submenu"),
+        ("NavHover.TButton", "mouse-over navigation glow"),
+        ("_install_rtl_window_titles", "consistent RTL window titles"),
+        ("_schoolpass_refresh_textvariable", "live RTL display text variables"),
         ("سجل التلاميذ المطرودين", "dedicated class-expulsion log navigation"),
         ("اختيار الحساب", "account selector on login"),
     ):
         if marker not in app_source:
-            errors.append(f"SchoolPass 4.7.0 visual design marker missing: {description}")
+            errors.append(f"SchoolPass 4.7.1 visual design marker missing: {description}")
     for marker, description in (
         ("def _schoolpass_map_values", "dynamic Arabic combobox values"),
         ("def _schoolpass_save_logical_values", "logical Treeview value preservation"),
