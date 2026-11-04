@@ -322,6 +322,22 @@ class TestGuiSmoke(unittest.TestCase):
         COMMANDS.clear(); self.app.SetupDialog(root); self.press_all("setup")     # empty fields -> error message, no crash
         self.assertFalse(core.has_admin())
 
+    def test_saved_primary_guardian_autofills_exit_permit_form(self):
+        a = self.make_app(self.sup)
+        full_id = "123456789012345678"
+        with mock.patch.object(core, "protect_sensitive_text", lambda value: "DPAPI1:" + value[::-1]), \
+             mock.patch.object(core, "reveal_sensitive_text", lambda value: value.split(":", 1)[1][::-1]):
+            core.create_guardian_for_student(
+                self.sup, self.s1["id"], "محمد ولي تجريبي", "الأب", full_id,
+                "0550123456", make_primary=True,
+            )
+            form = self.app.RecordForm(a, "exit_permit")
+            form.set_student(self.s1)
+            self.assertEqual(form.vars["guardian_name"].get(), "محمد ولي تجريبي")
+            self.assertEqual(form.vars["relationship"].get(), "الأب")
+            self.assertEqual(form.vars["national_id"].get(), full_id)
+            self.assertTrue(form.guardian_combo.get())
+
     def test_student_autocomplete_clears_selection_when_query_changes(self):
         a = self.make_app(self.sup)
         form = self.app.RecordForm(a, "late")
