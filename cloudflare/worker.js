@@ -98,8 +98,8 @@ async function readJson(request, maxBytes = 4096) {
   const bytes = new Uint8Array(total);
   let offset = 0;
   for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
-  const raw = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
   try {
+    const raw = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
     const value = JSON.parse(raw);
     return value && typeof value === "object" && !Array.isArray(value) ? { value } : { error: "invalid_json" };
   } catch (_) {
@@ -151,8 +151,9 @@ function permitPage(row) {
     extra = "<div class='status good'>الرخصة سارية حتى " + escapeHtml(row.expires_at || "") + ".</div>";
   }
   const canRequest = row.kind === "exit_permit" && row.status === "valid";
-  const button = canRequest ?
-    "<button id='request' type='button'>طلب تسجيل عودة التلميذ</button><div id='message' role='status' aria-live='polite'></div>" : "";
+  const button = canRequest ? (row.pending_request_at ?
+    "<div class='status'>تم إرسال طلب العودة إلى المؤسسة في " + escapeHtml(row.pending_request_at) + ". انتظر تأكيد المشرف.</div>" :
+    "<button id='request' type='button'>طلب تسجيل عودة التلميذ</button><div id='message' role='status' aria-live='polite'></div>") : "";
   const script = canRequest ?
     "<script>(function(){const b=document.getElementById('request'),m=document.getElementById('message');" +
     "b.addEventListener('click',async()=>{b.disabled=true;m.textContent='جارٍ إرسال الطلب...';" +
@@ -177,6 +178,14 @@ export default {
       if (await limited(request, env, 30)) return htmlResponse(page("مهلة مؤقتة", "<div class='status bad'>عدد المحاولات كبير. أعد المحاولة لاحقًا.</div>"), 429);
       const row = await getPermit(env, publicMatch[1]);
       if (!row) return htmlResponse(page("رخصة غير موجودة", "<div class='status bad'>لم يتم العثور على هذه الرخصة.</div>"), 404);
+      if (row.kind === "exit_permit" && row.status === "valid") {
+        const pending = await env.DB.prepare(
+          "SELECT id,requested_at FROM return_requests WHERE token=? AND state='pending' LIMIT 1"
+        ).bind(row.token).first();
+        if (pending) {
+          row.pending_request_at = pending.requested_at;
+        }
+      }
       return htmlResponse(permitPage(row));
     }
 
