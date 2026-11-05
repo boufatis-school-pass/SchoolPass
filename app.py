@@ -1,5 +1,5 @@
 ﻿# -*- coding: utf-8 -*-
-"""SchoolPass 4.8.0 — pupil attendance alerts, complete histories and verified gate-exit tracking."""
+"""SchoolPass 4.8.1 — startup compatibility fix and pupil attendance features, complete histories and verified gate-exit tracking."""
 from __future__ import annotations
 
 import json
@@ -936,10 +936,13 @@ def _install_rtl_widget_adapters():
 
         class ArabicTextWidget(original):
             def __init__(self, master=None, **kwargs):
-                # A consistent RTL default for every label/button; explicit
-                # center/left alignment supplied by a specific control is preserved.
-                kwargs.setdefault('justify', 'right')
-                kwargs.setdefault('anchor', 'e')
+                # Only ttk.Label supports both justify and anchor as widget
+                # options. ttk.Button/Checkbutton/Radiobutton reject -anchor
+                # (and may reject -justify), which previously crashed startup.
+                # Keep their Arabic text shaping without passing unsupported options.
+                if class_name == 'Label':
+                    kwargs.setdefault('justify', 'right')
+                    kwargs.setdefault('anchor', 'e')
                 if isinstance(kwargs.get('text'), str):
                     kwargs['text'] = rtl_display(kwargs['text'])
                 self._schoolpass_text_source = None
