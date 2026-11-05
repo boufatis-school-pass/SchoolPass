@@ -6,6 +6,7 @@ compatibility_date = "2026-11-01"
 binding = "DB"
 database_name = "schoolpass-cloud"
 database_id = "00000001-00000004-0000511a-0461ce5f5b3059c7cd597e4a3fc196b8"
+  migrations_dir = "migrations"
 
 # Configure DEVICE_API_KEY as a Worker secret; never commit its value.
 
