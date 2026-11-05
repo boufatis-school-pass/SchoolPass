@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-EXPECTED = "4.9.2"
+EXPECTED = "4.9.3"
 
 
 def main() -> int:
@@ -39,7 +39,7 @@ def main() -> int:
         errors.append("requirements_dev.txt must pin the reviewed PyInstaller 6.22.3 release")
     schema = re.search(r"^SCHEMA_VERSION\s*=\s*[\"\']?(\d+)[\"\']?", core, re.M)
     if not schema or schema.group(1) != "9":
-        errors.append("SchoolPass 4.9.2 must preserve database schema version 9; this visual release does not migrate user data")
+        errors.append("SchoolPass 4.9.3 must preserve database schema version 9; this visual release does not migrate user data")
     if not setup_version:
         errors.append("MyAppVersion is missing from SchoolPass_Setup.iss")
     elif setup_version.group(1) != EXPECTED:
@@ -127,7 +127,7 @@ def main() -> int:
     )
     for marker, description in modern_ui_markers:
         if marker not in app_source:
-            errors.append(f"SchoolPass 4.9.2 visual feature missing: {description}")
+            errors.append(f"SchoolPass 4.9.3 visual feature missing: {description}")
 
     runtime_test = (ROOT / "test_ui_tk_runtime.py").read_text(encoding="utf-8-sig")
     if "def test_windows_tk_installs_rounded_buttons_entries_and_dropdowns():" not in runtime_test:
