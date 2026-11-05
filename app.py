@@ -132,7 +132,7 @@ def _text_on(hex_color: str) -> str:
 
 def _rounded_photo_image(root, fill: str, border: str, fallback: str):
     """Create a scalable 9-slice rounded rectangle image for ttk surfaces."""
-    size, radius, border_width = 36, 12, 2
+    size, radius, border_width = 36, 14, 2
     try:
         image = tk.PhotoImage(master=root, width=size, height=size)
     except Exception:
@@ -263,6 +263,7 @@ def _install_rounded_widget_surfaces(root, style, palette: dict[str, str]):
         ('Hero.TFrame', palette.get('sidebar', '#142B49'), palette.get('sidebar_hover', border)),
         ('HeroBadge.TFrame', palette.get('sidebar_hover', '#24466E'), palette.get('sidebar_hover', border)),
         ('SidebarProfile.TFrame', palette.get('sidebar_hover', '#24466E'), palette.get('sidebar_hover', border)),
+        ('SidebarSubmenu.TFrame', palette.get('sidebar_hover', '#24466E'), palette.get('sidebar_hover', border)),
     ):
         _install_rounded_ttk_style(
             root, style, style_name, 'Surface', fill, edge, bg,
@@ -429,8 +430,8 @@ def make_style(root: Tk, primary: str | None = None, secondary: str | None = Non
             'primary_hover': '#78AEFF', 'primary_soft': '#243E60',
             'sidebar': '#0E1B2D', 'sidebar_hover': '#1C3452',
             'sidebar_text': '#F3F7FC', 'sidebar_muted': '#A9BCD3',
-            'accent': '#43B7AC', 'gold': '#E5B85D', 'border': '#314158',
-            'field': '#142033', 'heading': '#26364B', 'selected': '#294568',
+            'accent': '#43B7AC', 'gold': '#E5B85D', 'border': '#465A74',
+            'field': '#18283D', 'heading': '#26364B', 'selected': '#294568',
             'alert_bg': '#47351E', 'alert_fg': '#FFD79A',
             'good_bg': '#173D37', 'good_fg': '#A8E7D7',
             'danger_bg': '#4A2830', 'danger_fg': '#FFB7BF',
@@ -441,14 +442,14 @@ def make_style(root: Tk, primary: str | None = None, secondary: str | None = Non
         # giving the rest of the interface a coherent navy/blue institutional skin.
         palette = {
             'bg': secondary_color if secondary_color not in ('#F2F5F9', '#F2F6F4') else '#F3F6FB',
-            'surface': '#FFFFFF', 'surface_alt': '#F8FAFD',
+            'surface': '#FFFFFF', 'surface_alt': '#F7FAFE',
             'ink': '#17263C', 'muted': '#64758B',
             'primary': primary_color, 'primary_text': core.text_color_for(primary_color),
             'primary_hover': _shade(primary_color, 0.88),
             'primary_soft': '#E9F1FC', 'sidebar': '#142B49',
             'sidebar_hover': '#24466E', 'sidebar_text': '#FFFFFF',
             'sidebar_muted': '#C1D0E3', 'accent': '#0E9388',
-            'gold': '#E6B24F', 'border': '#E4EAF2', 'field': '#FFFFFF',
+            'gold': '#E6B24F', 'border': '#B8C7D9', 'field': '#F1F5FB',
             'heading': '#EDF2F8', 'selected': '#E4EEFC',
             'alert_bg': '#FFF4E3', 'alert_fg': '#87500D',
             'good_bg': '#E7F6F1', 'good_fg': '#126B59',
@@ -516,6 +517,7 @@ def make_style(root: Tk, primary: str | None = None, secondary: str | None = Non
     style.configure('Sidebar.TFrame', background=palette['sidebar'])
     style.configure('SidebarProfile.TFrame', background=palette['sidebar_hover'], relief='flat')
     style.configure('SidebarSeparator.TFrame', background=palette['sidebar_hover'])
+    style.configure('SidebarSubmenu.TFrame', background=palette['sidebar_hover'], relief='flat', borderwidth=0)
     for suffix, bg_key, fg_key in (
         ('Ops', 'sidebar_ops_bg', 'sidebar_ops_fg'),
         ('Data', 'sidebar_data_bg', 'sidebar_data_fg'),
@@ -659,7 +661,7 @@ def make_style(root: Tk, primary: str | None = None, secondary: str | None = Non
     # Forms and data grids
     style.configure('TLabel', background=bg, foreground=ink, font=('Segoe UI', 10), anchor='e')
     style.configure(
-        'TEntry', padding=(13, 10), fieldbackground=palette['field'], foreground=ink,
+        'TEntry', padding=(11, 8), fieldbackground=palette['field'], foreground=ink,
         borderwidth=2, relief='solid', bordercolor=palette['border'],
         lightcolor=palette['border'], darkcolor=palette['border'],
         insertwidth=2,
@@ -670,7 +672,7 @@ def make_style(root: Tk, primary: str | None = None, secondary: str | None = Non
               lightcolor=[('focus', primary_color), ('!focus', palette['border'])],
               darkcolor=[('focus', primary_color), ('!focus', palette['border'])])
     style.configure(
-        'TCombobox', padding=(12, 9), fieldbackground=palette['field'], foreground=ink,
+        'TCombobox', padding=(10, 7), fieldbackground=palette['field'], foreground=ink,
         arrowsize=16, borderwidth=2, relief='solid', bordercolor=palette['border'],
         lightcolor=palette['border'], darkcolor=palette['border'],
     )
@@ -2970,12 +2972,14 @@ class SchoolPassApp:
 
         nav('⌂   لوحة التحكم الرئيسية', self.refresh_all)
         operations_group = nav_group('operations', 'إجراءات الدخول والخروج', 'SidebarGroupOps.TFrame', 'SidebarGroupOpsTitle.TLabel')
-        entry_group = ttk.Frame(operations_group, style='SidebarGroupOps.TFrame')
-        entry_toggle = nav('＋   رخص الدخول  ▾', lambda: None, parent=operations_group)
+        entry_group = ttk.Frame(operations_group, style='SidebarSubmenu.TFrame', padding=(8, 6))
+        # Keep the dropdown labels as clean Arabic text. Mixing arrows and Latin-style
+        # symbols into the same RTL string caused punctuation to jump to the wrong side.
+        entry_toggle = nav('رخص الدخول', lambda: None, parent=operations_group)
         entry_items = (
-            ('＋  تأخر عن الدخول', 'late'),
-            ('↩  عودة بعد الغياب', 'absence_return'),
-            ('⚑  الطرد من الحصة / حالة خاصة', 'special_entry'),
+            ('تأخر عن الدخول', 'late'),
+            ('عودة بعد الغياب', 'absence_return'),
+            ('الطرد من الحصة — حالة خاصة', 'special_entry'),
         )
         for label, kind in entry_items:
             nav(label, lambda k=kind: RecordForm(self, k), 'SubNav.TButton', parent=entry_group)
@@ -2983,10 +2987,8 @@ class SchoolPassApp:
         def toggle_entry_group(_event=None):
             if entry_group.winfo_ismapped():
                 entry_group.pack_forget()
-                entry_toggle.configure(text='＋   رخص الدخول  ▾')
             else:
                 entry_group.pack(fill=X, padx=8, pady=(0, 4), before=exit_button)
-                entry_toggle.configure(text='＋   رخص الدخول  ▴')
         entry_toggle.configure(command=toggle_entry_group)
 
         data_group = nav_group('data', 'إدارة البيانات', 'SidebarGroupData.TFrame', 'SidebarGroupDataTitle.TLabel')
@@ -3055,9 +3057,9 @@ class SchoolPassApp:
 
         # High-impact welcome banner inspired by the approved SchoolPass premium concept.
         # It is built from native ttk widgets so it remains crisp at Windows DPI scaling.
-        hero = ttk.Frame(content, style='Hero.TFrame', padding=(18, 12))
-        hero.pack(fill=X, padx=22, pady=(0, 12))
-        ttk.Frame(hero, style='HeroAccent.TFrame', height=4).pack(fill=X, pady=(0, 14))
+        hero = ttk.Frame(content, style='Hero.TFrame', padding=(14, 9))
+        hero.pack(fill=X, padx=12, pady=(0, 7))
+        ttk.Frame(hero, style='HeroAccent.TFrame', height=3).pack(fill=X, pady=(0, 8))
         hero_body = ttk.Frame(hero, style='Hero.TFrame')
         hero_body.pack(fill=X)
         hero_info = ttk.Frame(hero_body, style='Hero.TFrame')
@@ -3082,7 +3084,7 @@ class SchoolPassApp:
         ttk.Label(hero_badge, text=f'الإصدار {APP_VERSION}', style='HeroBadgeText.TLabel').pack(pady=(5, 0))
 
         hero_actions = ttk.Frame(hero, style='Hero.TFrame')
-        hero_actions.pack(fill=X, pady=(14, 0))
+        hero_actions.pack(fill=X, pady=(9, 0))
         self.hero_entry_button = ttk.Button(
             hero_actions, text='＋  إصدار رخصة دخول', style='Accent.TButton',
             command=lambda: RecordForm(self, 'late'))
@@ -3099,7 +3101,7 @@ class SchoolPassApp:
 
         # KPI cards in a responsive 3x2 grid with an icon, a clear metric and context.
         cards = ttk.Frame(content)
-        cards.pack(fill=X, padx=18, pady=(2, 8))
+        cards.pack(fill=X, padx=12, pady=(1, 5))
         self.card_values = {}
         card_specs = [
             ('students', 'إجمالي التلاميذ النشطين', '♙', 'قاعدة بيانات المؤسسة'),
@@ -3114,10 +3116,10 @@ class SchoolPassApp:
         for col in range(3):
             cards.grid_columnconfigure(col, weight=1, uniform='kpi')
         for idx, (key, label, icon, hint) in enumerate(card_specs):
-            card = ttk.Frame(cards, style='MetricCard.TFrame', padding=(12, 8))
+            card = ttk.Frame(cards, style='MetricCard.TFrame', padding=(10, 6))
             self.kpi_cards.append(card)
-            card.grid(row=idx // 3, column=2 - (idx % 3), sticky='nsew', padx=7, pady=7)
-            ttk.Frame(card, height=3, style='KPIAccent.TFrame').pack(fill=X, pady=(0, 10))
+            card.grid(row=idx // 3, column=2 - (idx % 3), sticky='nsew', padx=4, pady=4)
+            ttk.Frame(card, height=3, style='KPIAccent.TFrame').pack(fill=X, pady=(0, 6))
             card_head = ttk.Frame(card, style='MetricCard.TFrame')
             card_head.pack(fill=X)
             icon_label = ttk.Label(card_head, text=icon, style='MetricIcon.TLabel')
@@ -3138,8 +3140,8 @@ class SchoolPassApp:
 
         # Chart and alerts share a row to keep the dashboard informative yet compact.
         overview = ttk.Frame(content)
-        overview.pack(fill=X, padx=22, pady=(0, 14))
-        chart_panel = ttk.Frame(overview, style='Surface.TFrame', padding=(16, 14))
+        overview.pack(fill=X, padx=12, pady=(0, 8))
+        chart_panel = ttk.Frame(overview, style='Surface.TFrame', padding=(12, 9))
         self.chart_panel = chart_panel
         chart_panel.pack(side=LEFT, fill=BOTH, expand=True, padx=(0, 5))
         chart_head = ttk.Frame(chart_panel, style='Surface.TFrame')
@@ -3158,10 +3160,10 @@ class SchoolPassApp:
         self.dashboard_month_label = ttk.Label(chart_panel, textvariable=self.dashboard_month_summary, style='Subtitle.TLabel', cursor='hand2')
         self.dashboard_month_label.pack(anchor=E, pady=(2, 0))
         self.dashboard_month_label.bind('<Button-1>', lambda _e: self.open_dashboard_details('month_all'))
-        self.dashboard_chart = Canvas(chart_panel, height=145, background=UI_PALETTE.get('canvas', '#FFFFFF'), highlightthickness=0)
+        self.dashboard_chart = Canvas(chart_panel, height=112, background=UI_PALETTE.get('canvas', '#FFFFFF'), highlightthickness=0)
         self.dashboard_chart.pack(fill=X, expand=True, pady=(3, 0))
 
-        alert_panel = ttk.Frame(overview, style='Surface.TFrame', padding=(16, 14))
+        alert_panel = ttk.Frame(overview, style='Surface.TFrame', padding=(12, 9))
         self.alert_panel = alert_panel
         alert_panel.pack(side=RIGHT, fill=Y, padx=(5, 0))
         ttk.Label(alert_panel, text='التنبيهات والمتابعة', style='Section.TLabel').pack(anchor=E, pady=(0, 8))
@@ -3191,7 +3193,7 @@ class SchoolPassApp:
         overview.pack_configure(before=cards)
 
         action_row = ttk.Frame(content)
-        action_row.pack(fill=X, padx=18, pady=(0, 7))
+        action_row.pack(fill=X, padx=12, pady=(0, 5))
         self.dashboard_action_buttons = []
         def add_dashboard_action(parent, full, compact, command, style=None, side=RIGHT):
             button = ttk.Button(parent, text=full, command=command, style=style or 'TButton')
@@ -3205,8 +3207,8 @@ class SchoolPassApp:
             add_dashboard_action(action_row, 'التقرير اليومي التفصيلي A4', 'التقرير اليومي A4', self.daily_summary, 'Accent.TButton', LEFT)
         add_dashboard_action(action_row, 'التقرير الشهري', 'شهري', self.monthly_report, 'TButton', LEFT)
 
-        panel = ttk.Frame(content, style='Surface.TFrame', padding=(16, 14))
-        panel.pack(fill=BOTH, expand=True, padx=22, pady=(0, 16))
+        panel = ttk.Frame(content, style='Surface.TFrame', padding=(12, 10))
+        panel.pack(fill=BOTH, expand=True, padx=12, pady=(0, 10))
         title_row = ttk.Frame(panel, style='Surface.TFrame')
         title_row.pack(fill=X, pady=(0, 7))
         ttk.Label(title_row, text='أحدث العمليات المسجلة', style='Section.TLabel').pack(side=RIGHT)
