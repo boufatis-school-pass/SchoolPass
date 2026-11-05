@@ -280,29 +280,9 @@ def _install_rounded_widget_surfaces(root, style, palette: dict[str, str]):
             suffixes=('.border', '.background'),
         )
 
-    button_styles = (
-        # Install derived styles before TButton so each keeps its own image element
-        # rather than inheriting the base button's background image.
-        ('Accent.TButton', primary, primary, palette.get('primary_hover', primary)),
-        ('Gold.TButton', palette.get('gold', '#E6B24F'), palette.get('gold', '#E6B24F'), _shade(palette.get('gold', '#E6B24F'), 0.92)),
-        ('NavGroupOps.TButton', '#245B86', '#245B86', '#3475A5'),
-        ('NavGroupData.TButton', '#286B62', '#286B62', '#34877A'),
-        ('NavGroupReports.TButton', '#66518A', '#66518A', '#7A65A1'),
-        ('NavGroupAdmin.TButton', '#8A6435', '#8A6435', '#A47A45'),
-        ('Nav.TButton', palette.get('sidebar', '#142B49'), palette.get('sidebar', '#142B49'), palette.get('sidebar_hover', '#24466E')),
-        ('NavHover.TButton', palette.get('sidebar_hover', '#24466E'), palette.get('sidebar_hover', '#24466E'), palette.get('primary', primary)),
-        ('SubNav.TButton', palette.get('surface_alt', '#F8FAFD'), border, palette.get('primary_soft', '#E9F1FC')),
-        ('SubNavHover.TButton', palette.get('primary_soft', '#E9F1FC'), border, palette.get('primary_soft', '#E9F1FC')),
-        ('Link.TButton', surface, surface, palette.get('primary_soft', '#E9F1FC')),
-        ('TButton', palette.get('heading', '#EDF2F8'), border, palette.get('selected', '#E4EEFC')),
-    )
-    # Do not replace ttk button drawing elements with PhotoImage surfaces.
-    # On some Windows/Tk builds the image element paints over the button label,
-    # leaving large blank coloured blocks (the 4.8.1 screenshot regression).
-    # Keep the rounded entry/card surfaces above, but let ttk draw button text
-    # natively so Arabic labels and keyboard focus remain visible.
-    # Button colours, typography, padding and hover maps are configured in
-    # make_style() below; only the custom image-backed button skin is disabled.
+    # Buttons receive their stateful rounded backgrounds in
+    # _install_rounded_button_surfaces(), using a parent image element with
+    # Button.label as its child so Arabic text can never be painted over.
 
 
 
@@ -524,7 +504,7 @@ def make_style(root: Tk, primary: str | None = None, secondary: str | None = Non
             'sidebar': '#071526', 'sidebar_hover': '#193654',
             'sidebar_text': '#F7FAFF', 'sidebar_muted': '#B4C4D8',
             'accent': '#36C5B4', 'gold': '#F0BE5B', 'border': '#3B526F',
-            'field': '#1A2E49', 'heading': '#243A57', 'selected': '#284A73',
+            'field': '#152A45', 'heading': '#243A57', 'selected': '#284A73',
             'alert_bg': '#47351E', 'alert_fg': '#FFD79A',
             'good_bg': '#173D37', 'good_fg': '#A8E7D7',
             'danger_bg': '#4A2830', 'danger_fg': '#FFB7BF',
@@ -542,7 +522,7 @@ def make_style(root: Tk, primary: str | None = None, secondary: str | None = Non
             'primary_soft': '#E8F0FF', 'sidebar': '#11243D',
             'sidebar_hover': '#1E4167', 'sidebar_text': '#F8FBFF',
             'sidebar_muted': '#C5D3E5', 'accent': '#0FA99A',
-            'gold': '#E8B34D', 'border': '#C5D2E2', 'field': '#F1F5FC',
+            'gold': '#E8B34D', 'border': '#AEBFD4', 'field': '#EAF1FA',
             'heading': '#EAF0F8', 'selected': '#DFEAFF',
             'alert_bg': '#FFF4E3', 'alert_fg': '#87500D',
             'good_bg': '#E7F6F1', 'good_fg': '#126B59',
