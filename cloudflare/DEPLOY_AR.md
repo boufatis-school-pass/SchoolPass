@@ -2,6 +2,8 @@
 
 هذا الدليل ينشر خدمة التحقق وطلبات عودة التلميذ عبر الإنترنت. قاعدة D1 المستخدمة في إعداد المشروع اسمها `schoolpass-cloud`، وارتباطها موجود في `wrangler.toml` تحت اسم `DB`.
 
+**تنبيه بخصوص معرّف قاعدة البيانات:** ملف `wrangler.toml` يحتوي حاليًا على قيمة مؤقتة `REPLACE_WITH_D1_DATABASE_UUID`. افتح قاعدة `schoolpass-cloud` في لوحة Cloudflare، وانسخ حقل Database ID / UUID كما يظهر تمامًا، ثم استبدل القيمة المؤقتة به. معرّف D1 UUID يكون بالشكل المعتاد `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx` (36 محرفًا مع الشرطات). لا تستخدم Account ID أو أي رمز طويل آخر.
+
 ## 1. إنشاء Worker
 
 1. افتح لوحة Cloudflare ثم **Workers & Pages**.
@@ -16,6 +18,8 @@
 
 - Variable name: `DB`
 - D1 database: `schoolpass-cloud`
+
+إذا أردت استخدام Wrangler بدل لوحة التحكم، لا تنفذ أوامر النشر قبل وضع UUID الصحيح داخل `cloudflare/wrangler.toml`.
 
 احفظ الإعدادات وأعد نشر Worker. ثم افتح قاعدة D1 من **Storage & databases → D1 SQL Database**، وافتح **Console**، ونفّذ محتوى الملف `cloudflare/schema.sql` مرة واحدة. ينشئ ذلك جداول الرخص والطلبات وحدود المحاولات، ويمنع وجود أكثر من طلب عودة معلّق للرخصة نفسها.
 
