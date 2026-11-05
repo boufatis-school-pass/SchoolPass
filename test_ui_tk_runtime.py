@@ -39,8 +39,13 @@ def test_windows_tk_installs_rounded_buttons_entries_and_dropdowns():
 
         ui.make_style(root)
         style = ttk.Style(root)
+        assert getattr(root, "_schoolpass_theme_init_error", None) is None, (
+            "ttkbootstrap theme initialization failed: "
+            + repr(getattr(root, "_schoolpass_theme_init_error", None))
+        )
         assert getattr(root, "_schoolpass_button_skin_count", 0) >= 6, (
             "Rounded button surfaces were not installed: "
+            + " theme_init_error=" + repr(getattr(root, "_schoolpass_theme_init_error", None))
             + " import_error=" + repr(getattr(root, "_schoolpass_button_skin_import_error", None))
             + " per_style_errors=" + repr(getattr(root, "_schoolpass_button_skin_errors", {}))
         )
