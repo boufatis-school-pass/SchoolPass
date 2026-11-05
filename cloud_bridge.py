@@ -3,11 +3,17 @@
 from __future__ import annotations
 
 import json
+import hashlib
+import time
 from datetime import datetime, timedelta
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 import schoolpass_core as core
+
+
+_SYNCED_PAYLOADS: dict[str, str] = {}
+_LAST_FULL_SYNC = 0.0
 
 
 class CloudBridgeError(RuntimeError):
@@ -79,7 +85,10 @@ def _to_utc(value: str) -> str:
 
 
 def sync_local_permits() -> int:
-    """Sync all exit permits (including older open exits) and recent entry slips."""
+    """Synchronize changed exit permits and recent entry slips, with periodic reconciliation."""
+    global _LAST_FULL_SYNC
+    monotonic_now = time.monotonic()
+    full_sync = monotonic_now - _LAST_FULL_SYNC >= 6 * 60 * 60
     cutoff = (datetime.now() - timedelta(hours=6)).strftime("%Y-%m-%d %H:%M:%S")
     with core.db_connect() as conn:
         rows = conn.execute(
@@ -87,13 +96,13 @@ def sync_local_permits() -> int:
             "FROM records WHERE kind='exit_permit' OR COALESCE(NULLIF(issued_at,''),created_at)>=? "
             "ORDER BY id DESC LIMIT 5000", (cutoff,)
         ).fetchall()
-    if not rows:
-        return 0
-    payloads = []
+    payloads: list[dict] = []
+    fingerprints: dict[str, str] = {}
+    active_tokens = set()
     for row in rows:
         issued = _to_utc(row["issued_at"] or row["created_at"])
         returned = _to_utc(row["returned_at"]) if row["returned_at"] else None
-        payloads.append({
+        payload = {
             "token": row["qr_token"],
             "record_no": row["record_no"],
             "kind": row["kind"],
@@ -102,15 +111,32 @@ def sync_local_permits() -> int:
             "issued_at": issued,
             "status": row["status"],
             "returned_at": returned,
-        })
+        }
+        token = str(row["qr_token"])
+        active_tokens.add(token)
+        fingerprint = hashlib.sha256(
+            json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        fingerprints[token] = fingerprint
+        if full_sync or _SYNCED_PAYLOADS.get(token) != fingerprint:
+            payloads.append(payload)
     sent = 0
     for start in range(0, len(payloads), 100):
-        result = _request("POST", "/api/permits/batch", {"permits": payloads[start:start + 100]})
-        if not result.get("ok"):
-            raise CloudBridgeError("لم يؤكد Cloudflare حفظ الرخص.")
-        sent += int(result.get("count", 0))
+        batch = payloads[start:start + 100]
+        result = _request("POST", "/api/permits/batch", {"permits": batch})
+        if not result.get("ok") or int(result.get("count", -1)) != len(batch):
+            raise CloudBridgeError("لم يؤكد Cloudflare حفظ جميع الرخص في الدفعة.")
+        sent += len(batch)
+        for payload in batch:
+            token = str(payload["token"])
+            _SYNCED_PAYLOADS[token] = fingerprints[token]
+    if full_sync or not _LAST_FULL_SYNC:
+        _LAST_FULL_SYNC = monotonic_now
+    if len(_SYNCED_PAYLOADS) > 10000:
+        for token in list(_SYNCED_PAYLOADS):
+            if token not in active_tokens:
+                _SYNCED_PAYLOADS.pop(token, None)
     return sent
-
 
 def pending_return_requests() -> list[dict]:
     result = _request("GET", "/api/return-requests/pending")
