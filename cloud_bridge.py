@@ -8,6 +8,7 @@ import time
 from datetime import datetime, timedelta
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+from urllib.parse import urlsplit
 
 import schoolpass_core as core
 
@@ -25,6 +26,9 @@ def _config() -> tuple[str, str]:
     base, key = config.get("url", "").rstrip("/"), config.get("api_key", "")
     if not base:
         raise CloudBridgeError("لم يُضبط رابط Cloudflare في إعدادات المؤسسة.")
+    parsed = urlsplit(base)
+    if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password or parsed.path or parsed.query or parsed.fragment:
+        raise CloudBridgeError("رابط Cloudflare غير آمن أو غير صالح. يجب أن يكون عنوان HTTPS عامًا دون مسار إضافي.")
     if not key:
         raise CloudBridgeError("لم يُنشأ مفتاح الربط السري أو لم يُحفظ على هذا الحاسوب.")
     return base, key
