@@ -74,6 +74,16 @@ jobs:
           if (-not $tag.StartsWith('v')) { $tag = "v$tag" }
           "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
+      - name: Move release tag to verified release commit
+        if: startsWith(github.ref, 'refs/heads/release/')
+        shell: powershell
+        run: |
+          $tag = "${{ steps.release_tag.outputs.tag }}"
+          git tag -f $tag $env:GITHUB_SHA
+          if ($LASTEXITCODE -ne 0) { throw "Could not point release tag at the verified commit" }
+          git push --force origin "refs/tags/$tag"
+          if ($LASTEXITCODE -ne 0) { throw "Could not update remote release tag" }
+
       - name: Publish release installer
         if: startsWith(github.ref, 'refs/tags/') || startsWith(github.ref, 'refs/heads/release/')
         uses: softprops/action-gh-release@v2
