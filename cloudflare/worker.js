@@ -102,23 +102,31 @@ function validText(value, max) {
   return typeof value === "string" && value.trim().length > 0 && value.length <= max;
 }
 function permitPage(row) {
+  const isExit = row.kind === "exit_permit";
+  const expired = !isExit && row.expires_at && Date.now() >= Date.parse(row.expires_at);
+  const labels = { late: "رخصة الدخول — تأخر", absence_return: "رخصة الدخول — عودة بعد الغياب",
+    special_entry: "رخصة الدخول — حالة خاصة", exit_return: "إثبات عودة من خروج استثنائي",
+    exit_permit: "رخصة خروج استثنائي" };
   const status = row.status === "returned" ? "تم تسجيل عودة التلميذ" :
-    row.status === "cancelled" ? "الرخصة ملغاة" : "الرخصة مسجلة";
+    row.status === "cancelled" ? "الرخصة ملغاة" : "الرخصة سارية";
   const items =
     "<div class='row'><span class='label'>رقم الرخصة</span><span class='value'>" + escapeHtml(row.record_no) + "</span></div>" +
+    "<div class='row'><span class='label'>نوع الرخصة</span><span class='value'>" + escapeHtml(labels[row.kind] || row.kind) + "</span></div>" +
     "<div class='row'><span class='label'>التلميذ</span><span class='value'>" + escapeHtml(row.student_name) + "</span></div>" +
     "<div class='row'><span class='label'>القسم</span><span class='value'>" + escapeHtml(row.class_name) + "</span></div>" +
-    "<div class='row'><span class='label'>وقت الخروج</span><span class='value'>" + escapeHtml(row.issued_at) + "</span></div>";
+    "<div class='row'><span class='label'>" + (isExit ? "وقت الخروج" : "وقت الإصدار") + "</span><span class='value'>" + escapeHtml(row.issued_at) + "</span></div>";
   let stateClass = row.status === "returned" ? "good" : row.status === "cancelled" ? "bad" : "status";
   let extra = "";
   if (row.status === "returned") {
     extra = "<div class='status good'>تم تسجيل العودة في " + escapeHtml(row.returned_at || "") + ".</div>";
   } else if (row.status === "cancelled") {
     extra = "<div class='status bad'>هذه الرخصة ملغاة ولا يجوز اعتمادها.</div>";
-  } else if (row.kind !== "exit_permit" && row.expires_at && Date.now() >= Date.parse(row.expires_at)) {
-    extra = "<div class='status bad'>انتهت صلاحية هذه الرخصة بعد ساعتين من إصدارها.</div>";
+  } else if (expired) {
+    extra = "<div class='status bad'>انتهت صلاحية هذه الرخصة بعد ساعتين من إصدارها (" + escapeHtml(row.expires_at || "") + ").</div>";
+  } else if (isExit) {
+    extra = "<div class='status'>رخصة الخروج تبقى مفتوحة إلى حين تسجيل عودة التلميذ من المشرف.</div>";
   } else {
-    extra = "<div class='status " + stateClass + "'>" + status + "</div>";
+    extra = "<div class='status good'>الرخصة سارية حتى " + escapeHtml(row.expires_at || "") + ".</div>";
   }
   const canRequest = row.kind === "exit_permit" && row.status === "valid";
   const button = canRequest ?
@@ -132,7 +140,7 @@ function permitPage(row) {
     "else if(r.status===409){m.textContent='لا يمكن إرسال الطلب: قد تكون العودة سُجلت أو الرخصة أُغلقت.';}" +
     "else{m.textContent='تعذر إرسال الطلب. تحقق من الاتصال ثم أعد تحميل الصفحة.';b.disabled=false;}" +
     "}catch(e){m.textContent='تعذر الاتصال. أعد المحاولة عند توفر الإنترنت.';b.disabled=false;}});})();</script>" : "";
-  return page("التحقق من الرخصة", "<h3>بيانات رخصة الخروج</h3>" + items + extra + button + script);
+  return page("التحقق من الرخصة", "<h3>بيانات الرخصة</h3>" + items + extra + button + script);
 }
 
 export default {
