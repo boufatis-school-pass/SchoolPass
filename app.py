@@ -1946,17 +1946,20 @@ class RecordForm:
         self.win.transient(app.root)
         self.win.grab_set()
         self.win.protocol('WM_DELETE_WINDOW', self.close)
-        ttk.Label(self.win, text=self.title, style='Title.TLabel').pack(pady=(12, 6))
+        form_header = ttk.Frame(self.win, style='DialogHeader.TFrame', padding=(18, 12))
+        form_header.pack(fill=X, padx=14, pady=(12, 7))
+        ttk.Label(form_header, text='إصدار وتوثيق الرخصة', style='Eyebrow.TLabel').pack(anchor=E)
+        ttk.Label(form_header, text=self.title, style='DialogHeaderTitle.TLabel').pack(anchor=E, pady=(3, 0))
         form_scroll = ScrollableFrame(self.win, inner_style='TFrame')
-        form_scroll.pack(fill=BOTH, expand=True, padx=12, pady=4)
+        form_scroll.pack(fill=BOTH, expand=True, padx=14, pady=(0, 6))
         form = form_scroll.inner
         self.vars: dict[str, StringVar] = {}
         self.check_vars: dict[str, BooleanVar] = {}
 
         def add_row(parent, key, label, value=''):
             row = ttk.Frame(parent)
-            row.pack(fill=X, pady=5)
-            ttk.Label(row, text=label, width=29, anchor=E).pack(side=RIGHT, padx=(4, 8))
+            row.pack(fill=X, pady=6)
+            ttk.Label(row, text=label, width=26, anchor=E, style='FieldLabel.TLabel').pack(side=RIGHT, padx=(4, 9))
             v = StringVar(value=value)
             self.vars[key] = v
             ent = ttk.Entry(row, textvariable=v, justify='right')
@@ -1965,8 +1968,8 @@ class RecordForm:
 
         def add_date_row(parent, key, label, value=''):
             row = ttk.Frame(parent)
-            row.pack(fill=X, pady=5)
-            ttk.Label(row, text=label, width=29, anchor=E).pack(side=RIGHT, padx=(4, 8))
+            row.pack(fill=X, pady=6)
+            ttk.Label(row, text=label, width=26, anchor=E, style='FieldLabel.TLabel').pack(side=RIGHT, padx=(4, 9))
             v = StringVar(value=value or date_today())
             self.vars[key] = v
             ent = ttk.Entry(row, textvariable=v, justify='center', state='readonly', width=15)
@@ -1976,8 +1979,8 @@ class RecordForm:
             return ent
 
         student_row = ttk.Frame(form)
-        student_row.pack(fill=X, pady=6)
-        ttk.Label(student_row, text='التلميذ', width=29, anchor=E).pack(side=RIGHT, padx=(4, 8))
+        student_row.pack(fill=X, pady=(3, 9))
+        ttk.Label(student_row, text='التلميذ', width=26, anchor=E, style='FieldLabel.TLabel').pack(side=RIGHT, padx=(4, 9))
         self.student_label = DisplayStringVar(value='لم يتم اختيار التلميذ')
         self.student_var = StringVar(value='')
         # Use a real Entry for typing; suggestions live in a separate, non-modal popup.
@@ -1991,9 +1994,9 @@ class RecordForm:
         self.student_combo.bind('<Escape>', lambda _e: self.student_suggestions.hide())
         ttk.Button(student_row, text='بحث بالقائمة', command=self.pick_student).pack(side=RIGHT, padx=6)
 
-        attention_box = ttk.Frame(form, style='Surface.TFrame', padding=(10, 7))
+        attention_box = ttk.Frame(form, style='InfoPanel.TFrame', padding=(12, 9))
         attention_box.pack(fill=X, pady=(3, 7))
-        attention_header = ttk.Frame(attention_box, style='Surface.TFrame')
+        attention_header = ttk.Frame(attention_box, style='InfoPanel.TFrame')
         attention_header.pack(fill=X)
         ttk.Label(attention_header, text='متابعة الغياب والتأخر المتكرر', style='Section.TLabel').pack(side=RIGHT)
         self.attention_open_button = ttk.Button(
@@ -2005,12 +2008,12 @@ class RecordForm:
                   justify='right', foreground='#5A4A22').pack(fill=X, anchor=E, pady=(4, 0))
 
         # Guardian profiles are shared across all permit forms and are loaded per selected student.
-        guardian_box = ttk.Frame(form, relief='groove', borderwidth=1)
-        guardian_box.pack(fill=X, pady=(4, 7))
-        ttk.Label(guardian_box, text='أولياء التلميذ المسجلون', font=('Segoe UI', 9, 'bold')).pack(anchor=E, padx=8, pady=(5, 2))
-        guardian_row = ttk.Frame(guardian_box)
-        guardian_row.pack(fill=X, padx=7, pady=3)
-        ttk.Label(guardian_row, text='الولي', width=29, anchor=E).pack(side=RIGHT, padx=(4, 8))
+        guardian_box = ttk.Frame(form, style='FormSection.TFrame', padding=(12, 9))
+        guardian_box.pack(fill=X, pady=(5, 8))
+        ttk.Label(guardian_box, text='أولياء التلميذ المسجلون', style='FormSectionTitle.TLabel').pack(anchor=E, fill=X, padx=4, pady=(0, 7))
+        guardian_row = ttk.Frame(guardian_box, style='FormSection.TFrame')
+        guardian_row.pack(fill=X, pady=3)
+        ttk.Label(guardian_row, text='الولي', width=26, anchor=E, style='FieldLabel.TLabel').pack(side=RIGHT, padx=(4, 9))
         self.guardian_var = StringVar(value='')
         self.guardian_combo = ttk.Combobox(guardian_row, textvariable=self.guardian_var,
                                            state='readonly', values=(), justify='right')
@@ -2018,22 +2021,22 @@ class RecordForm:
         self.guardian_combo.bind('<<ComboboxSelected>>', self._guardian_selected)
         ttk.Button(guardian_row, text='+ إضافة ولي', command=self.add_guardian_dialog,
                    style='Gold.TButton').pack(side=RIGHT, padx=5)
-        guardian_actions = ttk.Frame(guardian_box)
-        guardian_actions.pack(fill=X, padx=8, pady=(2, 5))
+        guardian_actions = ttk.Frame(guardian_box, style='FormSection.TFrame')
+        guardian_actions.pack(fill=X, pady=(4, 6))
         self.guardian_info_var = DisplayStringVar(value='اختر التلميذ لعرض بيانات أوليائه المسجلين.')
         ttk.Label(guardian_actions, textvariable=self.guardian_info_var,
-                  foreground='#526579', wraplength=490, justify='right').pack(side=RIGHT, fill=X, expand=True)
+                  foreground=UI_PALETTE.get('muted', '#64758B'), wraplength=490, justify='right').pack(side=RIGHT, fill=X, expand=True)
         ttk.Button(guardian_actions, text='تعيين الولي المختار كأساسي',
                    command=self.set_selected_guardian_primary, style='Link.TButton').pack(side=LEFT, padx=4)
-        guardian_id_row = ttk.Frame(guardian_box)
-        guardian_id_row.pack(fill=X, padx=7, pady=(0, 6))
-        ttk.Label(guardian_id_row, text='رقم بطاقة التعريف', width=29, anchor=E).pack(side=RIGHT, padx=(4, 8))
+        guardian_id_row = ttk.Frame(guardian_box, style='FormSection.TFrame')
+        guardian_id_row.pack(fill=X, pady=(3, 0))
+        ttk.Label(guardian_id_row, text='رقم بطاقة التعريف', width=26, anchor=E, style='FieldLabel.TLabel').pack(side=RIGHT, padx=(4, 9))
         self.guardian_id_var = StringVar(value='')
         ttk.Entry(guardian_id_row, textvariable=self.guardian_id_var,
                   state='readonly', justify='center').pack(side=RIGHT, fill=X, expand=True)
 
         if kind == 'late':
-            ttk.Label(form, text='سبب التأخر', anchor=E).pack(fill=X, pady=(9, 3))
+            ttk.Label(form, text='سبب التأخر', anchor=E, style='FieldLabel.TLabel').pack(fill=X, pady=(10, 4))
             late_options = ('التواجد في الاستشارة', 'التأخر بسبب انعدام النقل', 'التأخر في الالتحاق بالقسم')
             self.late_reason = ComboStringVar(late_options, value='')
             self.vars['reason'] = self.late_reason  # logical reason alias used by the form's save/validation path
@@ -2050,9 +2053,9 @@ class RecordForm:
             ttk.Label(form, text='يُحسب الغياب من تاريخ بدايته إلى اليوم السابق للعودة؛ يوم العودة غير محسوب.',
                       foreground='#526579', wraplength=600).pack(anchor=E, pady=3)
             add_row(form, 'reason', 'ملاحظة (اختياري)')
-            rule_box = ttk.Frame(form, relief='groove', borderwidth=1)
-            rule_box.pack(fill=X, pady=7)
-            ttk.Label(rule_box, text='قاعدة قبول تبرير الغياب', font=('Segoe UI', 9, 'bold')).pack(anchor=E, padx=8, pady=(4, 0))
+            rule_box = ttk.Frame(form, style='FormSection.TFrame', padding=(12, 9))
+            rule_box.pack(fill=X, pady=8)
+            ttk.Label(rule_box, text='قاعدة قبول تبرير الغياب', style='FormSectionTitle.TLabel').pack(anchor=E, fill=X, pady=(0, 5))
             self.rule_label = ttk.Label(rule_box, text='اختر تاريخ بداية الغياب لتحديد طريقة التبرير.', anchor=E, wraplength=560)
             self.rule_label.pack(fill=X, padx=10, pady=6)
             self.proof_choices = {
@@ -2068,20 +2071,20 @@ class RecordForm:
             self.method_combo = ttk.Combobox(method_row, textvariable=self.proof_method, state='readonly',
                                               values=choice_labels, justify='right')
             self.method_combo.pack(side=RIGHT, fill=X, expand=True)
-            self.medical_frame = ttk.Frame(form, relief='groove', borderwidth=1)
+            self.medical_frame = ttk.Frame(form, style='FormSection.TFrame', padding=(11, 8))
             self.check_vars['certificate_present'] = BooleanVar(value=False)
             ttk.Checkbutton(self.medical_frame, text='أؤكد استلام الشهادة الطبية والتحقق منها.',
                             variable=self.check_vars['certificate_present']).pack(anchor=E, padx=7, pady=6)
-            self.guardian_frame = ttk.Frame(form, relief='groove', borderwidth=1)
-            ttk.Label(self.guardian_frame, text='بيانات ولي الأمر — يجب أن يكون حاضرًا فعليًا', font=('Segoe UI', 9, 'bold')).pack(anchor=E, padx=6, pady=4)
+            self.guardian_frame = ttk.Frame(form, style='FormSection.TFrame', padding=(11, 8))
+            ttk.Label(self.guardian_frame, text='بيانات ولي الأمر — يجب أن يكون حاضرًا فعليًا', style='FormSectionTitle.TLabel').pack(anchor=E, fill=X, pady=(0, 6))
             add_row(self.guardian_frame, 'guardian_name', 'الاسم الكامل لولي الأمر')
             add_row(self.guardian_frame, 'relationship', 'صلة القرابة')
             add_row(self.guardian_frame, 'national_id', 'رقم بطاقة الهوية الوطنية')
             self.check_vars['guardian_present'] = BooleanVar(value=False)
             ttk.Checkbutton(self.guardian_frame, text='أؤكد حضور ولي الأمر شخصيًا إلى الإدارة والتحقق من هويته.',
                             variable=self.check_vars['guardian_present']).pack(anchor=E, padx=7, pady=6)
-            self.other_frame = ttk.Frame(form, relief='groove', borderwidth=1)
-            ttk.Label(self.other_frame, text='تفاصيل التبرير الآخر', font=('Segoe UI', 9, 'bold')).pack(anchor=E, padx=6, pady=4)
+            self.other_frame = ttk.Frame(form, style='FormSection.TFrame', padding=(11, 8))
+            ttk.Label(self.other_frame, text='تفاصيل التبرير الآخر', style='FormSectionTitle.TLabel').pack(anchor=E, fill=X, pady=(0, 6))
             add_row(self.other_frame, 'other_reason', 'اكتب سبب التبرير')
             self.method_combo.bind('<<ComboboxSelected>>', lambda _e: self._refresh_absence_method())
             self._update_absence_rule()
@@ -2093,8 +2096,8 @@ class RecordForm:
             self.special_combo = ttk.Combobox(reason_row, textvariable=self.special_reason, state='readonly',
                                                values=tuple(self.special_options), justify='right')
             self.special_combo.pack(side=RIGHT, fill=X, expand=True)
-            self.expulsion_frame = ttk.Frame(form, relief='groove', borderwidth=1)
-            ttk.Label(self.expulsion_frame, text='معلومات الطرد من الحصة', font=('Segoe UI', 9, 'bold')).pack(anchor=E, padx=6, pady=4)
+            self.expulsion_frame = ttk.Frame(form, style='FormSection.TFrame', padding=(11, 8))
+            ttk.Label(self.expulsion_frame, text='معلومات الطرد من الحصة', style='FormSectionTitle.TLabel').pack(anchor=E, fill=X, pady=(0, 6))
             self.teacher_var = StringVar(value='')
             self.selected_teacher_id = None
             self.teacher_option_map = {}
@@ -2125,10 +2128,10 @@ class RecordForm:
             ttk.Label(form, text='لن يُطبع رقم الهوية كاملًا ولن يوضع داخل رمز QR؛ سيظهر آخر 4 أرقام فقط على التصريح.',
                       foreground='#526579', wraplength=580).pack(anchor=E, pady=4)
 
-        bar = ttk.Frame(self.win)
-        bar.pack(fill=X, padx=25, pady=16)
+        bar = ttk.Frame(self.win, style='DialogFooter.TFrame', padding=(14, 10))
+        bar.pack(fill=X, padx=14, pady=(0, 12))
         ttk.Button(bar, text='حفظ وإصدار الرخصة', command=self.save, style='Accent.TButton').pack(side=RIGHT, padx=5)
-        ttk.Button(bar, text='إلغاء', command=self.close).pack(side=RIGHT, padx=5)
+        ttk.Button(bar, text='إلغاء', command=self.close, style='TButton').pack(side=RIGHT, padx=5)
 
     def close(self):
         for name in ('student_suggestions', 'teacher_suggestions'):
