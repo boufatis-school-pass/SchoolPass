@@ -326,6 +326,7 @@ def _install_rounded_button_surfaces(root, style, palette: dict[str, str]) -> in
         theme_name = 'default'
 
     count = 0
+    errors = {}
     for style_name, fill, hover, pressed, disabled, foreground, radius, anchor in specs:
         fingerprint = ''.join(ch if ch.isalnum() else '_' for ch in
                               f'{theme_name}_{style_name}_{fill}_{hover}_{pressed}_{disabled}_{foreground}_{radius}')
@@ -363,11 +364,15 @@ def _install_rounded_button_surfaces(root, style, palette: dict[str, str]) -> in
             retained.extend((normal_img, hover_img, pressed_img, disabled_img))
             installed.add(key)
             count += 1
-        except Exception:
-            # If a theme cannot build a custom element, native ttk styling remains usable.
+        except Exception as exc:
+            # Keep the native label readable, but preserve diagnostics so the
+            # Windows runtime test can identify a failed rounded-surface install.
+            errors[style_name] = f"{type(exc).__name__}: {exc}"
             continue
     root._schoolpass_button_skin_keys = installed
     root._schoolpass_button_images = retained
+    root._schoolpass_button_skin_errors = errors
+    root._schoolpass_button_skin_count = count
     return count
 
 
@@ -899,7 +904,7 @@ def make_style(root: Tk, primary: str | None = None, secondary: str | None = Non
     # The outer image elements give all entry boxes, combo boxes and main cards
     # genuinely rounded corners. Entry focus and disabled states remain distinct.
     _install_rounded_widget_surfaces(root, style, palette)
-    _install_rounded_button_surfaces(root, style, palette)
+    root._schoolpass_button_skin_count = _install_rounded_button_surfaces(root, style, palette)
 
 
 RTL_SHAPING_ENABLED = True
