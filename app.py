@@ -5296,8 +5296,13 @@ class SchoolPassApp:
                 continue
             row = record_by_token(str(request.get("token") or ""))
             if not row:
-                # The cloud request is not for a record in this workstation database.
+                # A request without a matching local record must never be approved.
                 self._cloud_seen_requests.add(request_id)
+                self._cloud_retry_decisions[request_id] = {
+                    "decision": "rejected", "recorded_by": self.current_user["display_name"]
+                }
+                audit(self.current_user["id"], "رفض طلب عودة غير مرتبط بسجل محلي", "cloud_return_request", request_id,
+                      "لم يتم العثور على رمز الرخصة في قاعدة بيانات هذا الحاسوب.")
                 continue
             self._cloud_seen_requests.add(request_id)
             if row["status"] == "returned":
@@ -5355,10 +5360,18 @@ class SchoolPassApp:
             while True:
                 kind, payload = self._cloud_event_queue.get_nowait()
                 if kind == "requests":
+                    current = {}
                     for request in payload or []:
                         request_id = str(request.get("id") or "")
                         if request_id:
-                            self._cloud_pending_requests[request_id] = request
+                            current[request_id] = request
+                    completed_ids = set(self._cloud_pending_requests) - set(current)
+                    for request_id in completed_ids:
+                        self._cloud_seen_requests.discard(request_id)
+                        self._cloud_retry_decisions.pop(request_id, None)
+                    self._cloud_pending_requests = current
+                    if self.status_text.get() != self.base_status:
+                        self.status_text.set(self.base_status)
                 elif kind == "error" and self.status_text.get() == self.base_status:
                     # Avoid repeated dialogs while the Internet is unavailable.
                     self.status_text.set(self.base_status + "  |  مزامنة Cloudflare تنتظر الاتصال")
