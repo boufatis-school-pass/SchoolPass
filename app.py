@@ -585,6 +585,13 @@ def make_style(root: Tk, primary: str | None = None, secondary: str | None = Non
         root.option_add('*Text.background', palette['field'])
         root.option_add('*Text.foreground', ink)
         root.option_add('*Text.insertBackground', palette['primary'])
+        root.option_add('*Text.highlightThickness', 1)
+        root.option_add('*Text.highlightBackground', palette['border'])
+        root.option_add('*Text.highlightColor', palette['primary'])
+        root.option_add('*Text.relief', 'flat')
+        root.option_add('*Text.borderWidth', 1)
+        root.option_add('*Text.padX', 10)
+        root.option_add('*Text.padY', 8)
         import tkinter.font as tkfont
         for font_name in ('TkDefaultFont', 'TkTextFont', 'TkMenuFont', 'TkHeadingFont', 'TkCaptionFont'):
             try:
@@ -1887,7 +1894,9 @@ class SuggestionPopup:
             foreground=UI_PALETTE.get('ink', '#17263C'),
             selectbackground=UI_PALETTE.get('primary', '#185A8D'),
             selectforeground=UI_PALETTE.get('primary_text', '#FFFFFF'),
-            highlightthickness=1, relief='solid', borderwidth=1)
+            highlightthickness=1, highlightbackground=UI_PALETTE.get('border', '#C5D2E2'),
+            highlightcolor=UI_PALETTE.get('primary', '#185A8D'), relief='flat',
+            borderwidth=1, activestyle='none')
         self.listbox.pack(fill=BOTH, expand=True)
         self.listbox.bind('<ButtonRelease-1>', lambda _event: self.select_first())
         self.listbox.bind('<Return>', lambda _event: self.select_first())
@@ -2084,12 +2093,12 @@ class RecordForm:
             self.vars['return_date'] = StringVar(value=date_today())
             ttk.Entry(row, textvariable=self.vars['return_date'], justify='center', state='readonly', width=15).pack(side=RIGHT, padx=4)
             ttk.Label(form, text='يُحسب الغياب من تاريخ بدايته إلى اليوم السابق للعودة؛ يوم العودة غير محسوب.',
-                      foreground=UI_PALETTE.get('muted', '#687A91'), wraplength=600).pack(anchor=E, pady=4)
+                      style='FormCaption.TLabel', wraplength=600).pack(anchor=E, pady=4)
             add_row(form, 'reason', 'ملاحظة (اختياري)')
             rule_box = ttk.Frame(form, style='FormSection.TFrame', padding=(12, 9))
             rule_box.pack(fill=X, pady=8)
             ttk.Label(rule_box, text='قاعدة قبول تبرير الغياب', style='FormSectionTitle.TLabel').pack(anchor=E, fill=X, pady=(0, 5))
-            self.rule_label = ttk.Label(rule_box, text='اختر تاريخ بداية الغياب لتحديد طريقة التبرير.', anchor=E, wraplength=560)
+            self.rule_label = ttk.Label(rule_box, text='اختر تاريخ بداية الغياب لتحديد طريقة التبرير.', anchor=E, wraplength=560, style='FormCaption.TLabel')
             self.rule_label.pack(fill=X, padx=10, pady=6)
             self.proof_choices = {
                 'شهادة طبية': 'medical_certificate',
@@ -2159,7 +2168,7 @@ class RecordForm:
             add_row(form, 'relationship', 'صلة القرابة')
             add_row(form, 'national_id', 'رقم بطاقة الهوية الوطنية')
             ttk.Label(form, text='لن يُطبع رقم الهوية كاملًا ولن يوضع داخل رمز QR؛ سيظهر آخر 4 أرقام فقط على التصريح.',
-                      foreground=UI_PALETTE.get('muted', '#687A91'), wraplength=580).pack(anchor=E, pady=4)
+                      style='FormCaption.TLabel', wraplength=580).pack(anchor=E, pady=4)
 
         bar = ttk.Frame(self.win, style='DialogFooter.TFrame', padding=(14, 10))
         bar.pack(fill=X, padx=14, pady=(0, 12))
@@ -5070,11 +5079,11 @@ class SchoolPassApp:
         color_row.pack(fill=X, pady=3)
         primary_preview = ttk.Label(color_row, text='اللون الرئيسي', width=18, anchor=E)
         primary_preview.pack(side=RIGHT, padx=5)
-        primary_value = ttk.Label(color_row, textvariable=primary, width=12, relief='groove', anchor='center', style='ThemePrimary.TLabel')
+        primary_value = ttk.Label(color_row, textvariable=primary, width=12, relief='flat', anchor='center', style='ThemePrimary.TLabel')
         primary_value.pack(side=RIGHT, padx=5)
         secondary_preview = ttk.Label(color_row, text='اللون الثانوي', width=18, anchor=E)
         secondary_preview.pack(side=RIGHT, padx=(20, 5))
-        secondary_value = ttk.Label(color_row, textvariable=secondary, width=12, relief='groove', anchor='center', style='ThemeSecondary.TLabel')
+        secondary_value = ttk.Label(color_row, textvariable=secondary, width=12, relief='flat', anchor='center', style='ThemeSecondary.TLabel')
         secondary_value.pack(side=RIGHT, padx=5)
 
         theme_style = ttk.Style(win)
@@ -5082,7 +5091,8 @@ class SchoolPassApp:
             return core.text_color_for(value)
 
         def paint_swatch(style_name, value):
-            theme_style.configure(style_name, background=value, foreground=readable_foreground(value), padding=5)
+            theme_style.configure(style_name, background=value, foreground=readable_foreground(value),
+                                  padding=(10, 7), borderwidth=1, relief='solid')
 
         def choose_color(var, title, style_name):
             chosen = colorchooser.askcolor(color=var.get(), parent=win, title=title)[1]
