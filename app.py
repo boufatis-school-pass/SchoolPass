@@ -5351,6 +5351,8 @@ class SchoolPassApp:
                         messagebox.showerror("تعذر تسجيل العودة", str(exc), parent=self.root)
                         self._cloud_seen_requests.discard(request_id)
             else:
+                audit(self.current_user["id"], "رفض طلب تسجيل عودة عبر QR", "cloud_return_request", request_id,
+                      f"الرخصة: {row['record_no']}؛ التلميذ: {row['student_name']}")
                 self._cloud_retry_decisions[request_id] = {
                     "decision": "rejected", "recorded_by": self.current_user["display_name"]
                 }
