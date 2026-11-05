@@ -125,6 +125,12 @@ def main() -> int:
         if marker not in app_source:
             errors.append(f"SchoolPass 4.9.1 visual feature missing: {description}")
 
+    runtime_test = (ROOT / "test_ui_tk_runtime.py").read_text(encoding="utf-8-sig")
+    if "def test_windows_tk_installs_rounded_buttons_entries_and_dropdowns():" not in runtime_test:
+        errors.append("SchoolPass 4.9.1 Windows Tk runtime layout test is missing")
+    if "El('Button.label', side='left', expand=True)" not in app_source:
+        errors.append("Rounded buttons must retain the native Button.label child")
+
     polish_test = (ROOT / "test_ui_polish_regressions.py").read_text(encoding="utf-8-sig")
     for marker, description in (
         ("def test_buttons_have_rounded_stateful_image_layout_without_hiding_captions():", "rounded button/caption rendering regression test"),
