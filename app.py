@@ -5307,7 +5307,7 @@ class SchoolPassApp:
             self._cloud_seen_requests.add(request_id)
             if row["status"] == "returned":
                 actor = core.get_user(row["returned_by"]) if row["returned_by"] else None
-                recorded_by = actor["display_name"] if actor else self.current_user["display_name"]
+                recorded_by = actor["display_name"] if actor else "تم تسجيل العودة محليًا"
                 self._cloud_retry_decisions[request_id] = {"decision": "approved", "recorded_by": recorded_by}
                 continue
             if row["status"] != "valid":
