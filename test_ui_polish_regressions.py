@@ -5,29 +5,63 @@ APP = (ROOT / "app.py").read_text(encoding="utf-8")
 
 
 def test_input_fields_have_visible_tinted_surface_and_stronger_border():
-    assert "'border': '#B8C7D9', 'field': '#F1F5FB'" in APP
-    assert "'field': '#18283D'" in APP
+    assert "'border': '#AEBFD4', 'field': '#EAF1FA'" in APP
+    assert "'field': '#152A45'" in APP
     assert "focus_border=primary" in APP
     assert "size, radius, border_width = 36, 14, 2" in APP
+    assert "style.configure(\n        'TEntry', padding=(13, 10), fieldbackground=palette['field']" in APP
 
 
-def test_dashboard_uses_compact_spacing_and_chart():
-    assert "hero = ttk.Frame(content, style='Hero.TFrame', padding=(14, 9))" in APP
-    assert "cards.pack(fill=X, padx=12, pady=(1, 5))" in APP
-    assert "chart_panel = ttk.Frame(overview, style='Surface.TFrame', padding=(12, 9))" in APP
+def test_dashboard_uses_compact_hierarchy_and_color_coded_kpis():
+    assert "hero = ttk.Frame(content, style='Hero.TFrame', padding=(18, 14))" in APP
+    assert "cards.pack(fill=X, padx=14, pady=(1, 7))" in APP
+    assert "chart_panel = ttk.Frame(overview, style='Surface.TFrame', padding=(15, 12))" in APP
     assert "self.dashboard_chart = Canvas(chart_panel, height=112" in APP
-    assert "panel.pack(fill=BOTH, expand=True, padx=12, pady=(0, 10))" in APP
+    assert "panel = ttk.Frame(content, style='Surface.TFrame', padding=(16, 13))" in APP
+    assert "overview.pack_configure(before=cards)" not in APP
+    assert "KPIAccentBlue.TFrame" in APP and "KPIAccentRose.TFrame" in APP
+    assert "MetricCardIconHover.TLabel" in APP
 
 
-def test_entry_permits_dropdown_uses_plain_arabic_labels():
+def test_buttons_have_rounded_stateful_image_layout_without_hiding_captions():
+    assert "def _install_rounded_button_surfaces(" in APP
+    assert "from ttkbootstrap import Assets, El, image_element, layout" in APP
+    assert "assets.rounded_rect(fill, size=(150, 44), radius=radius)" in APP
+    assert "El('Button.label', side='left', expand=True)" in APP
+    assert "_install_rounded_button_surfaces(root, style, palette)" in APP
+    assert "('Success.TButton'" in APP and "('Danger.TButton'" in APP
+    assert "('NavGroupOpsOpen.TButton'" in APP and "('NavActive.TButton'" in APP
+
+
+def test_permit_form_has_rounded_section_cards_and_a_hierarchical_header():
+    assert "style='DialogHeader.TFrame'" in APP
+    assert "style='DialogHeaderTitle.TLabel'" in APP
+    assert "style='DialogEyebrow.TLabel'" in APP
+    assert "style='FormSection.TFrame'" in APP
+    assert "style='FormSectionTitle.TLabel'" in APP
+    assert "style='DialogFooter.TFrame'" in APP
+    assert "relief='groove'" not in APP
+
+
+def test_entry_permits_dropdown_uses_clean_arabic_and_open_state():
     assert "entry_toggle = nav('رخص الدخول'" in APP
     assert "('تأخر عن الدخول', 'late')" in APP
     assert "('عودة بعد الغياب', 'absence_return')" in APP
     assert "('الطرد من الحصة — حالة خاصة', 'special_entry')" in APP
+    assert "entry_toggle.configure(style='NavActive.TButton')" in APP
+    assert "toggle = ttk.Button(group, text=label," in APP
+    assert "toggle.configure(text=label, style=_group_open_styles.get(key" in APP
     assert "entry_toggle.configure(text='＋   رخص الدخول" not in APP
 
 
-def test_permit_dropdown_has_distinct_rounded_submenu_surface():
-    assert "style.configure('SidebarSubmenu.TFrame'" in APP
-    assert "style='SidebarSubmenu.TFrame', padding=(8, 6)" in APP
-    assert "('SidebarSubmenu.TFrame', palette.get('sidebar_hover'" in APP
+def test_semantic_record_actions_and_status_bar_have_distinct_styles():
+    assert "self.open_selected_record, 'Info.TButton'" in APP
+    assert "self.return_selected_exit, 'Success.TButton'" in APP
+    assert "self.cancel_selected, 'Danger.TButton'" in APP
+    assert "style='StatusStrong.TLabel'" in APP
+
+
+def test_dropdown_lists_follow_the_current_light_or_dark_palette():
+    assert "root.option_add('*TCombobox*Listbox.background', palette['field'])" in APP
+    assert "root.option_add('*Listbox.selectBackground', palette['primary'])" in APP
+    assert "root.option_add('*Text.background', palette['field'])" in APP
