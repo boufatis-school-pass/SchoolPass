@@ -306,14 +306,17 @@ export default {
         }
         const stamp = now();
         const results = await env.DB.batch([
-          env.DB.prepare("UPDATE return_requests SET state='approved',decided_at=?,recorded_by=? WHERE id=? AND state='pending'")
-            .bind(stamp, body.recorded_by.trim(), decision[1]),
+          env.DB.prepare("UPDATE return_requests SET state='approved',decided_at=?,recorded_by=? WHERE id=? AND state='pending' " +
+            "AND EXISTS(SELECT 1 FROM permits WHERE token=? AND kind='exit_permit' AND status IN ('valid','returned'))")
+            .bind(stamp, body.recorded_by.trim(), decision[1], existing.token),
           env.DB.prepare("UPDATE permits SET status='returned',returned_at=COALESCE(returned_at,?),updated_at=? " +
             "WHERE token=? AND kind='exit_permit' AND status IN ('valid','returned') " +
             "AND EXISTS(SELECT 1 FROM return_requests WHERE id=? AND state='approved')")
             .bind(stamp, stamp, existing.token, decision[1])
         ]);
-        if (!(results[0]?.meta?.changes)) return json({ error: "already_decided" }, 409);
+        if (!(results[0]?.meta?.changes) || !(results[1]?.meta?.changes)) {
+          return json({ error: "permit_state_changed" }, 409);
+        }
       } else {
         const result = await env.DB.prepare("UPDATE return_requests SET state='rejected',decided_at=?,recorded_by=? " +
           "WHERE id=? AND state='pending'").bind(now(), body.recorded_by.trim(), decision[1]).run();
