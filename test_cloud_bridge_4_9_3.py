@@ -73,3 +73,24 @@ def test_permit_sync_only_sends_changed_records(monkeypatch):
         conn.close()
         cloud_bridge._SYNCED_PAYLOADS.clear()
         cloud_bridge._LAST_FULL_SYNC = 0.0
+
+def test_qr_uses_public_https_worker_when_configured(monkeypatch):
+    token = "b" * 48
+    monkeypatch.setattr(cloud_bridge.core, "cloud_bridge_url", lambda: "https://schoolpass-cloud-bridge.example.workers.dev")
+    assert cloud_bridge.core.qr_url(token) == (
+        "https://schoolpass-cloud-bridge.example.workers.dev/v/" + token
+    )
+
+
+def test_client_refuses_http_before_sending_device_key(monkeypatch):
+    monkeypatch.setattr(
+        cloud_bridge.core,
+        "cloud_bridge_config",
+        lambda: {"url": "http://insecure.example", "api_key": "a" * 64},
+    )
+    try:
+        cloud_bridge._config()
+    except cloud_bridge.CloudBridgeError as exc:
+        assert "HTTPS" in str(exc)
+    else:
+        raise AssertionError("the device key must never be sent over HTTP")
