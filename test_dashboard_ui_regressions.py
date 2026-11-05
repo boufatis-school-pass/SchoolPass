@@ -8,7 +8,7 @@ def test_dashboard_activity_chart_is_visible_by_default():
     # A regression previously hid the chart panel on startup, leaving the
     # dashboard overview with an empty-looking area.
     assert "self.stats_toggle_button.configure(text='−  إخفاء الإحصائيات والرسوم')" in APP
-    assert "chart_panel.pack_forget()" not in APP
+    assert "chart_panel.pack_forget()\n        overview.pack_configure(before=cards)" not in APP
 
 
 def test_permit_dialog_uses_shared_window_configuration():
