@@ -935,12 +935,13 @@ def _install_rtl_widget_adapters():
         original = getattr(ttk, class_name)
 
         class ArabicTextWidget(original):
-            def __init__(self, master=None, **kwargs):
+            def __init__(self, master=None, _supports_alignment=(class_name == 'Label'), **kwargs):
                 # Only ttk.Label supports both justify and anchor as widget
                 # options. ttk.Button/Checkbutton/Radiobutton reject -anchor
                 # (and may reject -justify), which previously crashed startup.
-                # Keep their Arabic text shaping without passing unsupported options.
-                if class_name == 'Label':
+                # Capture the class-specific flag in a default argument because
+                # this adapter class is defined repeatedly inside a loop.
+                if _supports_alignment:
                     kwargs.setdefault('justify', 'right')
                     kwargs.setdefault('anchor', 'e')
                 if isinstance(kwargs.get('text'), str):
