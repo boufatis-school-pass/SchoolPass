@@ -455,6 +455,57 @@ def set_setting(key: str, value: str) -> None:
                      "ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value", (key, value))
 
 
+def cloud_bridge_url() -> str:
+    """Return the configured HTTPS Cloudflare Worker base URL, without a trailing slash."""
+    return setting("cloud_bridge_url", "").strip().rstrip("/")
+
+
+def cloud_bridge_config() -> dict[str, str]:
+    """Read the Worker URL and decrypt its device key with the current Windows profile."""
+    encrypted = setting("cloud_bridge_api_key_enc", "").strip()
+    api_key = reveal_sensitive_text(encrypted) if encrypted else ""
+    return {"url": cloud_bridge_url(), "api_key": api_key}
+
+
+def save_cloud_bridge_url_as(actor, url: str) -> str:
+    """Admin-only configuration of a public HTTPS Worker URL; local IPs are rejected."""
+    admin = require_admin(actor)
+    value = str(url or "").strip().rstrip("/")
+    if value:
+        if not re.fullmatch(r"https://[A-Za-z0-9.-]+(?::443)?", value, re.I):
+            raise ValueError("أدخل رابط Cloudflare Worker كاملًا ويبدأ بـ https://، دون مسار أو رمز سري.")
+        host = value.split("://", 1)[1].split(":", 1)[0]
+        if "." not in host or host.lower() in {"localhost", "127.0.0.1"}:
+            raise ValueError("يجب أن يكون عنوان الخدمة عنوانًا عامًا على الإنترنت.")
+    previous = cloud_bridge_url()
+    set_setting("cloud_bridge_url", value)
+    audit(admin["id"], "تغيير رابط Cloudflare", "settings", "cloud_bridge_url", value or "تعطيل الربط")
+    return value
+
+
+def save_cloud_bridge_api_key_as(actor, api_key: str) -> None:
+    """Encrypt the shared device key at rest using Windows DPAPI before saving it."""
+    admin = require_admin(actor)
+    value = str(api_key or "").strip()
+    if not value:
+        set_setting("cloud_bridge_api_key_enc", "")
+        audit(admin["id"], "مسح مفتاح Cloudflare", "settings", "cloud_bridge_api_key_enc", "تم مسح المفتاح")
+        return
+    if len(value) < 32 or len(value) > 256 or not re.fullmatch(r"[A-Za-z0-9._~-]+", value):
+        raise ValueError("مفتاح الربط يجب أن يكون بين 32 و256 محرفًا لاتينيًا آمنًا.")
+    encrypted = protect_sensitive_text(value)
+    set_setting("cloud_bridge_api_key_enc", encrypted)
+    audit(admin["id"], "تحديث مفتاح Cloudflare", "settings", "cloud_bridge_api_key_enc", "تم حفظ المفتاح مشفرًا بواسطة Windows DPAPI")
+
+
+def generate_cloud_bridge_key_as(actor) -> str:
+    """Create a high-entropy device key, store it encrypted, and return it once for Worker setup."""
+    key = secrets.token_urlsafe(48)
+    save_cloud_bridge_api_key_as(actor, key)
+    return key
+
+
+
 def audit(user_id: int | None, action: str, target_type: str = "", target_id="", description: str = "") -> None:
     with db_connect() as conn:
         conn.execute("INSERT INTO audit_logs(happened_at,user_id,action,target_type,target_id,description) VALUES(?,?,?,?,?,?)",
@@ -2807,6 +2858,10 @@ def set_qr_host_as(actor, host: str) -> None:
 
 
 def qr_url(token: str) -> str:
+    """Prefer the public Cloudflare bridge for new printouts; retain LAN fallback for legacy setup."""
+    cloud = cloud_bridge_url()
+    if cloud:
+        return f"{cloud}/v/{token}"
     return f"http://{qr_host()}:{SERVER_PORT}/v/{token}"
 
 
