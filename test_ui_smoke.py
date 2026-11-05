@@ -135,7 +135,7 @@ class Widget:
 
 def fake_ttk():
     m = types.ModuleType("tkinter.ttk")
-    for n in ("Style", "Frame", "Label", "Button", "Entry", "Combobox", "Treeview", "Scrollbar", "Checkbutton"):
+    for n in ("Style", "Frame", "Label", "Button", "Entry", "Combobox", "Treeview", "Scrollbar", "Checkbutton", "Radiobutton"):
         setattr(m, n, type(n, (Widget,), {}))
     return m
 
