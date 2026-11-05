@@ -1805,9 +1805,10 @@ class RecordForm:
         }
         self.title = titles[kind]
         self.win = Toplevel(app.root)
-        self.win.title(self.title)
-        self.win.geometry('660x620' if kind == 'absence_return' else '620x520')
-        self.win.minsize(520, 420)
+        configure_window(
+            self.win, self.title,
+            '660x620' if kind == 'absence_return' else '620x520',
+        )
         self.win.transient(app.root)
         self.win.grab_set()
         self.win.protocol('WM_DELETE_WINDOW', self.close)
