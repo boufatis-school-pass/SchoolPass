@@ -179,6 +179,37 @@ export default {
         message: "وصل طلب العودة إلى المؤسسة. انتظر تأكيد المشرف." }, 201);
     }
 
+    if (request.method === "POST" && url.pathname === "/api/permits/batch") {
+      if (!(await authorized(request, env))) return json({ error: "unauthorized" }, 401);
+      const parsed = await readJson(request, 128 * 1024);
+      if (parsed.error) return json({ error: parsed.error }, parsed.error === "too_large" ? 413 : 400);
+      const permits = parsed.value.permits;
+      if (!Array.isArray(permits) || permits.length < 1 || permits.length > 100) return json({ error: "invalid_batch" }, 400);
+      const statements = [];
+      const sql = "INSERT INTO permits(token,record_no,kind,student_name,class_name,issued_at,expires_at,status,returned_at,updated_at) " +
+        "VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(token) DO UPDATE SET " +
+        "record_no=excluded.record_no,kind=excluded.kind,student_name=excluded.student_name,class_name=excluded.class_name," +
+        "issued_at=excluded.issued_at,expires_at=excluded.expires_at," +
+        "status=CASE WHEN permits.status='returned' THEN 'returned' ELSE excluded.status END," +
+        "returned_at=COALESCE(permits.returned_at,excluded.returned_at),updated_at=excluded.updated_at";
+      for (const body of permits) {
+        if (!body || !TOKEN_RE.test(body.token || "") || !ALL_KINDS.has(body.kind) ||
+            !validText(body.record_no, 60) || !validText(body.student_name, 120) ||
+            !validText(body.class_name, 80) || !validText(body.issued_at, 40)) {
+          return json({ error: "invalid_payload" }, 400);
+        }
+        const expires = expiryFor(body.kind, body.issued_at);
+        if (expires === "invalid") return json({ error: "invalid_issued_at" }, 400);
+        const status = ["valid", "cancelled", "returned"].includes(body.status) ? body.status : "valid";
+        const returnedAt = typeof body.returned_at === "string" ? body.returned_at.slice(0, 40) : null;
+        statements.push(env.DB.prepare(sql).bind(body.token, body.record_no.trim(), body.kind,
+          body.student_name.trim(), body.class_name.trim(), body.issued_at.trim(), expires,
+          status, returnedAt, now()));
+      }
+      await env.DB.batch(statements);
+      return json({ ok: true, count: permits.length });
+    }
+
     if (request.method === "POST" && url.pathname === "/api/permits") {
       if (!(await authorized(request, env))) return json({ error: "unauthorized" }, 401);
       const parsed = await readJson(request, 4096);
@@ -210,7 +241,7 @@ export default {
       const rows = await env.DB.prepare(
         "SELECT r.id,r.token,r.requested_at,p.record_no,p.student_name,p.class_name,p.issued_at " +
         "FROM return_requests r JOIN permits p ON p.token=r.token " +
-        "WHERE r.state='pending' AND p.kind='exit_permit' AND p.status='valid' " +
+        "WHERE r.state='pending' AND p.kind='exit_permit' " +
         "ORDER BY r.requested_at LIMIT 100"
       ).all();
       return json({ requests: rows.results || [] });
@@ -230,15 +261,15 @@ export default {
       if (existing.state !== "pending") return json({ error: "already_decided", state: existing.state }, 409);
       if (body.decision === "approved") {
         const permit = await getPermit(env, existing.token);
-        if (!permit || permit.kind !== "exit_permit" || permit.status !== "valid") {
+        if (!permit || permit.kind !== "exit_permit" || permit.status === "cancelled") {
           return json({ error: "permit_not_open" }, 409);
         }
         const stamp = now();
         const results = await env.DB.batch([
           env.DB.prepare("UPDATE return_requests SET state='approved',decided_at=?,recorded_by=? WHERE id=? AND state='pending'")
             .bind(stamp, body.recorded_by.trim(), decision[1]),
-          env.DB.prepare("UPDATE permits SET status='returned',returned_at=?,updated_at=? " +
-            "WHERE token=? AND kind='exit_permit' AND status='valid' " +
+          env.DB.prepare("UPDATE permits SET status='returned',returned_at=COALESCE(returned_at,?),updated_at=? " +
+            "WHERE token=? AND kind='exit_permit' AND status IN ('valid','returned') " +
             "AND EXISTS(SELECT 1 FROM return_requests WHERE id=? AND state='approved')")
             .bind(stamp, stamp, existing.token, decision[1])
         ]);
