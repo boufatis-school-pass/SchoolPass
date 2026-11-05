@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-EXPECTED = "4.9.1"
+EXPECTED = "4.9.2"
 
 
 def main() -> int:
@@ -31,6 +31,10 @@ def main() -> int:
         errors.append("Windows fallback Python must be pinned to the available 3.14.10 installer")
     if "python-version: '3.14'" not in workflow:
         errors.append("GitHub Actions must build with Python 3.14 to match the supported Windows toolchain")
+    if "choco install poppler" not in workflow or "SCHOOLPASS_REQUIRE_QR_DECODE: '1'" not in workflow:
+        errors.append("Windows release CI must install Poppler and require QR decoding")
+    if "opencv-python-headless" not in (ROOT / "requirements_dev.txt").read_text(encoding="utf-8"):
+        errors.append("requirements_dev.txt must install OpenCV for the PDF QR decoding test")
     if "pyinstaller==6.22.3" not in (ROOT / "requirements_dev.txt").read_text(encoding="utf-8"):
         errors.append("requirements_dev.txt must pin the reviewed PyInstaller 6.22.3 release")
     schema = re.search(r"^SCHEMA_VERSION\s*=\s*[\"\']?(\d+)[\"\']?", core, re.M)
