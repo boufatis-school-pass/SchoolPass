@@ -566,10 +566,14 @@ def make_style(root: Tk, primary: str | None = None, secondary: str | None = Non
             ).register()
             _ttkbootstrap_theme_state.registered = True
         target_theme = 'schoolpass-dark' if dark else 'schoolpass-light'
-        style = ttkb.Style(root, theme=target_theme)
+        style = ttkb.Style(theme=target_theme)
         if style.theme_use() != target_theme:
             style.theme_use(target_theme)
-    except Exception:
+    except Exception as exc:
+        # Keep the reason visible to the Windows Tk runtime regression test;
+        # silently falling back here would erase the ttkbootstrap scaling service
+        # required by the rounded image elements below.
+        root._schoolpass_theme_init_error = f'{type(exc).__name__}: {exc}'
         style = ttk.Style(root)
         try:
             style.theme_use('clam')
