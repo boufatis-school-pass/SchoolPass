@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import hashlib
 import time
+import threading
 from datetime import datetime, timedelta
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -15,6 +16,7 @@ import schoolpass_core as core
 
 _SYNCED_PAYLOADS: dict[str, str] = {}
 _LAST_FULL_SYNC = 0.0
+_SYNC_LOCK = threading.Lock()
 
 
 class CloudBridgeError(RuntimeError):
@@ -88,7 +90,7 @@ def _to_utc(value: str) -> str:
     return parsed.isoformat(timespec="seconds")
 
 
-def sync_local_permits() -> int:
+def _sync_local_permits_unlocked() -> int:
     """Synchronize changed exit permits and recent entry slips, with periodic reconciliation."""
     global _LAST_FULL_SYNC
     monotonic_now = time.monotonic()
@@ -141,6 +143,12 @@ def sync_local_permits() -> int:
             if token not in active_tokens:
                 _SYNCED_PAYLOADS.pop(token, None)
     return sent
+
+def sync_local_permits() -> int:
+    """Serialize scheduled and issue-triggered sync to protect the fingerprint cache."""
+    with _SYNC_LOCK:
+        return _sync_local_permits_unlocked()
+
 
 def pending_return_requests() -> list[dict]:
     result = _request("GET", "/api/return-requests/pending")
