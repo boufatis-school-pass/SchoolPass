@@ -8,6 +8,7 @@
 - Reworked the permit form header, guardian information, absence-proof sections, expulsion details, and action footer into rounded cards.
 - Improved sidebar expanded and active states, including a clean Arabic-only "رخص الدخول" submenu.
 - Improved contrast for editable fields, dropdowns, multiline notes, autocomplete lists, and selected list items in both light and dark themes.
+- Extended the same theme to login panels, student-history notes, permit-history grids, and the statistics chart; success and danger actions retain readable contrast in dark mode.
 - Unified list, table, scrollbar, and status styling.
 
 ## Data and compatibility
