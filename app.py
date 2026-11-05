@@ -654,6 +654,7 @@ def make_style(root: Tk, primary: str | None = None, secondary: str | None = Non
     style.configure('InfoPanel.TFrame', background=palette['primary_soft'], relief='flat', borderwidth=0)
     style.configure('DialogHeader.TFrame', background=palette['primary_soft'], relief='flat', borderwidth=0)
     style.configure('DialogHeaderTitle.TLabel', background=palette['primary_soft'], foreground=primary_color, font=('Segoe UI', 17, 'bold'), anchor='e')
+    style.configure('DialogEyebrow.TLabel', background=palette['primary_soft'], foreground=palette['accent'], font=('Segoe UI', 9, 'bold'), anchor='e')
     style.configure('Toolbar.TFrame', background=surface, relief='flat', borderwidth=0)
     style.configure('ToolbarBadge.TLabel', background=palette['primary_soft'], foreground=primary_color, padding=(12, 7), font=('Segoe UI', 9, 'bold'))
     style.configure('Sidebar.TFrame', background=palette['sidebar'])
@@ -764,8 +765,8 @@ def make_style(root: Tk, primary: str | None = None, secondary: str | None = Non
     style.configure('TButton', background=palette['button_bg'], foreground=ink, borderwidth=0,
                     focusthickness=2, focuscolor=palette['primary'], padding=(15, 10),
                     font=('Segoe UI', 9, 'bold'), relief='flat', anchor='center')
-    style.map('TButton', background=[('disabled', palette['heading']), ('pressed', palette['selected']),
-                                    ('active', palette['selected'])],
+    style.map('TButton', background=[('disabled', palette['button_bg']), ('pressed', palette['button_pressed']),
+                                    ('active', palette['button_hover'])],
               foreground=[('disabled', muted), ('active', ink)])
     style.configure('Accent.TButton', background=primary_color, foreground=palette['primary_text'], borderwidth=0,
                     focusthickness=2, focuscolor=palette['accent'], padding=(18, 11),
@@ -1982,7 +1983,7 @@ class RecordForm:
         self.win.protocol('WM_DELETE_WINDOW', self.close)
         form_header = ttk.Frame(self.win, style='DialogHeader.TFrame', padding=(18, 12))
         form_header.pack(fill=X, padx=14, pady=(12, 7))
-        ttk.Label(form_header, text='إصدار وتوثيق الرخصة', style='Eyebrow.TLabel').pack(anchor=E)
+        ttk.Label(form_header, text='إصدار وتوثيق الرخصة', style='DialogEyebrow.TLabel').pack(anchor=E)
         ttk.Label(form_header, text=self.title, style='DialogHeaderTitle.TLabel').pack(anchor=E, pady=(3, 0))
         form_scroll = ScrollableFrame(self.win, inner_style='TFrame')
         form_scroll.pack(fill=BOTH, expand=True, padx=14, pady=(0, 6))
@@ -2026,7 +2027,7 @@ class RecordForm:
         self.student_combo.bind('<Return>', self._student_suggestion_selected)
         self.student_combo.bind('<Down>', lambda _e: self.student_suggestions.move_selection())
         self.student_combo.bind('<Escape>', lambda _e: self.student_suggestions.hide())
-        ttk.Button(student_row, text='بحث بالقائمة', command=self.pick_student).pack(side=RIGHT, padx=6)
+        ttk.Button(student_row, text='بحث بالقائمة', command=self.pick_student, style='Info.TButton').pack(side=RIGHT, padx=6)
 
         attention_box = ttk.Frame(form, style='InfoPanel.TFrame', padding=(12, 9))
         attention_box.pack(fill=X, pady=(3, 7))
@@ -2039,7 +2040,7 @@ class RecordForm:
         self.attention_open_button.pack(side=LEFT, padx=4)
         self.attention_var = DisplayStringVar(value='اختر التلميذ لعرض ملخص التأخر والغياب والملاحظات السابقة.')
         ttk.Label(attention_box, textvariable=self.attention_var, wraplength=610,
-                  justify='right', foreground='#5A4A22').pack(fill=X, anchor=E, pady=(4, 0))
+                  justify='right', foreground=UI_PALETTE.get('ink', '#17263D')).pack(fill=X, anchor=E, pady=(4, 0))
 
         # Guardian profiles are shared across all permit forms and are loaded per selected student.
         guardian_box = ttk.Frame(form, style='FormSection.TFrame', padding=(12, 9))
@@ -2081,11 +2082,11 @@ class RecordForm:
             add_date_row(form, 'absence_start', 'تاريخ بداية الغياب')
             row = ttk.Frame(form)
             row.pack(fill=X, pady=5)
-            ttk.Label(row, text='تاريخ العودة (يُحدد تلقائيًا)', width=29, anchor=E).pack(side=RIGHT, padx=(4, 8))
+            ttk.Label(row, text='تاريخ العودة (يُحدد تلقائيًا)', width=26, anchor=E, style='FieldLabel.TLabel').pack(side=RIGHT, padx=(4, 9))
             self.vars['return_date'] = StringVar(value=date_today())
             ttk.Entry(row, textvariable=self.vars['return_date'], justify='center', state='readonly', width=15).pack(side=RIGHT, padx=4)
             ttk.Label(form, text='يُحسب الغياب من تاريخ بدايته إلى اليوم السابق للعودة؛ يوم العودة غير محسوب.',
-                      foreground='#526579', wraplength=600).pack(anchor=E, pady=3)
+                      foreground=UI_PALETTE.get('muted', '#687A91'), wraplength=600).pack(anchor=E, pady=4)
             add_row(form, 'reason', 'ملاحظة (اختياري)')
             rule_box = ttk.Frame(form, style='FormSection.TFrame', padding=(12, 9))
             rule_box.pack(fill=X, pady=8)
@@ -2101,7 +2102,7 @@ class RecordForm:
             choice_labels = tuple(self.proof_choices)
             self.proof_method = ComboStringVar(choice_labels, value='شهادة طبية')
             method_row = ttk.Frame(form); method_row.pack(fill=X, pady=5)
-            ttk.Label(method_row, text='طريقة تبرير الغياب', width=29, anchor=E).pack(side=RIGHT, padx=(4, 8))
+            ttk.Label(method_row, text='طريقة تبرير الغياب', width=26, anchor=E, style='FieldLabel.TLabel').pack(side=RIGHT, padx=(4, 9))
             self.method_combo = ttk.Combobox(method_row, textvariable=self.proof_method, state='readonly',
                                               values=choice_labels, justify='right')
             self.method_combo.pack(side=RIGHT, fill=X, expand=True)
@@ -2126,7 +2127,7 @@ class RecordForm:
             self.special_options = {'الطرد من الحصة': 'class_expulsion', 'التواجد في الإدارة': 'administration_visit'}
             self.special_reason = ComboStringVar(tuple(self.special_options), value='الطرد من الحصة')
             reason_row = ttk.Frame(form); reason_row.pack(fill=X, pady=7)
-            ttk.Label(reason_row, text='سبب رخصة الدخول', width=29, anchor=E).pack(side=RIGHT, padx=(4, 8))
+            ttk.Label(reason_row, text='سبب رخصة الدخول', width=26, anchor=E, style='FieldLabel.TLabel').pack(side=RIGHT, padx=(4, 9))
             self.special_combo = ttk.Combobox(reason_row, textvariable=self.special_reason, state='readonly',
                                                values=tuple(self.special_options), justify='right')
             self.special_combo.pack(side=RIGHT, fill=X, expand=True)
@@ -2136,7 +2137,7 @@ class RecordForm:
             self.selected_teacher_id = None
             self.teacher_option_map = {}
             teacher_row = ttk.Frame(self.expulsion_frame); teacher_row.pack(fill=X, pady=5)
-            ttk.Label(teacher_row, text='اسم الأستاذ', width=29, anchor=E).pack(side=RIGHT, padx=(4, 8))
+            ttk.Label(teacher_row, text='اسم الأستاذ', width=26, anchor=E, style='FieldLabel.TLabel').pack(side=RIGHT, padx=(4, 9))
             self.teacher_combo = ttk.Entry(teacher_row, textvariable=self.teacher_var, justify='right')
             self.teacher_combo.pack(side=RIGHT, fill=X, expand=True)
             self.teacher_suggestions = SuggestionPopup(self.teacher_combo, self._choose_teacher_suggestion)
@@ -2146,7 +2147,7 @@ class RecordForm:
             self.teacher_combo.bind('<Escape>', lambda _e: self.teacher_suggestions.hide())
             self.subject_var = StringVar(value='')
             subject_row = ttk.Frame(self.expulsion_frame); subject_row.pack(fill=X, pady=5)
-            ttk.Label(subject_row, text='المادة الدراسية', width=29, anchor=E).pack(side=RIGHT, padx=(4, 8))
+            ttk.Label(subject_row, text='المادة الدراسية', width=26, anchor=E, style='FieldLabel.TLabel').pack(side=RIGHT, padx=(4, 9))
             ttk.Entry(subject_row, textvariable=self.subject_var, state='readonly', justify='right').pack(side=RIGHT, fill=X, expand=True)
             if self.app.current_user['role'] == 'admin':
                 ttk.Button(self.expulsion_frame, text='إدارة الأساتذة واستيراد القائمة',
@@ -2160,7 +2161,7 @@ class RecordForm:
             add_row(form, 'relationship', 'صلة القرابة')
             add_row(form, 'national_id', 'رقم بطاقة الهوية الوطنية')
             ttk.Label(form, text='لن يُطبع رقم الهوية كاملًا ولن يوضع داخل رمز QR؛ سيظهر آخر 4 أرقام فقط على التصريح.',
-                      foreground='#526579', wraplength=580).pack(anchor=E, pady=4)
+                      foreground=UI_PALETTE.get('muted', '#687A91'), wraplength=580).pack(anchor=E, pady=4)
 
         bar = ttk.Frame(self.win, style='DialogFooter.TFrame', padding=(14, 10))
         bar.pack(fill=X, padx=14, pady=(0, 12))
@@ -2188,12 +2189,12 @@ class RecordForm:
         try:
             days = core.absence_days(self.vars['absence_start'].get(), self.vars['return_date'].get())[2]
         except Exception:
-            self.rule_label.configure(text='تاريخ البداية غير صالح أو يقع بعد تاريخ اليوم.', foreground='#A05A00')
+            self.rule_label.configure(text='تاريخ البداية غير صالح أو يقع بعد تاريخ اليوم.', foreground=UI_PALETTE.get('alert_fg', '#87500D'))
             days = 0
         if days > core.ABSENCE_CERTIFICATE_MAX_DURATION_DAYS:
-            self.rule_label.configure(text=f'مدة الغياب {days} يومًا قبل يوم العودة. حضور ولي الأمر شخصيًا إلزامي؛ اختر حضور الولي أو حضوره مع شهادة طبية.', foreground='#B42318')
+            self.rule_label.configure(text=f'مدة الغياب {days} يومًا قبل يوم العودة. حضور ولي الأمر شخصيًا إلزامي؛ اختر حضور الولي أو حضوره مع شهادة طبية.', foreground=UI_PALETTE.get('danger_fg', '#A73543'))
         else:
-            self.rule_label.configure(text=f'مدة الغياب {days} يومًا قبل يوم العودة. يمكن اختيار شهادة طبية أو حضور الولي أو تبرير آخر.', foreground='#18794E')
+            self.rule_label.configure(text=f'مدة الغياب {days} يومًا قبل يوم العودة. يمكن اختيار شهادة طبية أو حضور الولي أو تبرير آخر.', foreground=UI_PALETTE.get('good_fg', '#126B59'))
         self._refresh_absence_method()
 
     def _refresh_absence_method(self):
@@ -3304,10 +3305,10 @@ class SchoolPassApp:
                            'absence': 'today_absence', 'open': 'open_exits'}
             if key in detail_keys:
                 def set_card_hover(active, _card=card, _head=card_head, _icon=icon_label,
-                                   _title=title_label, _value=value, _hint=hint_label):
+                                   _title=title_label, _value=value, _hint=hint_label, _icon_style=icon_style):
                     _card.configure(style='MetricCardHover.TFrame' if active else 'MetricCard.TFrame')
                     _head.configure(style='MetricCardHover.TFrame' if active else 'MetricCard.TFrame')
-                    _icon.configure(style='MetricCardIconHover.TLabel' if active else icon_style)
+                    _icon.configure(style='MetricCardIconHover.TLabel' if active else _icon_style)
                     _title.configure(style='MetricCardTitleHover.TLabel' if active else 'CardTitle.TLabel')
                     _value.configure(style='MetricCardValueHover.TLabel' if active else 'CardValue.TLabel')
                     _hint.configure(style='MetricCardHintHover.TLabel' if active else 'MetricHint.TLabel')
