@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-EXPECTED = "4.8.0"
+EXPECTED = "4.9.3"
 
 
 def main() -> int:
@@ -31,11 +31,15 @@ def main() -> int:
         errors.append("Windows fallback Python must be pinned to the available 3.14.10 installer")
     if "python-version: '3.14'" not in workflow:
         errors.append("GitHub Actions must build with Python 3.14 to match the supported Windows toolchain")
+    if "choco install poppler" not in workflow or "SCHOOLPASS_REQUIRE_QR_DECODE: '1'" not in workflow:
+        errors.append("Windows release CI must install Poppler and require QR decoding")
+    if "opencv-python-headless" not in (ROOT / "requirements_dev.txt").read_text(encoding="utf-8"):
+        errors.append("requirements_dev.txt must install OpenCV for the PDF QR decoding test")
     if "pyinstaller==6.22.3" not in (ROOT / "requirements_dev.txt").read_text(encoding="utf-8"):
         errors.append("requirements_dev.txt must pin the reviewed PyInstaller 6.22.3 release")
     schema = re.search(r"^SCHEMA_VERSION\s*=\s*[\"\']?(\d+)[\"\']?", core, re.M)
     if not schema or schema.group(1) != "9":
-        errors.append("SchoolPass 4.8.0 must use schema version 9 with additive guardian, student-note and gate-execution fields")
+        errors.append("SchoolPass 4.9.3 must preserve database schema version 9; this visual release does not migrate user data")
     if not setup_version:
         errors.append("MyAppVersion is missing from SchoolPass_Setup.iss")
     elif setup_version.group(1) != EXPECTED:
@@ -45,6 +49,8 @@ def main() -> int:
         "app.py", "schoolpass_core.py", "requirements.txt", "requirements_dev.txt",
         "SchoolPass_Setup.iss", "build_windows.ps1", "build_installer_only.ps1",
         "release_preflight.py", ".github/workflows/release-windows.yml", "app.ico",
+        "cloud_bridge.py", "cloudflare/worker.js", "cloudflare/schema.sql",
+        "cloudflare/wrangler.toml", "cloudflare/migrations/0001_initial.sql",
     ]
     for name in required:
         if not (ROOT / name).is_file():
@@ -73,11 +79,28 @@ def main() -> int:
         errors.append("GitHub release workflow does not publish SchoolPass_Setup.exe")
     if "schoolpass_setup.exe" not in (ROOT / "app.py").read_text(encoding="utf-8").lower():
         errors.append("In-app update checker does not verify the setup asset")
+    core_source = (ROOT / "schoolpass_core.py").read_text(encoding="utf-8")
+    bridge_source = (ROOT / "cloud_bridge.py").read_text(encoding="utf-8")
+    if "def sync_local_permits(" not in bridge_source or "def pending_return_requests(" not in bridge_source:
+        errors.append("Cloud bridge client is missing synchronization or pending-request polling")
+    if "def generate_cloud_bridge_key_as(" not in core_source or "def cloud_bridge_config(" not in core_source:
+        errors.append("Cloudflare device key must be generated and encrypted with Windows DPAPI")
+    if "cloud_bridge_url()" not in core_source:
+        errors.append("Cloudflare public HTTPS QR URL selection is missing")
+    worker_source = (ROOT / "cloudflare/worker.js").read_text(encoding="utf-8")
+    for marker in ("/api/permits/batch", "/api/return-requests/pending", "/api/return-requests/", "طلب تسجيل عودة التلميذ"):
+        if marker not in worker_source:
+            errors.append(f"Cloudflare Worker feature missing: {marker}")
+    wrangler_source = (ROOT / "cloudflare/wrangler.toml").read_text(encoding="utf-8")
+    d1_match = re.search(r'(?m)^database_id\s*=\s*"([^"]+)"', wrangler_source)
+    if not d1_match:
+        errors.append("Cloudflare D1 database_id binding is missing")
+    elif d1_match.group(1) != "REPLACE_WITH_D1_DATABASE_UUID" and not re.fullmatch(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}", d1_match.group(1)):
+        errors.append("Cloudflare D1 database_id must be a valid UUID; use the exact UUID shown in the D1 database details")
     if "--icon" not in (ROOT / "build_windows.ps1").read_text(encoding="utf-8"):
         errors.append("Windows build does not embed app.ico in SchoolPass.exe")
     if "--add-data" not in (ROOT / "build_windows.ps1").read_text(encoding="utf-8"):
         errors.append("Windows build does not package the runtime app.ico asset")
-    core_source = (ROOT / "schoolpass_core.py").read_text(encoding="utf-8")
     if "def _draw_admin_signature_box(" not in core_source:
         errors.append("The enlarged administration signature component is missing")
     for removed_label in ("ختم المؤسسة", "إمضاء المسؤول", "توقيع رقمي"):
@@ -94,7 +117,7 @@ def main() -> int:
         ('mode: str = "auto"', "explicit first-print and reprint modes"),
     ):
         if marker not in core_source:
-            errors.append(f"SchoolPass 4.8.0 core feature missing: {description}")
+            errors.append(f"SchoolPass required core feature missing: {description}")
 
 
     app_source = (ROOT / "app.py").read_text(encoding="utf-8-sig")
@@ -108,6 +131,41 @@ def main() -> int:
     ):
         if marker not in test_ui_source:
             errors.append(f"UI regression test missing: {description}")
+
+    modern_ui_markers = (
+        ("def _install_rounded_button_surfaces(", "rounded state-aware button renderer"),
+        ("El('Button.label', side='left', expand=True)", "native button caption preserved above rounded image surfaces"),
+        ("KPIAccentBlue.TFrame", "color-coded dashboard KPI cards"),
+        ("MetricCardIconHover.TLabel", "interactive KPI hover feedback"),
+        ("DialogHeader.TFrame", "modern permit dialog header"),
+        ("FormSection.TFrame", "rounded form sections"),
+        ("DialogFooter.TFrame", "consistent dialog footer"),
+        ("NavGroupOpsOpen.TButton", "expanded navigation state"),
+        ("NavActive.TButton", "active entry permits navigation state"),
+        ("root.option_add('*TCombobox*Listbox.background', palette['field'])", "theme-aware dropdown list surfaces"),
+    )
+    for marker, description in modern_ui_markers:
+        if marker not in app_source:
+            errors.append(f"SchoolPass 4.9.3 visual feature missing: {description}")
+
+    runtime_test = (ROOT / "test_ui_tk_runtime.py").read_text(encoding="utf-8-sig")
+    if "def test_windows_tk_installs_rounded_buttons_entries_and_dropdowns():" not in runtime_test:
+        errors.append("SchoolPass 4.9.2 Windows Tk runtime layout test is missing")
+    if "El('Button.label', side='left', expand=True)" not in app_source:
+        errors.append("Rounded buttons must retain the native Button.label child")
+
+    polish_test = (ROOT / "test_ui_polish_regressions.py").read_text(encoding="utf-8-sig")
+    for marker, description in (
+        ("def test_buttons_have_rounded_stateful_image_layout_without_hiding_captions():", "rounded button/caption rendering regression test"),
+        ("def test_dashboard_uses_compact_hierarchy_and_color_coded_kpis():", "modern dashboard hierarchy regression test"),
+        ("def test_entry_permits_dropdown_uses_clean_arabic_and_open_state():", "Arabic entry permits dropdown regression test"),
+        ("def test_permit_form_has_rounded_section_cards_and_a_hierarchical_header():", "permit form visual hierarchy regression test"),
+        ("def test_semantic_buttons_keep_contrast_in_dark_mode():", "dark-mode success/danger button contrast regression test"),
+        ("def test_student_notes_and_admin_history_share_the_live_theme():", "theme-aware pupil history regression test"),
+        ("def test_statistics_chart_uses_theme_aware_surface_and_grid():", "theme-aware statistics chart regression test"),
+    ):
+        if marker not in polish_test:
+            errors.append(f"SchoolPass 4.9.2 visual test missing: {description}")
 
     if "requested_w * 0.90" in app_source or "requested_h * 0.88" in app_source:
         errors.append("Dialog geometry must not be arbitrarily scaled down; this clips buttons on school screens.")
@@ -224,7 +282,7 @@ def main() -> int:
         ("def _update_student_attention(self):", "monthly attention alerts"),
     ):
         if marker not in app_source:
-            errors.append(f"SchoolPass 4.8.0 UI feature missing: {description}")
+            errors.append(f"SchoolPass required UI feature missing: {description}")
 
     if "SetupIconFile=app.ico" not in setup:
         errors.append("Inno Setup wizard icon is not configured")

@@ -28,13 +28,15 @@ from pathlib import Path
 from typing import NamedTuple
 
 APP_NAME = "SchoolPass"
-APP_VERSION = "4.8.0"
+APP_VERSION = "4.9.3"
 SCHOOL_NAME = "ثانوية المجاهد بسجراري لخضر بوفاطيس"
 MINISTRY_NAME = "الجمهورية الجزائرية الديمقراطية الشعبية — وزارة التربية الوطنية"
 SERVER_PORT = 8765
 AUTO_LOCK_SECONDS = 600
 RECORD_KINDS = ("late", "absence_return", "special_entry", "exit_permit", "exit_return")
 ABSENCE_CERTIFICATE_MAX_DURATION_DAYS = 2
+RECORD_VALIDITY_HOURS = 2
+TIME_LIMITED_RECORD_KINDS = frozenset({"late", "absence_return", "special_entry", "exit_return"})
 # Backward-compatible alias for integrations that referenced the earlier constant name.
 ABSENCE_CERTIFICATE_MAX_DATE_DIFFERENCE = ABSENCE_CERTIFICATE_MAX_DURATION_DAYS
 
@@ -451,6 +453,57 @@ def set_setting(key: str, value: str) -> None:
     with db_connect() as conn:
         conn.execute("INSERT INTO settings(setting_key,setting_value) VALUES(?,?) "
                      "ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value", (key, value))
+
+
+def cloud_bridge_url() -> str:
+    """Return the configured HTTPS Cloudflare Worker base URL, without a trailing slash."""
+    return setting("cloud_bridge_url", "").strip().rstrip("/")
+
+
+def cloud_bridge_config() -> dict[str, str]:
+    """Read the Worker URL and decrypt its device key with the current Windows profile."""
+    encrypted = setting("cloud_bridge_api_key_enc", "").strip()
+    api_key = reveal_sensitive_text(encrypted) if encrypted else ""
+    return {"url": cloud_bridge_url(), "api_key": api_key}
+
+
+def save_cloud_bridge_url_as(actor, url: str) -> str:
+    """Admin-only configuration of a public HTTPS Worker URL; local IPs are rejected."""
+    admin = require_admin(actor)
+    value = str(url or "").strip().rstrip("/")
+    if value:
+        if not re.fullmatch(r"https://[A-Za-z0-9.-]+(?::443)?", value, re.I):
+            raise ValueError("أدخل رابط Cloudflare Worker كاملًا ويبدأ بـ https://، دون مسار أو رمز سري.")
+        host = value.split("://", 1)[1].split(":", 1)[0]
+        if "." not in host or host.lower() in {"localhost", "127.0.0.1"}:
+            raise ValueError("يجب أن يكون عنوان الخدمة عنوانًا عامًا على الإنترنت.")
+    previous = cloud_bridge_url()
+    set_setting("cloud_bridge_url", value)
+    audit(admin["id"], "تغيير رابط Cloudflare", "settings", "cloud_bridge_url", value or "تعطيل الربط")
+    return value
+
+
+def save_cloud_bridge_api_key_as(actor, api_key: str) -> None:
+    """Encrypt the shared device key at rest using Windows DPAPI before saving it."""
+    admin = require_admin(actor)
+    value = str(api_key or "").strip()
+    if not value:
+        set_setting("cloud_bridge_api_key_enc", "")
+        audit(admin["id"], "مسح مفتاح Cloudflare", "settings", "cloud_bridge_api_key_enc", "تم مسح المفتاح")
+        return
+    if len(value) < 32 or len(value) > 256 or not re.fullmatch(r"[A-Za-z0-9._~-]+", value):
+        raise ValueError("مفتاح الربط يجب أن يكون بين 32 و256 محرفًا لاتينيًا آمنًا.")
+    encrypted = protect_sensitive_text(value)
+    set_setting("cloud_bridge_api_key_enc", encrypted)
+    audit(admin["id"], "تحديث مفتاح Cloudflare", "settings", "cloud_bridge_api_key_enc", "تم حفظ المفتاح مشفرًا بواسطة Windows DPAPI")
+
+
+def generate_cloud_bridge_key_as(actor) -> str:
+    """Create a high-entropy device key, store it encrypted, and return it once for Worker setup."""
+    key = secrets.token_urlsafe(48)
+    save_cloud_bridge_api_key_as(actor, key)
+    return key
+
 
 
 def audit(user_id: int | None, action: str, target_type: str = "", target_id="", description: str = "") -> None:
@@ -1807,6 +1860,34 @@ def get_gatekeeper_log(user_id, date_from: str = "", date_to: str = "", state: s
     return [dict(r) for r in rows]
 
 
+def record_expiry_at(record) -> datetime | None:
+    """Return the two-hour expiry for entry permits; exceptional exits stay open until return."""
+    if not record or record["kind"] not in TIME_LIMITED_RECORD_KINDS:
+        return None
+    issued = str(record["issued_at"] or record["created_at"] or "").strip()
+    try:
+        parsed = datetime.strptime(issued, "%Y-%m-%d %H:%M:%S").astimezone()
+    except ValueError:
+        try:
+            parsed = datetime.fromisoformat(issued)
+            if parsed.tzinfo is None:
+                parsed = parsed.astimezone()
+        except ValueError:
+            return None
+    return parsed + timedelta(hours=RECORD_VALIDITY_HOURS)
+
+
+def record_is_expired(record, at: datetime | None = None) -> bool:
+    """Check expiry without deleting or mutating the historical record."""
+    expires = record_expiry_at(record)
+    if expires is None:
+        return False
+    current = at or datetime.now().astimezone()
+    if current.tzinfo is None:
+        current = current.astimezone()
+    return current >= expires
+
+
 def record_by_token(token: str) -> sqlite3.Row | None:
     with db_connect() as conn:
         return conn.execute("SELECT * FROM records WHERE qr_token=?", (token,)).fetchone()
@@ -2777,6 +2858,10 @@ def set_qr_host_as(actor, host: str) -> None:
 
 
 def qr_url(token: str) -> str:
+    """Prefer the public Cloudflare bridge for new printouts; retain LAN fallback for legacy setup."""
+    cloud = cloud_bridge_url()
+    if cloud:
+        return f"{cloud}/v/{token}"
     return f"http://{qr_host()}:{SERVER_PORT}/v/{token}"
 
 
@@ -2801,7 +2886,7 @@ def verification_page(token: str) -> tuple[int, bytes, dict | None]:
     row = None
     if _TOKEN_RE.match(token or ""):
         with db_connect() as conn:
-            row = conn.execute("SELECT record_no,kind,student_name,class_name,status,created_at,cancelled_at FROM records WHERE qr_token=?",
+            row = conn.execute("SELECT record_no,kind,student_name,class_name,status,created_at,issued_at,cancelled_at,returned_at FROM records WHERE qr_token=?",
                                (token,)).fetchone()
     school = html.escape(setting("school_name", SCHOOL_NAME))
     if not row:
@@ -2815,9 +2900,16 @@ def verification_page(token: str) -> tuple[int, bytes, dict | None]:
         if row["status"] == "cancelled":
             body += f'<p class="bad">تنبيه: هذا السجل ملغى منذ {html.escape(row["cancelled_at"] or "")} ولا يجوز الاعتماد عليه.</p>'
         elif row["status"] == "returned":
-            body += "<p>سُجّلت عودة التلميذ بموجب هذا التصريح.</p>"
+            body += f'<p>سُجّلت عودة التلميذ بموجب هذا التصريح في {html.escape(row["returned_at"] or "")}.</p>'
+        elif record_is_expired(row):
+            expires = record_expiry_at(row)
+            body += f'<p class="bad">انتهت صلاحية هذه الرخصة بعد ساعتين من إصدارها ({html.escape(expires.strftime("%Y-%m-%d %H:%M:%S") if expires else "")}). لا يجوز استعمالها.</p>'
         else:
-            body += "<p>السجل سارٍ. طابق الاسم والقسم مع التلميذ الحاضر.</p>"
+            expires = record_expiry_at(row)
+            if expires:
+                body += f'<p>السجل سارٍ حتى {html.escape(expires.strftime("%Y-%m-%d %H:%M:%S"))}. طابق الاسم والقسم مع التلميذ الحاضر.</p>'
+            else:
+                body += "<p>رخصة الخروج الاستثنائي تبقى سارية إلى حين تسجيل عودة التلميذ.</p>"
     page = (f'<!doctype html><html lang="ar" dir="rtl"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
             f'<title>{html.escape(title)}</title><style>body{{font-family:Tahoma,Arial,sans-serif;background:#f4f7fb;margin:0;padding:22px;color:#17243a}}'
             f'main{{max-width:480px;margin:auto;background:#fff;border-radius:14px;padding:22px}}h2{{color:#174a77}}p{{padding:9px 0;border-bottom:1px solid #edf0f5}}'

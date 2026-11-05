@@ -135,7 +135,7 @@ class Widget:
 
 def fake_ttk():
     m = types.ModuleType("tkinter.ttk")
-    for n in ("Style", "Frame", "Label", "Button", "Entry", "Combobox", "Treeview", "Scrollbar", "Checkbutton"):
+    for n in ("Style", "Frame", "Label", "Button", "Entry", "Combobox", "Treeview", "Scrollbar", "Checkbutton", "Radiobutton"):
         setattr(m, n, type(n, (Widget,), {}))
     return m
 
@@ -558,7 +558,7 @@ class TestGuiSmoke(unittest.TestCase):
 
     def test_arabic_rtl_rendering_covers_titles_labels_text_canvas_and_entries(self):
         owner = self.app._tk.Tk()
-        title = 'لوحة المتابعة — SchoolPass 4.8.0'
+        title = 'لوحة المتابعة — SchoolPass 4.9.1'
         owner.title(title)
         self.assertEqual(owner.title(), self.app.rtl_display(title))
 
@@ -572,6 +572,16 @@ class TestGuiSmoke(unittest.TestCase):
         self.assertEqual(label.kw['text'], self.app.rtl_display(label_text))
         self.assertEqual(label.kw['justify'], 'right')
         self.assertEqual(label.kw['anchor'], 'e')
+
+        # ttk.Button, Checkbutton and Radiobutton do not accept the Label-only
+        # anchor/justify options. They must still receive Arabic text shaping.
+        button = self.app.ttk.Button(owner, text='حفظ')
+        check = self.app.ttk.Checkbutton(owner, text='تفعيل')
+        radio = self.app.ttk.Radiobutton(owner, text='اختيار')
+        for widget in (button, check, radio):
+            self.assertNotIn('anchor', widget.kw)
+            self.assertNotIn('justify', widget.kw)
+            self.assertEqual(widget.kw['text'], self.app.rtl_display(widget.kw['text']))
         label.configure(text='إدارة الأولياء')
         self.assertEqual(label.kw['text'], self.app.rtl_display('إدارة الأولياء'))
 

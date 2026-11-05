@@ -3,6 +3,7 @@ $ProgressPreference = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $Root
+$BuildVersion = (Get-Content -LiteralPath (Join-Path $Root 'VERSION.txt') -Raw).Trim()
 $PythonVersion = '3.14.10'
 $PythonUrl = "https://www.python.org/ftp/python/$PythonVersion/python-$PythonVersion-amd64.exe"
 
@@ -109,7 +110,7 @@ try {
     $setup = Join-Path $Root 'dist\SchoolPass_Setup.exe'
     if (-not (Test-Path $setup) -or (Get-Item $setup).Length -lt 1000000) { throw 'لم يتم العثور على مثبت Windows صالح.' }
 
-    Write-Host "`nاكتمل بناء SchoolPass 4.7.6." -ForegroundColor Green
+    Write-Host "`nاكتمل بناء SchoolPass $BuildVersion." -ForegroundColor Green
     Write-Host "ملف التثبيت: $setup" -ForegroundColor Green
     Write-Host 'لم يجر لمس مجلد بيانات المستخدم %LOCALAPPDATA%\SchoolPass.'
     Start-Process explorer.exe -ArgumentList (Join-Path $Root 'dist')

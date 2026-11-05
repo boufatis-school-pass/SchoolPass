@@ -1,0 +1,17 @@
+name = "schoolpass-cloud-bridge"
+main = "worker.js"
+compatibility_date = "2026-11-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "schoolpass-cloud"
+database_id = "REPLACE_WITH_D1_DATABASE_UUID"
+  migrations_dir = "migrations"
+
+# Configure DEVICE_API_KEY as a Worker secret; never commit its value.
+
+[vars]
+APP_NAME = "SchoolPass Cloud Bridge"
+
+[observability]
+enabled = true

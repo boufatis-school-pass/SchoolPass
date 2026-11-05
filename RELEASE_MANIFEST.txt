@@ -1,8 +1,9 @@
-SchoolPass Release 4.8.0
-Version: 4.8.0
-Base: 4.7.7
-Database schema: 9 (additive)
+SchoolPass Release 4.9.1
+Version: 4.9.1
+Base: 4.9.0
+Database schema: 9 (unchanged; no data migration)
 Platform: Windows 10/11 x64
 Installer: SchoolPass_Setup.exe
-Scope: monthly repeated-lateness and recorded-absence alerts, append-only pupil administrative notes, separate first print/reprint, gatekeeper-confirmed physical exit and return ledger, selectable monthly/annual PDF archive, and clearer A6 print hierarchy with larger administration stamp area.
-Data migration: adds student_notes and exit execution metadata; retains existing student, permit, user and audit records.
+Scope: comprehensive modern administrative UI; vivid light/dark palettes; rounded high-contrast inputs, combo boxes, login panels, dialog cards and multiline notes; rounded state-aware buttons with native Arabic captions; six color-coded interactive dashboard KPIs; compact KPI-first dashboard hierarchy; semantic record actions; modern permit form sections; clear Arabic entry-permits submenu with active navigation states; themed autocomplete, lists, grids, scrollbars and statistics charts; UI regression tests plus a Windows Tk runtime check of actual rounded layouts and visible captions.
+Data safety: no database schema change, no reset, and no deletion of existing pupils, guardians, teachers, users, permits, audit logs, or backups.
+Verification: release preflight, complete regression/UI test suite, Windows Tk control-layout test where the desktop is available, syntax and installer build, and GitHub Release publication must all pass. Final on-device visual review on the institution's Windows screen/DPI remains required.
