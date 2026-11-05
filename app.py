@@ -2576,6 +2576,7 @@ class RecordForm:
             self.teacher_suggestions.hide()
         self.win.destroy()
         self.app.refresh_records()
+        self.app.sync_cloud_after_issue()
         self.app.show_record(row['id'], offer_print=True)
 
 
@@ -5251,6 +5252,21 @@ class SchoolPassApp:
         if self.root.winfo_exists():
             self.root.after(1000, self.poll_qr_events)
         self.root.after(500, self._tick_dashboard_clock)
+
+    def sync_cloud_after_issue(self):
+        """Publish a just-issued permit immediately so an instant gate scan won't see 404."""
+        config = core.cloud_bridge_config()
+        if not config.get("url") or not config.get("api_key"):
+            return
+
+        def work():
+            try:
+                cloud_bridge.sync_local_permits()
+            except Exception:
+                # The regular polling cycle retries automatically; never block receipt creation.
+                pass
+
+        threading.Thread(target=work, name="SchoolPassImmediateCloudSync", daemon=True).start()
 
     def poll_cloud_bridge(self):
         """Background HTTPS synchronization; all Tk interaction remains on the UI thread."""
