@@ -2474,7 +2474,7 @@ class RecordForm:
         ttk.Checkbutton(form, text='تعيين هذا الولي كأساسي لهذا التلميذ',
                         variable=primary_var).pack(anchor=E, pady=(8, 4))
         ttk.Label(form, text='يُحفظ رقم بطاقة التعريف مشفرًا، ويُعرض مختصرًا في القوائم والتقارير.',
-                  foreground='#526579', wraplength=490, justify='right').pack(anchor=E, pady=4)
+                  style='FormCaption.TLabel', wraplength=490, justify='right').pack(anchor=E, pady=4)
 
         def save_guardian():
             try:
@@ -3051,7 +3051,7 @@ class SchoolPassApp:
             variables[key] = variable
             ttk.Checkbutton(outer, text=label, variable=variable).pack(fill=X, anchor=E, pady=7)
         ttk.Label(outer, text='سيُحفظ اختيارك على هذا الجهاز ويُطبّق في المرة القادمة أيضًا.',
-                  foreground='#64748B').pack(anchor=E, pady=(12, 8))
+                  style='FormCaption.TLabel').pack(anchor=E, pady=(12, 8))
 
         def save_preferences():
             selected = [key for key, variable in variables.items() if bool(variable.get())]
@@ -3454,15 +3454,18 @@ class SchoolPassApp:
         status.pack(fill=X, side='bottom')
         self.root.after_idle(lambda: self._adapt_dashboard_layout(self.content_frame.winfo_width()))
 
+    def _apply_record_tree_tags(self, tree):
+        """Apply semantic, theme-aware row colors to every permit/history grid."""
+        palette = UI_PALETTE
+        tree.tag_configure('late', background=palette['alert_bg'], foreground=palette['alert_fg'])
+        tree.tag_configure('absence', background=palette['primary_soft'], foreground=palette['primary'])
+        tree.tag_configure('exit', background=palette['good_bg'], foreground=palette['good_fg'])
+        tree.tag_configure('special', background=palette['danger_bg'], foreground=palette['danger_fg'])
+        tree.tag_configure('cancelled', background=palette['surface_alt'], foreground=palette['danger_fg'])
+
     def _apply_main_tree_tags(self):
-        if not hasattr(self, 'tree'):
-            return
-        dark = core.setting('theme', 'light') == 'dark'
-        self.tree.tag_configure('late', background='#49391F' if dark else '#FFF6E5', foreground='#FFE1A8' if dark else '#6D4A11')
-        self.tree.tag_configure('absence', background='#203B55' if dark else '#EDF5FF', foreground='#D2E7FF' if dark else '#28547F')
-        self.tree.tag_configure('exit', background='#1B403A' if dark else '#EAF7F2', foreground='#BCE9DB' if dark else '#176B58')
-        self.tree.tag_configure('special', background='#4B2B34' if dark else '#FCEEF0', foreground='#FFD2D8' if dark else '#8D3946')
-        self.tree.tag_configure('cancelled', foreground='#FFADB6' if dark else '#A73543')
+        if hasattr(self, 'tree'):
+            self._apply_record_tree_tags(self.tree)
 
     def toggle_theme(self):
         """Persist and apply the light/dark theme without changing school data."""
@@ -3999,7 +4002,7 @@ class SchoolPassApp:
         win.minsize(460, 250)
         win.transient(parent)
         ttk.Label(win, text=title, style='Title.TLabel').pack(pady=(18, 6))
-        ttk.Label(win, text=f'الملف: {pdf_path.name}', wraplength=500).pack(pady=4)
+        ttk.Label(win, text=f'الملف: {pdf_path.name}', wraplength=500, style='CardMeta.TLabel').pack(pady=4)
         printers, default_printer = _windows_printer_list()
         ttk.Label(win, text='اختر الطابعة (أو افتح المعاينة واخترها من عارض PDF):').pack(anchor=E, padx=25, pady=(10, 3))
         printer_var = StringVar(value=default_printer or (printers[0] if printers else 'اختيار الطابعة من عارض PDF'))
@@ -4007,7 +4010,7 @@ class SchoolPassApp:
         combo = ttk.Combobox(win, textvariable=printer_var, values=values, state='readonly', justify='right')
         combo.pack(fill=X, padx=25, pady=4)
         note = 'سيبقى رقم الرخصة الأصلي كما هو، وستُسجّل إعادة الطباعة في سجل التدقيق.'
-        ttk.Label(win, text=note, wraplength=500, foreground='#526579').pack(pady=7)
+        ttk.Label(win, text=note, wraplength=500, style='FormCaption.TLabel').pack(pady=7)
         def preview():
             if core.open_pdf(pdf_path):
                 self.status_text.set(self.base_status + f' | المعاينة جاهزة: {pdf_path.name}')
@@ -4384,7 +4387,7 @@ class SchoolPassApp:
                 ttk.Label(row, text=label, width=22, anchor=E).pack(side=RIGHT, padx=(4, 8))
                 ttk.Entry(row, textvariable=variable, justify='right').pack(side=RIGHT, fill=X, expand=True)
             ttk.Label(form, text='يُسجل عرض رقم الهوية الكامل في سجل التدقيق. اترك الرقم كما هو إن لم ترغب بتغييره.',
-                      foreground='#526579', wraplength=480, justify='right').pack(anchor=E, pady=6)
+                      style='FormCaption.TLabel', wraplength=480, justify='right').pack(anchor=E, pady=6)
             def save():
                 try:
                     core.update_guardian_as_admin(
@@ -4521,10 +4524,19 @@ class SchoolPassApp:
             box = ttk.Frame(cards, style='Surface.TFrame', padding=(8, 7)); box.pack(side=RIGHT, fill=X, expand=True, padx=3)
             ttk.Label(box, text=title, style='CardTitle.TLabel').pack(anchor=E)
             ttk.Label(box, text=str(val), style='CardValue.TLabel').pack(anchor=E)
-        notes_box = tk.LabelFrame(win, text='الملاحظات الإدارية السابقة')
+        notes_box = ttk.Frame(win, style='FormSection.TFrame', padding=(12, 9))
         notes_box.pack(fill=X, padx=14, pady=(5, 7))
-        notes_text = tk.Text(notes_box, height=3, wrap='word', font=('Segoe UI', 9), bd=0,
-                             highlightthickness=1, highlightbackground='#D7E0E8')
+        ttk.Label(notes_box, text='الملاحظات الإدارية السابقة', style='FormSectionTitle.TLabel').pack(anchor=E, fill=X, pady=(0, 6))
+        notes_text = tk.Text(
+            notes_box, height=3, wrap='word', font=('Segoe UI', 9), bd=0,
+            background=UI_PALETTE.get('field', '#EAF1FA'),
+            foreground=UI_PALETTE.get('ink', '#17263D'),
+            insertbackground=UI_PALETTE.get('primary', '#185A8D'),
+            highlightthickness=2,
+            highlightbackground=UI_PALETTE.get('border', '#AEBFD4'),
+            highlightcolor=UI_PALETTE.get('primary', '#185A8D'),
+            relief='flat', padx=10, pady=8,
+        )
         notes_scroll = ttk.Scrollbar(notes_box, command=notes_text.yview)
         notes_text.configure(yscrollcommand=notes_scroll.set)
         notes_text.pack(side=LEFT, fill=X, expand=True, padx=5, pady=4)
@@ -4558,8 +4570,7 @@ class SchoolPassApp:
         heads = [('record_no','رقم الرخصة',135),('kind','نوع العملية',195),('created_at','التاريخ والوقت',155),('reason','السبب / الملاحظة',260),('status','الحالة',85),('supervisor','المشرف',130)]
         for col,title,width in heads:
             tree.heading(col,text=title); tree.column(col,width=width,anchor=E)
-        tree.tag_configure('late', background='#FFF8E8'); tree.tag_configure('absence', background='#EEF7FF')
-        tree.tag_configure('exit', background='#F0F7F2'); tree.tag_configure('special', background='#FFF1EC'); tree.tag_configure('cancelled', foreground='#A12D2D')
+        self._apply_record_tree_tags(tree)
         history_wrap = ttk.Frame(win)
         history_wrap.pack(fill=BOTH, expand=True, padx=12, pady=6)
         history_y = ttk.Scrollbar(history_wrap, orient='vertical', command=tree.yview)
@@ -4636,8 +4647,7 @@ class SchoolPassApp:
                     ('created_at', 'التاريخ والوقت', 145), ('supervisor', 'المشرف', 115), ('status', 'الحالة', 85), ('printed_count', 'الطباعة', 65)]
         for col,title,width in headings:
             tree.heading(col,text=title,command=lambda c=col: sort_tree(c)); tree.column(col,width=width,anchor=E,stretch=True)
-        tree.tag_configure('late', background='#FFF8E8'); tree.tag_configure('absence', background='#EEF7FF')
-        tree.tag_configure('exit', background='#F0F7F2'); tree.tag_configure('special', background='#FFF1EC'); tree.tag_configure('cancelled', foreground='#A12D2D')
+        self._apply_record_tree_tags(tree)
         yscroll=ttk.Scrollbar(win,orient='vertical',command=tree.yview)
         xscroll=ttk.Scrollbar(win,orient='horizontal',command=tree.xview)
         tree.configure(yscrollcommand=yscroll.set,xscrollcommand=xscroll.set)
@@ -4892,26 +4902,28 @@ class SchoolPassApp:
         ttk.Label(controls,text='الفترة البيانية:').pack(side=RIGHT,padx=5)
         combo=ttk.Combobox(controls,textvariable=period,state='readonly',values=('اليوم','الأسبوع','الشهر'),width=12,justify='right')
         combo.pack(side=RIGHT,padx=5)
-        chart=Canvas(win,height=220,background='#FFFFFF',highlightthickness=1,highlightbackground='#E1EAE5')
+        chart=Canvas(win, height=220, background=UI_PALETTE.get('canvas', '#FFFFFF'),
+                      highlightthickness=1, highlightbackground=UI_PALETTE.get('border', '#C5D2E2'),
+                      highlightcolor=UI_PALETTE.get('primary', '#185A8D'))
         chart.pack(fill=X,padx=18,pady=8)
         def draw_chart(_e=None):
             data=core.dashboard_series({'اليوم':'day','الأسبوع':'week','الشهر':'month'}.get(period.get(),'week'))
             chart.delete('all'); chart.update_idletasks(); w=max(600,chart.winfo_width()); h=max(180,chart.winfo_height())
-            l,r,t,b=45,w-16,14,h-34; chart.create_line(l,b,r,b,fill='#D9E4DE')
+            l,r,t,b=45,w-16,14,h-34; chart.create_line(l,b,r,b,fill=UI_PALETTE.get('border', '#C5D2E2'))
             series=[('late','تأخر','#D7A33B'),('absence_return','عودة بعد غياب','#4A89B8'),
                     ('special_entry','دخول خاص','#B85A45'),('exit_permit','خروج','#2D8062'),('exit_return','إثبات عودة','#8A78B7')]
             mx=max([1]+[n for arr in data['series'].values() for n in arr]); gw=(r-l)/max(1,len(data['labels'])); bw=max(2,min(10,gw/5))
             for tick in range(4):
-                y=b-(b-t)*tick/3; chart.create_line(l,y,r,y,fill='#EDF2EF'); chart.create_text(l-8,y,text=str(round(mx*tick/3)),anchor='e',font=('Segoe UI',8),fill='#667A73')
+                y=b-(b-t)*tick/3; chart.create_line(l,y,r,y,fill=UI_PALETTE.get('border', '#C5D2E2')); chart.create_text(l-8,y,text=str(round(mx*tick/3)),anchor='e',font=('Segoe UI',8),fill=UI_PALETTE.get('muted', '#687A91'))
             for i,lab in enumerate(data['labels']):
                 cx=l+i*gw+gw/2
                 for j,(key,_name,color) in enumerate(series):
                     n=data['series'][key][i]; bh=(b-t)*n/mx
                     if n: chart.create_rectangle(cx+(j-1.5)*bw,b-bh,cx+(j-1.5)*bw+bw-1,b,fill=color,outline='')
-                if len(data['labels'])<=10 or i%5==0 or i==len(data['labels'])-1: chart.create_text(cx,b+13,text=lab,font=('Segoe UI',7),fill='#667A73')
+                if len(data['labels'])<=10 or i%5==0 or i==len(data['labels'])-1: chart.create_text(cx,b+13,text=lab,font=('Segoe UI',7),fill=UI_PALETTE.get('muted', '#687A91'))
             x=r-5
             for _k,label,color in reversed(series):
-                chart.create_rectangle(x-88,3,x-80,11,fill=color,outline=''); chart.create_text(x-92,7,text=label,anchor='e',font=('Segoe UI',8),fill='#52665E'); x-=110
+                chart.create_rectangle(x-88,3,x-80,11,fill=color,outline=''); chart.create_text(x-92,7,text=label,anchor='e',font=('Segoe UI',8),fill=UI_PALETTE.get('ink', '#17263D')); x-=110
         combo.bind('<<ComboboxSelected>>',draw_chart)
         frame=ttk.Frame(win);frame.pack(fill=BOTH,expand=True,padx=18,pady=8)
         text_widget=__import__('tkinter').Text(
