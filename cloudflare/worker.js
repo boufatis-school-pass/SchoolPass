@@ -57,7 +57,9 @@ async function authorized(request, env) {
     digest(String(env.DEVICE_API_KEY)),
     digest(supplied.slice(7))
   ]);
-  return expectedHash === suppliedHash;
+  let difference = 0;
+  for (let i = 0; i < expectedHash.length; i++) difference |= expectedHash.charCodeAt(i) ^ suppliedHash.charCodeAt(i);
+  return difference === 0;
 }
 async function limited(request, env, maxHits = 20) {
   const ip = request.headers.get("cf-connecting-ip") || "unknown";
@@ -75,8 +77,28 @@ async function readJson(request, maxBytes = 4096) {
   if (!type.includes("application/json")) return { error: "content_type" };
   const declared = Number(request.headers.get("content-length") || "0");
   if (declared > maxBytes) return { error: "too_large" };
-  const raw = await request.text();
-  if (new TextEncoder().encode(raw).length > maxBytes) return { error: "too_large" };
+  if (!request.body) return { error: "invalid_json" };
+  const reader = request.body.getReader();
+  const chunks = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel();
+        return { error: "too_large" };
+      }
+      chunks.push(value);
+    }
+  } catch (_) {
+    return { error: "invalid_json" };
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+  const raw = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
   try {
     const value = JSON.parse(raw);
     return value && typeof value === "object" && !Array.isArray(value) ? { value } : { error: "invalid_json" };
@@ -160,7 +182,7 @@ export default {
 
     if (request.method === "POST" && url.pathname === "/api/return-requests") {
       if (!sameOrigin(request, url)) return json({ error: "origin_rejected" }, 403);
-      if (await limited(request, env, 8)) return json({ error: "rate_limited" }, 429);
+      if (await limited(request, env, 30)) return json({ error: "rate_limited" }, 429);
       const parsed = await readJson(request, 1024);
       if (parsed.error) return json({ error: parsed.error }, parsed.error === "too_large" ? 413 : 400);
       const token = parsed.value.token;
