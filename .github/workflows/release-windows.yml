@@ -17,10 +17,22 @@ permissions:
 jobs:
   build-windows:
     runs-on: windows-latest
+    env:
+      SCHOOLPASS_REQUIRE_QR_DECODE: '1'
 
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
+
+      - name: Install Poppler PDF utilities
+        shell: powershell
+        run: |
+          choco install poppler --yes --no-progress
+          if ($LASTEXITCODE -ne 0) { throw "Poppler installation failed" }
+          $pdftoppm = Get-Command pdftoppm -ErrorAction Stop
+          Write-Host "Poppler pdftoppm: $($pdftoppm.Source)"
+          & $pdftoppm.Source -v
+          if ($LASTEXITCODE -ne 0) { throw "pdftoppm verification failed" }
 
       - name: Set up Python 3.14 x64
         uses: actions/setup-python@v5
