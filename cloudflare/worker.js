@@ -266,6 +266,7 @@ export default {
       const existing = await env.DB.prepare("SELECT token,state FROM return_requests WHERE id=?")
         .bind(decision[1]).first();
       if (!existing) return json({ error: "request_not_found" }, 404);
+      if (existing.state === body.decision) return json({ ok: true, already_applied: true, decision: body.decision });
       if (existing.state !== "pending") return json({ error: "already_decided", state: existing.state }, 409);
       if (body.decision === "approved") {
         const permit = await getPermit(env, existing.token);
