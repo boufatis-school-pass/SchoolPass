@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Focused regressions for the 4.6 receipt safeguards and 4.9.0 release metadata."""
+"""Focused regressions for the 4.6 receipt safeguards and 4.9.1 release metadata."""
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
