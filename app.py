@@ -264,6 +264,8 @@ def _install_rounded_widget_surfaces(root, style, palette: dict[str, str]):
         ('FormSection.TFrame', surface, border),
         ('DialogHeader.TFrame', palette.get('primary_soft', surface), border),
         ('DialogFooter.TFrame', palette.get('surface_alt', surface), border),
+        ('LoginBrand.TFrame', palette.get('sidebar', '#142B49'), palette.get('sidebar_hover', border)),
+        ('LoginSurface.TFrame', surface, border),
         ('PageHeader.TFrame', surface, border),
         ('InfoPanel.TFrame', palette.get('primary_soft', surface), border),
         ('SidebarGroupOps.TFrame', palette.get('sidebar_ops_bg', surface), border),
