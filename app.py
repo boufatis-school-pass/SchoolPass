@@ -298,8 +298,8 @@ def _install_rounded_button_surfaces(root, style, palette: dict[str, str]) -> in
         ('TButton', palette['button_bg'], palette['button_hover'], palette['button_pressed'], palette['surface_alt'], palette['ink'], 12, 'center'),
         ('Accent.TButton', palette['primary'], palette['primary_hover'], _shade(palette['primary'], 0.78), _shade(palette['primary'], 0.55), palette['primary_text'], 14, 'center'),
         ('Gold.TButton', palette['gold'], _shade(palette['gold'], 0.94), _shade(palette['gold'], 0.82), '#C8CBD0', '#26364B', 12, 'center'),
-        ('Success.TButton', palette['good_fg'], _shade(palette['good_fg'], 0.92), _shade(palette['good_fg'], 0.78), '#A9B6B2', '#FFFFFF', 12, 'center'),
-        ('Danger.TButton', palette['danger_fg'], _shade(palette['danger_fg'], 0.92), _shade(palette['danger_fg'], 0.78), '#B9A9AC', '#FFFFFF', 12, 'center'),
+        ('Success.TButton', palette['success_button'], _shade(palette['success_button'], 0.92), _shade(palette['success_button'], 0.78), '#A9B6B2', '#FFFFFF', 12, 'center'),
+        ('Danger.TButton', palette['danger_button'], _shade(palette['danger_button'], 0.92), _shade(palette['danger_button'], 0.78), '#B9A9AC', '#FFFFFF', 12, 'center'),
         ('Info.TButton', palette['primary_soft'], palette['selected'], _shade(palette['primary_soft'], 0.94), palette['surface_alt'], palette['primary'], 12, 'center'),
         ('NavGroupOps.TButton', '#245B86', '#3475A5', '#1D4A70', '#52687E', '#FFFFFF', 13, 'e'),
         ('NavGroupData.TButton', '#286B62', '#34877A', '#20564F', '#526C67', '#FFFFFF', 13, 'e'),
@@ -541,6 +541,8 @@ def make_style(root: Tk, primary: str | None = None, secondary: str | None = Non
     palette['button_hover'] = '#314C6D' if dark else '#DDE8F7'
     palette['button_pressed'] = '#1B2D45' if dark else '#CEDCF0'
     palette['field_focus'] = palette['primary']
+    palette['success_button'] = '#167B67' if dark else palette['good_fg']
+    palette['danger_button'] = '#A83C4C' if dark else palette['danger_fg']
     UI_PALETTE = palette
 
     # ttkbootstrap supplies polished native ttk mappings; all application-specific
@@ -763,9 +765,9 @@ def make_style(root: Tk, primary: str | None = None, secondary: str | None = Non
     style.configure('Accent.TButton', background=primary_color, foreground=palette['primary_text'], borderwidth=0,
                     focusthickness=2, focuscolor=palette['accent'], padding=(18, 11),
                     font=('Segoe UI', 10, 'bold'), relief='flat', anchor='center')
-    style.configure('Success.TButton', background=palette['good_fg'], foreground='#FFFFFF', borderwidth=0,
+    style.configure('Success.TButton', background=palette['success_button'], foreground='#FFFFFF', borderwidth=0,
                     padding=(15, 10), font=('Segoe UI', 9, 'bold'), relief='flat')
-    style.configure('Danger.TButton', background=palette['danger_fg'], foreground='#FFFFFF', borderwidth=0,
+    style.configure('Danger.TButton', background=palette['danger_button'], foreground='#FFFFFF', borderwidth=0,
                     padding=(15, 10), font=('Segoe UI', 9, 'bold'), relief='flat')
     style.configure('Info.TButton', background=palette['primary_soft'], foreground=primary_color, borderwidth=0,
                     padding=(15, 10), font=('Segoe UI', 9, 'bold'), relief='flat')
