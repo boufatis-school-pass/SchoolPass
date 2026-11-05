@@ -19,6 +19,8 @@ CREATE TABLE IF NOT EXISTS return_requests (
   recorded_by TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_return_requests_pending ON return_requests(state,requested_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_one_pending_return_per_token
+  ON return_requests(token) WHERE state='pending';
 CREATE TABLE IF NOT EXISTS rate_limits (
   ip_hash TEXT NOT NULL,
   window_start INTEGER NOT NULL,
