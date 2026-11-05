@@ -1,5 +1,5 @@
 ﻿# -*- coding: utf-8 -*-
-"""Static regression guards for the SchoolPass 4.8.2 attention and permit release."""
+"""Regression guards for the SchoolPass 4.9.0 visual refresh and preserved administrative workflows."""
 from pathlib import Path
 import re
 
@@ -8,11 +8,11 @@ APP = (ROOT / "app.py").read_text(encoding="utf-8-sig")
 CORE = (ROOT / "schoolpass_core.py").read_text(encoding="utf-8")
 
 
-def test_release_version_is_482():
-    assert re.search(r'^APP_VERSION\s*=\s*["\']4\.8\.2["\']', CORE, re.M)
-    assert (ROOT / "VERSION.txt").read_text(encoding="ascii").strip() == "4.8.2"
+def test_release_version_is_490():
+    assert re.search(r'^APP_VERSION\s*=\s*["\']4\.9\.0["\']', CORE, re.M)
+    assert (ROOT / "VERSION.txt").read_text(encoding="ascii").strip() == "4.9.0"
     setup = (ROOT / "SchoolPass_Setup.iss").read_text(encoding="utf-8-sig")
-    assert '#define MyAppVersion "4.8.2"' in setup
+    assert '#define MyAppVersion "4.9.0"' in setup
 
 
 def test_database_schema_is_additively_migrated():
@@ -40,7 +40,11 @@ def test_premium_dashboard_hero_and_kpis_exist():
 def test_shared_visual_system_covers_main_controls():
     for marker in ("def make_style(", "PageHeader.TFrame", "MetricCard.TFrame",
                    "SidebarProfile.TFrame", "Treeview.Heading", "Accent.TButton",
-                   "Status.TLabel", "UI_PALETTE"):
+                   "Status.TLabel", "UI_PALETTE",
+                   "def _install_rounded_button_surfaces(",
+                   "El('Button.label', side='left', expand=True)",
+                   "FormSection.TFrame", "DialogHeader.TFrame",
+                   "KPIAccentBlue.TFrame", "NavGroupOpsOpen.TButton"):
         assert marker in APP
 
 
@@ -70,10 +74,16 @@ def test_sidebar_groups_are_large_colored_and_foldable_with_saved_preferences():
         assert marker in APP
 
 
-def test_dashboard_hides_detailed_charts_until_requested():
-    assert "chart_panel.pack_forget()" in APP
-    assert "عرض الإحصائيات والرسوم" in APP
-    assert "overview.pack_configure(before=cards)" in APP
+def test_dashboard_shows_kpis_before_charts_and_keeps_manual_collapse():
+    dashboard_start = APP.index("def build_ui(self):")
+    dashboard_end = APP.index("def _apply_record_tree_tags", dashboard_start)
+    dashboard = APP[dashboard_start:dashboard_end]
+    assert "cards.pack(fill=X, padx=14, pady=(1, 7))" in dashboard
+    assert "overview.pack(fill=X, padx=14, pady=(0, 9))" in dashboard
+    assert dashboard.index("cards.pack(") < dashboard.index("overview.pack(")
+    assert "overview.pack_configure(before=cards)" not in dashboard
+    assert "chart_panel.pack_forget()" in dashboard
+    assert "self.stats_toggle_button.configure(text='−  إخفاء الإحصائيات والرسوم')" in dashboard
 
 
 def test_guardian_directory_and_permit_autofill_are_present():
