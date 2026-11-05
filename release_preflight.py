@@ -131,6 +131,9 @@ def main() -> int:
         ("def test_dashboard_uses_compact_hierarchy_and_color_coded_kpis():", "modern dashboard hierarchy regression test"),
         ("def test_entry_permits_dropdown_uses_clean_arabic_and_open_state():", "Arabic entry permits dropdown regression test"),
         ("def test_permit_form_has_rounded_section_cards_and_a_hierarchical_header():", "permit form visual hierarchy regression test"),
+        ("def test_semantic_buttons_keep_contrast_in_dark_mode():", "dark-mode success/danger button contrast regression test"),
+        ("def test_student_notes_and_admin_history_share_the_live_theme():", "theme-aware pupil history regression test"),
+        ("def test_statistics_chart_uses_theme_aware_surface_and_grid():", "theme-aware statistics chart regression test"),
     ):
         if marker not in polish_test:
             errors.append(f"SchoolPass 4.9.0 visual test missing: {description}")
