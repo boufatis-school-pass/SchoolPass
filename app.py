@@ -5255,7 +5255,11 @@ class SchoolPassApp:
 
     def sync_cloud_after_issue(self):
         """Publish a just-issued permit immediately so an instant gate scan won't see 404."""
-        config = core.cloud_bridge_config()
+        try:
+            config = core.cloud_bridge_config()
+        except Exception:
+            # A DPAPI/configuration issue must never interrupt receipt creation or printing.
+            return
         if not config.get("url") or not config.get("api_key"):
             return
 
