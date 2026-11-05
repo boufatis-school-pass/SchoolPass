@@ -1,5 +1,5 @@
 ﻿# -*- coding: utf-8 -*-
-"""SchoolPass 4.8.0 — pupil attendance alerts, complete histories and verified gate-exit tracking."""
+"""SchoolPass 4.8.1 — startup compatibility fix and pupil attendance features, complete histories and verified gate-exit tracking."""
 from __future__ import annotations
 
 import json
@@ -285,11 +285,13 @@ def _install_rounded_widget_surfaces(root, style, palette: dict[str, str]):
         ('Link.TButton', surface, surface, palette.get('primary_soft', '#E9F1FC')),
         ('TButton', palette.get('heading', '#EDF2F8'), border, palette.get('selected', '#E4EEFC')),
     )
-    for style_name, fill, edge, hover in button_styles:
-        _install_rounded_ttk_style(
-            root, style, style_name, 'Button', fill, edge, bg,
-            hover_fill=hover, suffixes=('.border', '.button', '.background'),
-        )
+    # Do not replace ttk button drawing elements with PhotoImage surfaces.
+    # On some Windows/Tk builds the image element paints over the button label,
+    # leaving large blank coloured blocks (the 4.8.1 screenshot regression).
+    # Keep the rounded entry/card surfaces above, but let ttk draw button text
+    # natively so Arabic labels and keyboard focus remain visible.
+    # Button colours, typography, padding and hover maps are configured in
+    # make_style() below; only the custom image-backed button skin is disabled.
 
 
 
@@ -935,11 +937,15 @@ def _install_rtl_widget_adapters():
         original = getattr(ttk, class_name)
 
         class ArabicTextWidget(original):
-            def __init__(self, master=None, **kwargs):
-                # A consistent RTL default for every label/button; explicit
-                # center/left alignment supplied by a specific control is preserved.
-                kwargs.setdefault('justify', 'right')
-                kwargs.setdefault('anchor', 'e')
+            def __init__(self, master=None, _supports_alignment=(class_name == 'Label'), **kwargs):
+                # Only ttk.Label supports both justify and anchor as widget
+                # options. ttk.Button/Checkbutton/Radiobutton reject -anchor
+                # (and may reject -justify), which previously crashed startup.
+                # Capture the class-specific flag in a default argument because
+                # this adapter class is defined repeatedly inside a loop.
+                if _supports_alignment:
+                    kwargs.setdefault('justify', 'right')
+                    kwargs.setdefault('anchor', 'e')
                 if isinstance(kwargs.get('text'), str):
                     kwargs['text'] = rtl_display(kwargs['text'])
                 self._schoolpass_text_source = None
@@ -1799,9 +1805,10 @@ class RecordForm:
         }
         self.title = titles[kind]
         self.win = Toplevel(app.root)
-        self.win.title(self.title)
-        self.win.geometry('720x690' if kind == 'absence_return' else '660x570')
-        self.win.minsize(580, 500)
+        configure_window(
+            self.win, self.title,
+            '660x620' if kind == 'absence_return' else '620x520',
+        )
         self.win.transient(app.root)
         self.win.grab_set()
         self.win.protocol('WM_DELETE_WINDOW', self.close)
@@ -3176,8 +3183,11 @@ class SchoolPassApp:
                 self.stats_toggle_button.configure(text='−  إخفاء الإحصائيات والرسوم')
 
         self.stats_toggle_button.configure(command=toggle_dashboard_stats)
-        # Alerts and follow-up lead the page; detailed chart statistics are opt-in.
-        chart_panel.pack_forget()
+        # Keep the activity chart visible on first launch. Hiding it by default
+        # left a large, uninformative blank area and made the dashboard appear
+        # unfinished. Users may still collapse it with the toggle in the alerts
+        # panel when they need more room for the records table.
+        self.stats_toggle_button.configure(text='−  إخفاء الإحصائيات والرسوم')
         overview.pack_configure(before=cards)
 
         action_row = ttk.Frame(content)
