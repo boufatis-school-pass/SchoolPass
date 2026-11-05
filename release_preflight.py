@@ -91,8 +91,12 @@ def main() -> int:
     for marker in ("/api/permits/batch", "/api/return-requests/pending", "/api/return-requests/", "طلب تسجيل عودة التلميذ"):
         if marker not in worker_source:
             errors.append(f"Cloudflare Worker feature missing: {marker}")
-    if "00000001-00000004-0000511a-0461ce5f5b3059c7cd597e4a3fc196b8" not in (ROOT / "cloudflare/wrangler.toml").read_text(encoding="utf-8"):
-        errors.append("Cloudflare D1 database binding is not configured")
+    wrangler_source = (ROOT / "cloudflare/wrangler.toml").read_text(encoding="utf-8")
+    d1_match = re.search(r'(?m)^database_id\\s*=\\s*"([^"]+)"', wrangler_source)
+    if not d1_match:
+        errors.append("Cloudflare D1 database_id binding is missing")
+    elif d1_match.group(1) != "REPLACE_WITH_D1_DATABASE_UUID" and not re.fullmatch(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}", d1_match.group(1)):
+        errors.append("Cloudflare D1 database_id must be a valid UUID; use the exact UUID shown in the D1 database details")
     if "--icon" not in (ROOT / "build_windows.ps1").read_text(encoding="utf-8"):
         errors.append("Windows build does not embed app.ico in SchoolPass.exe")
     if "--add-data" not in (ROOT / "build_windows.ps1").read_text(encoding="utf-8"):
