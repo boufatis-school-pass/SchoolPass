@@ -79,6 +79,7 @@ def main() -> int:
         errors.append("GitHub release workflow does not publish SchoolPass_Setup.exe")
     if "schoolpass_setup.exe" not in (ROOT / "app.py").read_text(encoding="utf-8").lower():
         errors.append("In-app update checker does not verify the setup asset")
+    core_source = (ROOT / "schoolpass_core.py").read_text(encoding="utf-8")
     bridge_source = (ROOT / "cloud_bridge.py").read_text(encoding="utf-8")
     if "def sync_local_permits(" not in bridge_source or "def pending_return_requests(" not in bridge_source:
         errors.append("Cloud bridge client is missing synchronization or pending-request polling")
@@ -96,7 +97,6 @@ def main() -> int:
         errors.append("Windows build does not embed app.ico in SchoolPass.exe")
     if "--add-data" not in (ROOT / "build_windows.ps1").read_text(encoding="utf-8"):
         errors.append("Windows build does not package the runtime app.ico asset")
-    core_source = (ROOT / "schoolpass_core.py").read_text(encoding="utf-8")
     if "def _draw_admin_signature_box(" not in core_source:
         errors.append("The enlarged administration signature component is missing")
     for removed_label in ("ختم المؤسسة", "إمضاء المسؤول", "توقيع رقمي"):
