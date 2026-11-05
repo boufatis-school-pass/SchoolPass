@@ -32,3 +32,43 @@ def test_decision_client_rejects_unknown_decision():
         pass
     else:
         raise AssertionError("unknown decisions must be rejected")
+
+def test_permit_sync_only_sends_changed_records(monkeypatch):
+    import sqlite3
+
+    columns = (
+        "qr_token TEXT, record_no TEXT, kind TEXT, student_name TEXT, class_name TEXT, "
+        "issued_at TEXT, created_at TEXT, status TEXT, returned_at TEXT"
+    )
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.execute("CREATE TABLE records (" + columns + ")")
+    conn.execute(
+        "INSERT INTO records VALUES(?,?,?,?,?,?,?,?,?)",
+        ("a" * 48, "OUT-0001", "exit_permit", "تلميذ تجريبي", "1AS1",
+         "2026-11-05 08:00:00", "2026-11-05 08:00:00", "valid", "")
+    )
+    monkeypatch.setattr(cloud_bridge.core, "db_connect", lambda: conn)
+    cloud_bridge._SYNCED_PAYLOADS.clear()
+    cloud_bridge._LAST_FULL_SYNC = 0.0
+    calls = []
+
+    def fake_request(method, path, payload):
+        calls.append(payload["permits"])
+        return {"ok": True, "count": len(payload["permits"])}
+
+    monkeypatch.setattr(cloud_bridge, "_request", fake_request)
+    try:
+        assert cloud_bridge.sync_local_permits() == 1
+        assert cloud_bridge.sync_local_permits() == 0
+        conn.execute(
+            "UPDATE records SET status='returned',returned_at=? WHERE qr_token=?",
+            ("2026-11-05 09:00:00", "a" * 48)
+        )
+        assert cloud_bridge.sync_local_permits() == 1
+        assert len(calls) == 2
+        assert "guardian_name" not in calls[0][0]
+    finally:
+        conn.close()
+        cloud_bridge._SYNCED_PAYLOADS.clear()
+        cloud_bridge._LAST_FULL_SYNC = 0.0
