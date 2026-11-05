@@ -37,14 +37,15 @@ def test_permit_sync_only_sends_changed_records(monkeypatch):
     import sqlite3
 
     columns = (
-        "qr_token TEXT, record_no TEXT, kind TEXT, student_name TEXT, class_name TEXT, "
+        "id INTEGER PRIMARY KEY, qr_token TEXT, record_no TEXT, kind TEXT, student_name TEXT, class_name TEXT, "
         "issued_at TEXT, created_at TEXT, status TEXT, returned_at TEXT"
     )
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
     conn.execute("CREATE TABLE records (" + columns + ")")
     conn.execute(
-        "INSERT INTO records VALUES(?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO records(qr_token,record_no,kind,student_name,class_name,issued_at,created_at,status,returned_at) "
+        "VALUES(?,?,?,?,?,?,?,?,?)",
         ("a" * 48, "OUT-0001", "exit_permit", "تلميذ تجريبي", "1AS1",
          "2026-11-05 08:00:00", "2026-11-05 08:00:00", "valid", "")
     )
