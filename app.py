@@ -1898,7 +1898,7 @@ class SuggestionPopup:
             selectforeground=UI_PALETTE.get('primary_text', '#FFFFFF'),
             highlightthickness=1, highlightbackground=UI_PALETTE.get('border', '#C5D2E2'),
             highlightcolor=UI_PALETTE.get('primary', '#185A8D'), relief='flat',
-            borderwidth=1, activestyle='none')
+            borderwidth=1)
         self.listbox.pack(fill=BOTH, expand=True)
         self.listbox.bind('<ButtonRelease-1>', lambda _event: self.select_first())
         self.listbox.bind('<Return>', lambda _event: self.select_first())
