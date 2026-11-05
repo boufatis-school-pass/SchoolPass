@@ -67,6 +67,7 @@ def test_dropdown_lists_follow_the_current_light_or_dark_palette():
     assert "root.option_add('*TCombobox*Listbox.background', palette['field'])" in APP
     assert "root.option_add('*Listbox.selectBackground', palette['primary'])" in APP
     assert "root.option_add('*Text.background', palette['field'])" in APP
+    assert "background=UI_PALETTE.get('field', '#EAF1FA')" in APP
 
 
 def test_semantic_buttons_keep_contrast_in_dark_mode():
