@@ -5,6 +5,12 @@ compatibility_date = "2026-11-01"
 [[d1_databases]]
 binding = "DB"
 database_name = "schoolpass-cloud"
-database_id = "REPLACE_WITH_CLOUDFLARE_D1_DATABASE_ID"
+database_id = "00000001-00000004-0000511a-0461ce5f5b3059c7cd597e4a3fc196b8"
 
 # Configure DEVICE_API_KEY as a Worker secret; never commit its value.
+
+[vars]
+APP_NAME = "SchoolPass Cloud Bridge"
+
+[observability]
+enabled = true
