@@ -293,7 +293,8 @@ def _install_rounded_button_surfaces(root, style, palette: dict[str, str]) -> in
     try:
         from ttkbootstrap import Assets, El, image_element, layout
         assets = Assets(style)
-    except Exception:
+    except Exception as exc:
+        root._schoolpass_button_skin_import_error = f"{type(exc).__name__}: {exc}"
         return 0
 
     specs = (
