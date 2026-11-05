@@ -558,7 +558,7 @@ class TestGuiSmoke(unittest.TestCase):
 
     def test_arabic_rtl_rendering_covers_titles_labels_text_canvas_and_entries(self):
         owner = self.app._tk.Tk()
-        title = 'لوحة المتابعة — SchoolPass 4.8.0'
+        title = 'لوحة المتابعة — SchoolPass 4.8.1'
         owner.title(title)
         self.assertEqual(owner.title(), self.app.rtl_display(title))
 
@@ -574,6 +574,14 @@ class TestGuiSmoke(unittest.TestCase):
         self.assertEqual(label.kw['anchor'], 'e')
         label.configure(text='إدارة الأولياء')
         self.assertEqual(label.kw['text'], self.app.rtl_display('إدارة الأولياء'))
+
+        # Non-label ttk controls must not receive unsupported Tk options.
+        button = self.app.ttk.Button(owner, text='حفظ')
+        check = self.app.ttk.Checkbutton(owner, text='تأكيد')
+        radio = self.app.ttk.Radiobutton(owner, text='اختيار')
+        for control in (button, check, radio):
+            self.assertNotIn('anchor', control.kw)
+            self.assertNotIn('justify', control.kw)
 
         source = self.app.StringVar(value='اسم التلميذ')
         dynamic_label = self.app.ttk.Label(owner, textvariable=source)

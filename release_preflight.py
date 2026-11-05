@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-EXPECTED = "4.8.0"
+EXPECTED = "4.8.1"
 
 
 def main() -> int:
@@ -35,7 +35,7 @@ def main() -> int:
         errors.append("requirements_dev.txt must pin the reviewed PyInstaller 6.22.3 release")
     schema = re.search(r"^SCHEMA_VERSION\s*=\s*[\"\']?(\d+)[\"\']?", core, re.M)
     if not schema or schema.group(1) != "9":
-        errors.append("SchoolPass 4.8.0 must use schema version 9 with additive guardian, student-note and gate-execution fields")
+        errors.append("SchoolPass 4.8.1 must retain schema version 9 with additive guardian, student-note and gate-execution fields")
     if not setup_version:
         errors.append("MyAppVersion is missing from SchoolPass_Setup.iss")
     elif setup_version.group(1) != EXPECTED:
@@ -94,7 +94,7 @@ def main() -> int:
         ('mode: str = "auto"', "explicit first-print and reprint modes"),
     ):
         if marker not in core_source:
-            errors.append(f"SchoolPass 4.8.0 core feature missing: {description}")
+            errors.append(f"SchoolPass 4.8.1 core feature missing: {description}")
 
 
     app_source = (ROOT / "app.py").read_text(encoding="utf-8-sig")
@@ -224,7 +224,7 @@ def main() -> int:
         ("def _update_student_attention(self):", "monthly attention alerts"),
     ):
         if marker not in app_source:
-            errors.append(f"SchoolPass 4.8.0 UI feature missing: {description}")
+            errors.append(f"SchoolPass 4.8.1 UI feature missing: {description}")
 
     if "SetupIconFile=app.ico" not in setup:
         errors.append("Inno Setup wizard icon is not configured")
