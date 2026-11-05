@@ -10,6 +10,8 @@ def test_input_fields_have_visible_tinted_surface_and_stronger_border():
     assert "focus_border=primary" in APP
     assert "size, radius, border_width = 36, 14, 2" in APP
     assert "style.configure(\n        'TEntry', padding=(13, 10), fieldbackground=palette['field']" in APP
+    assert "('LoginBrand.TFrame', palette.get('sidebar'" in APP
+    assert "('LoginSurface.TFrame', surface, border)" in APP
 
 
 def test_dashboard_uses_compact_hierarchy_and_color_coded_kpis():
