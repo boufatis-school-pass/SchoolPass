@@ -28,13 +28,15 @@ from pathlib import Path
 from typing import NamedTuple
 
 APP_NAME = "SchoolPass"
-APP_VERSION = "4.9.2"
+APP_VERSION = "4.9.3"
 SCHOOL_NAME = "ثانوية المجاهد بسجراري لخضر بوفاطيس"
 MINISTRY_NAME = "الجمهورية الجزائرية الديمقراطية الشعبية — وزارة التربية الوطنية"
 SERVER_PORT = 8765
 AUTO_LOCK_SECONDS = 600
 RECORD_KINDS = ("late", "absence_return", "special_entry", "exit_permit", "exit_return")
 ABSENCE_CERTIFICATE_MAX_DURATION_DAYS = 2
+RECORD_VALIDITY_HOURS = 2
+TIME_LIMITED_RECORD_KINDS = frozenset({"late", "absence_return", "special_entry", "exit_return"})
 # Backward-compatible alias for integrations that referenced the earlier constant name.
 ABSENCE_CERTIFICATE_MAX_DATE_DIFFERENCE = ABSENCE_CERTIFICATE_MAX_DURATION_DAYS
 
@@ -1807,6 +1809,34 @@ def get_gatekeeper_log(user_id, date_from: str = "", date_to: str = "", state: s
     return [dict(r) for r in rows]
 
 
+def record_expiry_at(record) -> datetime | None:
+    """Return the two-hour expiry for entry permits; exceptional exits stay open until return."""
+    if not record or record["kind"] not in TIME_LIMITED_RECORD_KINDS:
+        return None
+    issued = str(record["issued_at"] or record["created_at"] or "").strip()
+    try:
+        parsed = datetime.strptime(issued, "%Y-%m-%d %H:%M:%S").astimezone()
+    except ValueError:
+        try:
+            parsed = datetime.fromisoformat(issued)
+            if parsed.tzinfo is None:
+                parsed = parsed.astimezone()
+        except ValueError:
+            return None
+    return parsed + timedelta(hours=RECORD_VALIDITY_HOURS)
+
+
+def record_is_expired(record, at: datetime | None = None) -> bool:
+    """Check expiry without deleting or mutating the historical record."""
+    expires = record_expiry_at(record)
+    if expires is None:
+        return False
+    current = at or datetime.now().astimezone()
+    if current.tzinfo is None:
+        current = current.astimezone()
+    return current >= expires
+
+
 def record_by_token(token: str) -> sqlite3.Row | None:
     with db_connect() as conn:
         return conn.execute("SELECT * FROM records WHERE qr_token=?", (token,)).fetchone()
@@ -2801,7 +2831,7 @@ def verification_page(token: str) -> tuple[int, bytes, dict | None]:
     row = None
     if _TOKEN_RE.match(token or ""):
         with db_connect() as conn:
-            row = conn.execute("SELECT record_no,kind,student_name,class_name,status,created_at,cancelled_at FROM records WHERE qr_token=?",
+            row = conn.execute("SELECT record_no,kind,student_name,class_name,status,created_at,issued_at,cancelled_at,returned_at FROM records WHERE qr_token=?",
                                (token,)).fetchone()
     school = html.escape(setting("school_name", SCHOOL_NAME))
     if not row:
@@ -2815,9 +2845,16 @@ def verification_page(token: str) -> tuple[int, bytes, dict | None]:
         if row["status"] == "cancelled":
             body += f'<p class="bad">تنبيه: هذا السجل ملغى منذ {html.escape(row["cancelled_at"] or "")} ولا يجوز الاعتماد عليه.</p>'
         elif row["status"] == "returned":
-            body += "<p>سُجّلت عودة التلميذ بموجب هذا التصريح.</p>"
+            body += f'<p>سُجّلت عودة التلميذ بموجب هذا التصريح في {html.escape(row["returned_at"] or "")}.</p>'
+        elif record_is_expired(row):
+            expires = record_expiry_at(row)
+            body += f'<p class="bad">انتهت صلاحية هذه الرخصة بعد ساعتين من إصدارها ({html.escape(expires.strftime("%Y-%m-%d %H:%M:%S") if expires else "")}). لا يجوز استعمالها.</p>'
         else:
-            body += "<p>السجل سارٍ. طابق الاسم والقسم مع التلميذ الحاضر.</p>"
+            expires = record_expiry_at(row)
+            if expires:
+                body += f'<p>السجل سارٍ حتى {html.escape(expires.strftime("%Y-%m-%d %H:%M:%S"))}. طابق الاسم والقسم مع التلميذ الحاضر.</p>'
+            else:
+                body += "<p>رخصة الخروج الاستثنائي تبقى سارية إلى حين تسجيل عودة التلميذ.</p>"
     page = (f'<!doctype html><html lang="ar" dir="rtl"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
             f'<title>{html.escape(title)}</title><style>body{{font-family:Tahoma,Arial,sans-serif;background:#f4f7fb;margin:0;padding:22px;color:#17243a}}'
             f'main{{max-width:480px;margin:auto;background:#fff;border-radius:14px;padding:22px}}h2{{color:#174a77}}p{{padding:9px 0;border-bottom:1px solid #edf0f5}}'
