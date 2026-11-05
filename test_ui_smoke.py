@@ -558,7 +558,7 @@ class TestGuiSmoke(unittest.TestCase):
 
     def test_arabic_rtl_rendering_covers_titles_labels_text_canvas_and_entries(self):
         owner = self.app._tk.Tk()
-        title = 'لوحة المتابعة — SchoolPass 4.8.1'
+        title = 'لوحة المتابعة — SchoolPass 4.8.2'
         owner.title(title)
         self.assertEqual(owner.title(), self.app.rtl_display(title))
 
