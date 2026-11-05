@@ -1,5 +1,5 @@
 ﻿# -*- coding: utf-8 -*-
-"""SchoolPass 4.9.0 — modern administrative interface and unified visual system."""
+"""SchoolPass 4.9.1 — modern administrative interface and unified visual system."""
 from __future__ import annotations
 
 import json
