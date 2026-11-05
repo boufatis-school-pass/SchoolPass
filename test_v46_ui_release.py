@@ -1,5 +1,5 @@
 ﻿# -*- coding: utf-8 -*-
-"""Regression guards for the SchoolPass 4.9.2 visual refresh and preserved administrative workflows."""
+"""Regression guards for the SchoolPass 4.9.3 visual refresh and preserved administrative workflows."""
 from pathlib import Path
 import re
 
@@ -9,10 +9,10 @@ CORE = (ROOT / "schoolpass_core.py").read_text(encoding="utf-8")
 
 
 def test_release_version_is_492():
-    assert re.search(r'^APP_VERSION\s*=\s*["\']4\.9\.2["\']', CORE, re.M)
-    assert (ROOT / "VERSION.txt").read_text(encoding="ascii").strip() == "4.9.2"
+    assert re.search(r'^APP_VERSION\s*=\s*["\']4\.9\.3["\']', CORE, re.M)
+    assert (ROOT / "VERSION.txt").read_text(encoding="ascii").strip() == "4.9.3"
     setup = (ROOT / "SchoolPass_Setup.iss").read_text(encoding="utf-8-sig")
-    assert '#define MyAppVersion "4.9.2"' in setup
+    assert '#define MyAppVersion "4.9.3"' in setup
 
 
 def test_database_schema_is_additively_migrated():
