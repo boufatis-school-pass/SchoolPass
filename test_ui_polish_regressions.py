@@ -89,3 +89,18 @@ def test_statistics_chart_uses_theme_aware_surface_and_grid():
     assert "background=UI_PALETTE.get('canvas', '#FFFFFF')" in APP
     assert "highlightbackground=UI_PALETTE.get('border', '#C5D2E2')" in APP
     assert "fill=UI_PALETTE.get('muted', '#687A91')" in APP
+
+
+
+def test_ttkbootstrap_style_uses_the_existing_default_root_and_exposes_scaling():
+    assert "style = ttkb.Style(theme=target_theme)" in APP
+    assert "ttkb.Style(root, theme=target_theme)" not in APP
+    assert "root._schoolpass_theme_init_error" in APP
+    assert "root._schoolpass_button_skin_count = _install_rounded_button_surfaces(root, style, palette)" in APP
+
+
+def test_windows_build_banner_uses_the_version_file_not_a_stale_literal():
+    build = (ROOT / "build_windows.ps1").read_text(encoding="utf-8-sig")
+    assert "$BuildVersion = (Get-Content -LiteralPath (Join-Path $Root 'VERSION.txt') -Raw).Trim()" in build
+    assert 'اكتمل بناء SchoolPass $BuildVersion.' in build
+    assert "اكتمل بناء SchoolPass 4.7.6." not in build
