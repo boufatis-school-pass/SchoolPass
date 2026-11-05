@@ -285,11 +285,13 @@ def _install_rounded_widget_surfaces(root, style, palette: dict[str, str]):
         ('Link.TButton', surface, surface, palette.get('primary_soft', '#E9F1FC')),
         ('TButton', palette.get('heading', '#EDF2F8'), border, palette.get('selected', '#E4EEFC')),
     )
-    for style_name, fill, edge, hover in button_styles:
-        _install_rounded_ttk_style(
-            root, style, style_name, 'Button', fill, edge, bg,
-            hover_fill=hover, suffixes=('.border', '.button', '.background'),
-        )
+    # Do not replace ttk button drawing elements with PhotoImage surfaces.
+    # On some Windows/Tk builds the image element paints over the button label,
+    # leaving large blank coloured blocks (the 4.8.1 screenshot regression).
+    # Keep the rounded entry/card surfaces above, but let ttk draw button text
+    # natively so Arabic labels and keyboard focus remain visible.
+    # Button colours, typography, padding and hover maps are configured in
+    # make_style() below; only the custom image-backed button skin is disabled.
 
 
 
