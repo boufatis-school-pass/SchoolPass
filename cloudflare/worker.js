@@ -74,7 +74,7 @@ async function limited(request, env, maxHits = 20) {
 }
 async function readJson(request, maxBytes = 4096) {
   const type = (request.headers.get("content-type") || "").toLowerCase();
-  if (!type.includes("application/json")) return { error: "content_type" };
+  if (type.split(";", 1)[0].trim() !== "application/json") return { error: "content_type" };
   const declared = Number(request.headers.get("content-length") || "0");
   if (declared > maxBytes) return { error: "too_large" };
   if (!request.body) return { error: "invalid_json" };
