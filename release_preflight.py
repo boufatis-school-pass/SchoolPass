@@ -92,7 +92,7 @@ def main() -> int:
         if marker not in worker_source:
             errors.append(f"Cloudflare Worker feature missing: {marker}")
     wrangler_source = (ROOT / "cloudflare/wrangler.toml").read_text(encoding="utf-8")
-    d1_match = re.search(r'(?m)^database_id\\s*=\\s*"([^"]+)"', wrangler_source)
+    d1_match = re.search(r'(?m)^database_id\s*=\s*"([^"]+)"', wrangler_source)
     if not d1_match:
         errors.append("Cloudflare D1 database_id binding is missing")
     elif d1_match.group(1) != "REPLACE_WITH_D1_DATABASE_UUID" and not re.fullmatch(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}", d1_match.group(1)):
