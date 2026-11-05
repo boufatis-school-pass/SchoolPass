@@ -259,7 +259,10 @@ def _install_rounded_widget_surfaces(root, style, palette: dict[str, str]):
         ('Card.TFrame', surface, border),
         ('MetricCard.TFrame', surface, border),
         ('DialogCard.TFrame', surface, border),
+        ('FormSection.TFrame', surface, border),
         ('PageHeader.TFrame', surface, border),
+        ('InfoPanel.TFrame', palette.get('primary_soft', surface), border),
+        ('SidebarSubmenu.TFrame', palette.get('sidebar_hover', '#24466E'), palette.get('sidebar_hover', border)),
         ('Hero.TFrame', palette.get('sidebar', '#142B49'), palette.get('sidebar_hover', border)),
         ('HeroBadge.TFrame', palette.get('sidebar_hover', '#24466E'), palette.get('sidebar_hover', border)),
         ('SidebarProfile.TFrame', palette.get('sidebar_hover', '#24466E'), palette.get('sidebar_hover', border)),
@@ -554,10 +557,10 @@ def make_style(root: Tk, primary: str | None = None, secondary: str | None = Non
         import ttkbootstrap as ttkb
         if not getattr(_ttkbootstrap_theme_state, 'registered', False):
             ttkb.Theme(
-                name='schoolpass', primary='#1F5FAF', success='#138A78',
+                name='schoolpass', primary='#2563B8', success='#0F8D7D',
                 info='#367AC4', warning='#C48A31', danger='#B54552',
-                light={'background': '#F3F6FB', 'foreground': '#17263C'},
-                dark={'background': '#111827', 'foreground': '#EAF0F8'},
+                light={'background': '#EEF3FA', 'foreground': '#17263D'},
+                dark={'background': '#0B1422', 'foreground': '#F1F6FC'},
             ).register()
             _ttkbootstrap_theme_state.registered = True
         target_theme = 'schoolpass-dark' if dark else 'schoolpass-light'
@@ -610,6 +613,11 @@ def make_style(root: Tk, primary: str | None = None, secondary: str | None = Non
     style.configure('KPIAccent.TFrame', background=palette['accent'])
     style.configure('Dialog.TFrame', background=surface)
     style.configure('DialogCard.TFrame', background=surface, relief='flat', borderwidth=1)
+    style.configure('FormSection.TFrame', background=surface, relief='flat', borderwidth=1)
+    style.configure('FormSectionHeader.TFrame', background=palette['surface_alt'], relief='flat', borderwidth=0)
+    style.configure('FormSectionTitle.TLabel', background=palette['surface_alt'], foreground=primary_color, font=('Segoe UI', 10, 'bold'), anchor='e')
+    style.configure('DialogFooter.TFrame', background=palette['surface_alt'], relief='flat', borderwidth=0)
+    style.configure('InfoPanel.TFrame', background=palette['primary_soft'], relief='flat', borderwidth=0)
     style.configure('DialogHeader.TFrame', background=palette['primary_soft'], relief='flat', borderwidth=0)
     style.configure('DialogHeaderTitle.TLabel', background=palette['primary_soft'], foreground=primary_color, font=('Segoe UI', 17, 'bold'), anchor='e')
     style.configure('Toolbar.TFrame', background=surface, relief='flat', borderwidth=0)
@@ -667,6 +675,10 @@ def make_style(root: Tk, primary: str | None = None, secondary: str | None = Non
     style.configure('ShortcutDivider.TFrame', background=palette['border'])
     style.configure('Section.TLabel', background=surface, foreground=ink,
                     font=('Segoe UI', 13, 'bold'), anchor='e')
+    style.configure('PageEyebrow.TLabel', background=surface, foreground=palette['accent'],
+                    font=('Segoe UI', 9, 'bold'), anchor='e')
+    style.configure('CardMeta.TLabel', background=surface, foreground=muted,
+                    font=('Segoe UI', 9), anchor='e')
     style.configure('Eyebrow.TLabel', background=surface, foreground=palette['accent'],
                     font=('Segoe UI', 9, 'bold'), anchor='e')
     style.configure('CardTitle.TLabel', background=surface, foreground=muted,
@@ -675,8 +687,16 @@ def make_style(root: Tk, primary: str | None = None, secondary: str | None = Non
                     font=('Segoe UI', 27, 'bold'), anchor='center')
     style.configure('Badge.TLabel', background=palette['primary_soft'], foreground=primary_color,
                     padding=(13, 8), font=('Segoe UI', 9, 'bold'))
+    style.configure('ToolbarBadge.TLabel', background=palette['primary_soft'], foreground=primary_color,
+                    padding=(11, 7), font=('Segoe UI', 9, 'bold'))
+    style.configure('FieldHint.TLabel', background=surface, foreground=muted,
+                    font=('Segoe UI', 9), anchor='e')
+    style.configure('FormCaption.TLabel', background=surface, foreground=muted,
+                    font=('Segoe UI', 9), anchor='e')
     style.configure('Status.TLabel', background=palette['surface_alt'], foreground=muted,
                     anchor='e', padding=(14, 8), font=('Segoe UI', 9))
+    style.configure('StatusStrong.TLabel', background=palette['primary_soft'], foreground=primary_color,
+                    anchor='e', padding=(13, 8), font=('Segoe UI', 9, 'bold'))
     style.configure('SidebarTitle.TLabel', background=palette['sidebar'], foreground=palette['sidebar_text'],
                     font=('Segoe UI', 19, 'bold'), anchor='e')
     style.configure('SidebarSub.TLabel', background=palette['sidebar'], foreground=palette['sidebar_muted'],
@@ -701,7 +721,8 @@ def make_style(root: Tk, primary: str | None = None, secondary: str | None = Non
     style.configure('HeroBadgeText.TLabel', background=palette['sidebar_hover'], foreground='#C5D8EE',
                     font=('Segoe UI', 8), anchor='center')
     style.configure('MetricIcon.TLabel', background=palette['primary_soft'], foreground=primary_color,
-                    font=('Segoe UI Symbol', 17, 'bold'), padding=(10, 8), anchor='center')
+                    font=('Segoe UI Symbol', 18, 'bold'), padding=(11, 9), anchor='center')
+    style.configure('MetricCardHover.TFrame', background=palette['primary_soft'], relief='flat', borderwidth=1)
     style.configure('MetricHint.TLabel', background=surface, foreground=muted,
                     font=('Segoe UI', 8), anchor='e')
 
@@ -793,6 +814,8 @@ def make_style(root: Tk, primary: str | None = None, secondary: str | None = Non
     style.configure('TRadiobutton', background=surface, foreground=ink, font=('Segoe UI', 9), padding=4)
     style.configure('TNotebook', background=bg, borderwidth=0, tabmargins=(3, 4, 3, 0))
     style.configure('TNotebook.Tab', padding=(17, 11), font=('Segoe UI', 9, 'bold'), background=palette['heading'])
+    style.configure('TNotebook', tabmargins=(5, 5, 5, 0))
+    style.configure('TNotebook.Tab', borderwidth=0, relief='flat')
     style.map('TNotebook.Tab', background=[('selected', surface), ('active', palette['selected'])],
               foreground=[('selected', primary_color), ('active', ink)])
     style.configure('Treeview', font=('Segoe UI', 10), rowheight=43, background=surface,
@@ -803,9 +826,11 @@ def make_style(root: Tk, primary: str | None = None, secondary: str | None = Non
               foreground=[('selected', ink)])
     style.configure('Horizontal.TProgressbar', troughcolor=palette['border'], background=palette['accent'])
     style.configure('Vertical.TScrollbar', background=palette['heading'], troughcolor=bg,
-                    bordercolor=bg, arrowcolor=muted, width=12)
+                    bordercolor=bg, arrowcolor=muted, width=10, relief='flat')
+    style.map('Vertical.TScrollbar', background=[('active', palette['primary_soft'])])
     style.configure('Horizontal.TScrollbar', background=palette['heading'], troughcolor=bg,
-                    bordercolor=bg, arrowcolor=muted, width=12)
+                    bordercolor=bg, arrowcolor=muted, width=10, relief='flat')
+    style.map('Horizontal.TScrollbar', background=[('active', palette['primary_soft'])])
     style.configure('Alert.TLabel', background=palette['alert_bg'], foreground=palette['alert_fg'],
                     padding=(13, 10), font=('Segoe UI', 9, 'bold'), anchor='e')
     style.configure('Good.TLabel', background=palette['good_bg'], foreground=palette['good_fg'],
