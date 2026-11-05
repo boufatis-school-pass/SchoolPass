@@ -3182,8 +3182,11 @@ class SchoolPassApp:
                 self.stats_toggle_button.configure(text='−  إخفاء الإحصائيات والرسوم')
 
         self.stats_toggle_button.configure(command=toggle_dashboard_stats)
-        # Alerts and follow-up lead the page; detailed chart statistics are opt-in.
-        chart_panel.pack_forget()
+        # Keep the activity chart visible on first launch. Hiding it by default
+        # left a large, uninformative blank area and made the dashboard appear
+        # unfinished. Users may still collapse it with the toggle in the alerts
+        # panel when they need more room for the records table.
+        self.stats_toggle_button.configure(text='−  إخفاء الإحصائيات والرسوم')
         overview.pack_configure(before=cards)
 
         action_row = ttk.Frame(content)
