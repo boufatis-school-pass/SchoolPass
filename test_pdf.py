@@ -216,15 +216,19 @@ class TestPdf(unittest.TestCase):
 
     def test_qr_decodes_to_random_token_url_without_personal_data(self):
         self.req('cv2', 'numpy')
-        import shutil as _sh
-        if not _sh.which('pdftoppm'):
-            self.skipTest('pdftoppm (poppler) not available; QR decode test runs on the review machine only')
+        pdftoppm = shutil.which('pdftoppm')
+        if not pdftoppm:
+            message = 'pdftoppm (Poppler) is required to render the permit PDF for QR decoding'
+            if os.environ.get('SCHOOLPASS_REQUIRE_QR_DECODE') == '1':
+                self.fail(message + '; Windows release CI must install Poppler')
+            self.skipTest(message)
         import cv2, subprocess
         p = self.permit()
         path = core.create_pdf(p["id"])
-        out = TEST_ROOT / "render"
-        subprocess.run(["pdftoppm", "-r", "300", "-png", str(path), str(out)], check=True)
-        pngs = sorted(TEST_ROOT.glob("render*.png"))
+        out = TEST_ROOT / f"qr-render-{p['id']}"
+        subprocess.run([pdftoppm, "-r", "300", "-png", str(path), str(out)],
+                       check=True, capture_output=True, text=True)
+        pngs = sorted(TEST_ROOT.glob(f"qr-render-{p['id']}-*.png"))
         self.assertEqual(len(pngs), 2)
         urls = []
         for png in pngs:

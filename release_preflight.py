@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-EXPECTED = "4.9.1"
+EXPECTED = "4.9.2"
 
 
 def main() -> int:
@@ -31,11 +31,15 @@ def main() -> int:
         errors.append("Windows fallback Python must be pinned to the available 3.14.10 installer")
     if "python-version: '3.14'" not in workflow:
         errors.append("GitHub Actions must build with Python 3.14 to match the supported Windows toolchain")
+    if "choco install poppler" not in workflow or "SCHOOLPASS_REQUIRE_QR_DECODE: '1'" not in workflow:
+        errors.append("Windows release CI must install Poppler and require QR decoding")
+    if "opencv-python-headless" not in (ROOT / "requirements_dev.txt").read_text(encoding="utf-8"):
+        errors.append("requirements_dev.txt must install OpenCV for the PDF QR decoding test")
     if "pyinstaller==6.22.3" not in (ROOT / "requirements_dev.txt").read_text(encoding="utf-8"):
         errors.append("requirements_dev.txt must pin the reviewed PyInstaller 6.22.3 release")
     schema = re.search(r"^SCHEMA_VERSION\s*=\s*[\"\']?(\d+)[\"\']?", core, re.M)
     if not schema or schema.group(1) != "9":
-        errors.append("SchoolPass 4.9.1 must preserve database schema version 9; this visual release does not migrate user data")
+        errors.append("SchoolPass 4.9.2 must preserve database schema version 9; this visual release does not migrate user data")
     if not setup_version:
         errors.append("MyAppVersion is missing from SchoolPass_Setup.iss")
     elif setup_version.group(1) != EXPECTED:
@@ -123,11 +127,11 @@ def main() -> int:
     )
     for marker, description in modern_ui_markers:
         if marker not in app_source:
-            errors.append(f"SchoolPass 4.9.1 visual feature missing: {description}")
+            errors.append(f"SchoolPass 4.9.2 visual feature missing: {description}")
 
     runtime_test = (ROOT / "test_ui_tk_runtime.py").read_text(encoding="utf-8-sig")
     if "def test_windows_tk_installs_rounded_buttons_entries_and_dropdowns():" not in runtime_test:
-        errors.append("SchoolPass 4.9.1 Windows Tk runtime layout test is missing")
+        errors.append("SchoolPass 4.9.2 Windows Tk runtime layout test is missing")
     if "El('Button.label', side='left', expand=True)" not in app_source:
         errors.append("Rounded buttons must retain the native Button.label child")
 
@@ -142,7 +146,7 @@ def main() -> int:
         ("def test_statistics_chart_uses_theme_aware_surface_and_grid():", "theme-aware statistics chart regression test"),
     ):
         if marker not in polish_test:
-            errors.append(f"SchoolPass 4.9.1 visual test missing: {description}")
+            errors.append(f"SchoolPass 4.9.2 visual test missing: {description}")
 
     if "requested_w * 0.90" in app_source or "requested_h * 0.88" in app_source:
         errors.append("Dialog geometry must not be arbitrarily scaled down; this clips buttons on school screens.")
