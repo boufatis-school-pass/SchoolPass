@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-EXPECTED = "4.8.2"
+EXPECTED = "4.9.0"
 
 
 def main() -> int:
@@ -35,7 +35,7 @@ def main() -> int:
         errors.append("requirements_dev.txt must pin the reviewed PyInstaller 6.22.3 release")
     schema = re.search(r"^SCHEMA_VERSION\s*=\s*[\"\']?(\d+)[\"\']?", core, re.M)
     if not schema or schema.group(1) != "9":
-        errors.append("SchoolPass 4.8.0 must use schema version 9 with additive guardian, student-note and gate-execution fields")
+        errors.append("SchoolPass 4.9.0 must preserve database schema version 9; this visual release does not migrate user data")
     if not setup_version:
         errors.append("MyAppVersion is missing from SchoolPass_Setup.iss")
     elif setup_version.group(1) != EXPECTED:
@@ -94,7 +94,7 @@ def main() -> int:
         ('mode: str = "auto"', "explicit first-print and reprint modes"),
     ):
         if marker not in core_source:
-            errors.append(f"SchoolPass 4.8.0 core feature missing: {description}")
+            errors.append(f"SchoolPass required core feature missing: {description}")
 
 
     app_source = (ROOT / "app.py").read_text(encoding="utf-8-sig")
@@ -108,6 +108,32 @@ def main() -> int:
     ):
         if marker not in test_ui_source:
             errors.append(f"UI regression test missing: {description}")
+
+    modern_ui_markers = (
+        ("def _install_rounded_button_surfaces(", "rounded state-aware button renderer"),
+        ("El('Button.label', side='left', expand=True)", "native button caption preserved above rounded image surfaces"),
+        ("KPIAccentBlue.TFrame", "color-coded dashboard KPI cards"),
+        ("MetricCardIconHover.TLabel", "interactive KPI hover feedback"),
+        ("DialogHeader.TFrame", "modern permit dialog header"),
+        ("FormSection.TFrame", "rounded form sections"),
+        ("DialogFooter.TFrame", "consistent dialog footer"),
+        ("NavGroupOpsOpen.TButton", "expanded navigation state"),
+        ("NavActive.TButton", "active entry permits navigation state"),
+        ("root.option_add('*TCombobox*Listbox.background', palette['field'])", "theme-aware dropdown list surfaces"),
+    )
+    for marker, description in modern_ui_markers:
+        if marker not in app_source:
+            errors.append(f"SchoolPass 4.9.0 visual feature missing: {description}")
+
+    polish_test = (ROOT / "test_ui_polish_regressions.py").read_text(encoding="utf-8-sig")
+    for marker, description in (
+        ("def test_buttons_have_rounded_stateful_image_layout_without_hiding_captions():", "rounded button/caption rendering regression test"),
+        ("def test_dashboard_uses_compact_hierarchy_and_color_coded_kpis():", "modern dashboard hierarchy regression test"),
+        ("def test_entry_permits_dropdown_uses_clean_arabic_and_open_state():", "Arabic entry permits dropdown regression test"),
+        ("def test_permit_form_has_rounded_section_cards_and_a_hierarchical_header():", "permit form visual hierarchy regression test"),
+    ):
+        if marker not in polish_test:
+            errors.append(f"SchoolPass 4.9.0 visual test missing: {description}")
 
     if "requested_w * 0.90" in app_source or "requested_h * 0.88" in app_source:
         errors.append("Dialog geometry must not be arbitrarily scaled down; this clips buttons on school screens.")
@@ -224,7 +250,7 @@ def main() -> int:
         ("def _update_student_attention(self):", "monthly attention alerts"),
     ):
         if marker not in app_source:
-            errors.append(f"SchoolPass 4.8.0 UI feature missing: {description}")
+            errors.append(f"SchoolPass required UI feature missing: {description}")
 
     if "SetupIconFile=app.ico" not in setup:
         errors.append("Inno Setup wizard icon is not configured")
