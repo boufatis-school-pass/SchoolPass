@@ -1,5 +1,5 @@
 ﻿# -*- coding: utf-8 -*-
-"""SchoolPass 4.8.1 — startup compatibility fix and pupil attendance features, complete histories and verified gate-exit tracking."""
+"""SchoolPass 4.9.0 — modern administrative interface and unified visual system."""
 from __future__ import annotations
 
 import json
@@ -425,13 +425,13 @@ def make_style(root: Tk, primary: str | None = None, secondary: str | None = Non
 
     if dark:
         palette = {
-            'bg': '#111827', 'surface': '#1B2738', 'surface_alt': '#202F43',
-            'ink': '#EAF0F8', 'muted': '#AAB8CA', 'primary': '#5B9BFA', 'primary_text': '#FFFFFF',
-            'primary_hover': '#78AEFF', 'primary_soft': '#243E60',
-            'sidebar': '#0E1B2D', 'sidebar_hover': '#1C3452',
-            'sidebar_text': '#F3F7FC', 'sidebar_muted': '#A9BCD3',
-            'accent': '#43B7AC', 'gold': '#E5B85D', 'border': '#465A74',
-            'field': '#18283D', 'heading': '#26364B', 'selected': '#294568',
+            'bg': '#0B1422', 'surface': '#142238', 'surface_alt': '#1A2C45',
+            'ink': '#F1F6FC', 'muted': '#B2C2D6', 'primary': '#6EA8FE', 'primary_text': '#FFFFFF',
+            'primary_hover': '#8AB9FF', 'primary_soft': '#203B60',
+            'sidebar': '#071526', 'sidebar_hover': '#193654',
+            'sidebar_text': '#F7FAFF', 'sidebar_muted': '#B4C4D8',
+            'accent': '#36C5B4', 'gold': '#F0BE5B', 'border': '#3B526F',
+            'field': '#1A2E49', 'heading': '#243A57', 'selected': '#284A73',
             'alert_bg': '#47351E', 'alert_fg': '#FFD79A',
             'good_bg': '#173D37', 'good_fg': '#A8E7D7',
             'danger_bg': '#4A2830', 'danger_fg': '#FFB7BF',
@@ -441,29 +441,33 @@ def make_style(root: Tk, primary: str | None = None, secondary: str | None = Non
         # Preserve custom primary/secondary colors set by the administrator while
         # giving the rest of the interface a coherent navy/blue institutional skin.
         palette = {
-            'bg': secondary_color if secondary_color not in ('#F2F5F9', '#F2F6F4') else '#F3F6FB',
-            'surface': '#FFFFFF', 'surface_alt': '#F7FAFE',
-            'ink': '#17263C', 'muted': '#64758B',
+            'bg': secondary_color if secondary_color not in ('#F2F5F9', '#F2F6F4') else '#EEF3FA',
+            'surface': '#FFFFFF', 'surface_alt': '#F6F9FE',
+            'ink': '#17263D', 'muted': '#687A91',
             'primary': primary_color, 'primary_text': core.text_color_for(primary_color),
-            'primary_hover': _shade(primary_color, 0.88),
-            'primary_soft': '#E9F1FC', 'sidebar': '#142B49',
-            'sidebar_hover': '#24466E', 'sidebar_text': '#FFFFFF',
-            'sidebar_muted': '#C1D0E3', 'accent': '#0E9388',
-            'gold': '#E6B24F', 'border': '#B8C7D9', 'field': '#F1F5FB',
-            'heading': '#EDF2F8', 'selected': '#E4EEFC',
+            'primary_hover': '#3B82F6' if primary_color == '#185A8D' else _shade(primary_color, 0.88),
+            'primary_soft': '#E8F0FF', 'sidebar': '#11243D',
+            'sidebar_hover': '#1E4167', 'sidebar_text': '#F8FBFF',
+            'sidebar_muted': '#C5D3E5', 'accent': '#0FA99A',
+            'gold': '#E8B34D', 'border': '#C5D2E2', 'field': '#F1F5FC',
+            'heading': '#EAF0F8', 'selected': '#DFEAFF',
             'alert_bg': '#FFF4E3', 'alert_fg': '#87500D',
             'good_bg': '#E7F6F1', 'good_fg': '#126B59',
             'danger_bg': '#FCEBED', 'danger_fg': '#A73543',
             'canvas': '#FFFFFF', 'white': '#FFFFFF',
         }
-    palette['sidebar_ops_bg'] = '#193652' if dark else '#E8F0FC'
-    palette['sidebar_data_bg'] = '#183D3B' if dark else '#E6F4EF'
-    palette['sidebar_reports_bg'] = '#40351F' if dark else '#F7F0E2'
-    palette['sidebar_admin_bg'] = '#382F4A' if dark else '#F0EBF8'
-    palette['sidebar_ops_fg'] = '#B8D8FB' if dark else '#214F7A'
-    palette['sidebar_data_fg'] = '#B9E8D8' if dark else '#20624F'
-    palette['sidebar_reports_fg'] = '#F4DDA7' if dark else '#78591C'
-    palette['sidebar_admin_fg'] = '#DCCCF8' if dark else '#5A477B'
+    palette['sidebar_ops_bg'] = '#183652' if dark else '#E7F0FF'
+    palette['sidebar_data_bg'] = '#173C3B' if dark else '#E4F5EF'
+    palette['sidebar_reports_bg'] = '#3B3152' if dark else '#F2ECFF'
+    palette['sidebar_admin_bg'] = '#46351F' if dark else '#FFF2DF'
+    palette['sidebar_ops_fg'] = '#C3DFFF' if dark else '#214F83'
+    palette['sidebar_data_fg'] = '#B9EBDD' if dark else '#206A58'
+    palette['sidebar_reports_fg'] = '#E2D0FF' if dark else '#63468B'
+    palette['sidebar_admin_fg'] = '#F1D9A8' if dark else '#875A20'
+    palette['button_bg'] = '#243A56' if dark else '#E8EEF7'
+    palette['button_hover'] = '#314C6D' if dark else '#DDE8F7'
+    palette['button_pressed'] = '#1B2D45' if dark else '#CEDCF0'
+    palette['field_focus'] = palette['primary']
     UI_PALETTE = palette
 
     # ttkbootstrap supplies polished native ttk mappings; all application-specific
@@ -493,27 +497,45 @@ def make_style(root: Tk, primary: str | None = None, secondary: str | None = Non
     primary_color = palette['primary']
     try:
         root.configure(background=bg)
-        root.option_add('*Font', ('Segoe UI', 10, 'bold'))
+        root.option_add('*Font', ('Segoe UI', 10))
         root.option_add('*TCombobox*Listbox.font', ('Segoe UI', 10))
+        root.option_add('*TCombobox*Listbox.background', palette['field'])
+        root.option_add('*TCombobox*Listbox.foreground', ink)
+        root.option_add('*TCombobox*Listbox.selectBackground', palette['primary'])
+        root.option_add('*TCombobox*Listbox.selectForeground', '#FFFFFF')
+        root.option_add('*Listbox.background', palette['field'])
+        root.option_add('*Listbox.foreground', ink)
+        root.option_add('*Listbox.selectBackground', palette['primary'])
+        root.option_add('*Listbox.selectForeground', '#FFFFFF')
+        root.option_add('*Listbox.borderWidth', 0)
+        root.option_add('*Listbox.relief', 'flat')
+        root.option_add('*Text.background', palette['field'])
+        root.option_add('*Text.foreground', ink)
+        root.option_add('*Text.insertBackground', palette['primary'])
         import tkinter.font as tkfont
         for font_name in ('TkDefaultFont', 'TkTextFont', 'TkMenuFont', 'TkHeadingFont', 'TkCaptionFont'):
             try:
-                tkfont.nametofont(font_name, root=root).configure(family='Segoe UI', size=10, weight='bold')
+                tkfont.nametofont(font_name, root=root).configure(family='Segoe UI', size=10, weight='normal')
             except Exception:
                 pass
     except Exception:
         pass
 
     # Base typography and surfaces
-    style.configure('.', font=('Segoe UI', 10, 'bold'), foreground=ink)
+    style.configure('.', font=('Segoe UI', 10), foreground=ink)
     style.configure('TFrame', background=bg)
     style.configure('Surface.TFrame', background=surface, relief='flat', borderwidth=0)
     style.configure('PageHeader.TFrame', background=surface, relief='flat', borderwidth=0)
     style.configure('Card.TFrame', background=surface, relief='flat', borderwidth=1)
     style.configure('MetricCard.TFrame', background=surface, relief='flat', borderwidth=1)
+    style.configure('MetricCardHover.TFrame', background=palette['primary_soft'], relief='flat', borderwidth=1)
     style.configure('KPIAccent.TFrame', background=palette['accent'])
     style.configure('Dialog.TFrame', background=surface)
-    style.configure('DialogCard.TFrame', background=surface, relief='flat', borderwidth=0)
+    style.configure('DialogCard.TFrame', background=surface, relief='flat', borderwidth=1)
+    style.configure('DialogHeader.TFrame', background=palette['primary_soft'], relief='flat', borderwidth=0)
+    style.configure('DialogHeaderTitle.TLabel', background=palette['primary_soft'], foreground=primary_color, font=('Segoe UI', 17, 'bold'), anchor='e')
+    style.configure('Toolbar.TFrame', background=surface, relief='flat', borderwidth=0)
+    style.configure('ToolbarBadge.TLabel', background=palette['primary_soft'], foreground=primary_color, padding=(12, 7), font=('Segoe UI', 9, 'bold'))
     style.configure('Sidebar.TFrame', background=palette['sidebar'])
     style.configure('SidebarProfile.TFrame', background=palette['sidebar_hover'], relief='flat')
     style.configure('SidebarSeparator.TFrame', background=palette['sidebar_hover'])
@@ -572,7 +594,7 @@ def make_style(root: Tk, primary: str | None = None, secondary: str | None = Non
     style.configure('CardTitle.TLabel', background=surface, foreground=muted,
                     font=('Segoe UI', 9, 'bold'), anchor='e')
     style.configure('CardValue.TLabel', background=surface, foreground=primary_color,
-                    font=('Segoe UI', 31, 'bold'), anchor='center')
+                    font=('Segoe UI', 27, 'bold'), anchor='center')
     style.configure('Badge.TLabel', background=palette['primary_soft'], foreground=primary_color,
                     padding=(13, 8), font=('Segoe UI', 9, 'bold'))
     style.configure('Status.TLabel', background=palette['surface_alt'], foreground=muted,
@@ -606,20 +628,26 @@ def make_style(root: Tk, primary: str | None = None, secondary: str | None = Non
                     font=('Segoe UI', 8), anchor='e')
 
     # Command buttons: compact and consistent with visible focus and hover states.
-    style.configure('TButton', background=palette['heading'], foreground=ink, borderwidth=0,
-                    focusthickness=2, focuscolor=palette['primary'], padding=(13, 9),
-                    font=('Segoe UI', 9, 'bold'), relief='flat')
+    style.configure('TButton', background=palette['button_bg'], foreground=ink, borderwidth=0,
+                    focusthickness=2, focuscolor=palette['primary'], padding=(15, 10),
+                    font=('Segoe UI', 9, 'bold'), relief='flat', anchor='center')
     style.map('TButton', background=[('disabled', palette['heading']), ('pressed', palette['selected']),
                                     ('active', palette['selected'])],
               foreground=[('disabled', muted), ('active', ink)])
     style.configure('Accent.TButton', background=primary_color, foreground=palette['primary_text'], borderwidth=0,
-                    focusthickness=2, focuscolor=palette['accent'], padding=(17, 11),
-                    font=('Segoe UI', 10, 'bold'), relief='flat')
+                    focusthickness=2, focuscolor=palette['accent'], padding=(18, 11),
+                    font=('Segoe UI', 10, 'bold'), relief='flat', anchor='center')
+    style.configure('Success.TButton', background=palette['good_fg'], foreground='#FFFFFF', borderwidth=0,
+                    padding=(15, 10), font=('Segoe UI', 9, 'bold'), relief='flat')
+    style.configure('Danger.TButton', background=palette['danger_fg'], foreground='#FFFFFF', borderwidth=0,
+                    padding=(15, 10), font=('Segoe UI', 9, 'bold'), relief='flat')
+    style.configure('Info.TButton', background=palette['primary_soft'], foreground=primary_color, borderwidth=0,
+                    padding=(15, 10), font=('Segoe UI', 9, 'bold'), relief='flat')
     style.map('Accent.TButton', background=[('disabled', '#9AA9BA'), ('pressed', _shade(primary_color, 0.72)),
                                             ('active', palette['primary_hover'])],
               foreground=[('disabled', '#F3F6FB'), ('active', palette['primary_text'])])
     style.configure('Gold.TButton', background=palette['gold'], foreground='#26364B', borderwidth=0,
-                    padding=(13, 9), font=('Segoe UI', 9, 'bold'), relief='flat')
+                    padding=(15, 10), font=('Segoe UI', 9, 'bold'), relief='flat')
     style.map('Gold.TButton', background=[('active', _shade(palette['gold'], 0.92)),
                                          ('pressed', _shade(palette['gold'], 0.82))])
     # Large, high-contrast category headers remain prominent while their contents are folded.
@@ -637,7 +665,7 @@ def make_style(root: Tk, primary: str | None = None, secondary: str | None = Non
         style.map(_group_style, background=[('active', _group_color), ('pressed', _group_color)],
                   foreground=[('active', '#FFFFFF'), ('pressed', '#FFFFFF')])
     style.configure('Nav.TButton', background=palette['sidebar'], foreground=palette['sidebar_muted'],
-                    borderwidth=0, focusthickness=0, padding=(17, 12), anchor='e',
+                    borderwidth=0, focusthickness=1, focuscolor=palette['accent'], padding=(17, 12), anchor='e',
                     font=('Segoe UI', 10, 'bold'), relief='flat')
     style.map('Nav.TButton', background=[('active', palette['sidebar_hover']),
                                          ('pressed', palette['sidebar_hover'])],
@@ -646,22 +674,22 @@ def make_style(root: Tk, primary: str | None = None, secondary: str | None = Non
                     borderwidth=1, focusthickness=1, focuscolor=palette['accent'],
                     padding=(17, 12), anchor='e', font=('Segoe UI', 10, 'bold'), relief='flat')
     style.configure('SubNav.TButton', background=palette['surface_alt'], foreground=palette['ink'],
-                    borderwidth=0, padding=(10, 8), anchor='e',
+                    borderwidth=0, padding=(13, 9), anchor='e',
                     font=('Segoe UI', 9, 'bold'), relief='flat')
     style.map('SubNav.TButton', background=[('active', palette['primary_soft']),
                                             ('pressed', palette['primary_soft'])],
               foreground=[('active', primary_color)])
     style.configure('SubNavHover.TButton', background=palette['primary_soft'], foreground=primary_color,
-                    borderwidth=1, padding=(10, 8), anchor='e',
+                    borderwidth=1, padding=(13, 9), anchor='e',
                     font=('Segoe UI', 9, 'bold'), relief='flat')
     style.configure('Link.TButton', background=surface, foreground=primary_color, borderwidth=0,
-                    padding=(5, 5), font=('Segoe UI', 9, 'bold'), relief='flat')
+                    padding=(8, 7), font=('Segoe UI', 9, 'bold'), relief='flat')
     style.map('Link.TButton', foreground=[('active', palette['accent'])])
 
     # Forms and data grids
     style.configure('TLabel', background=bg, foreground=ink, font=('Segoe UI', 10), anchor='e')
     style.configure(
-        'TEntry', padding=(11, 8), fieldbackground=palette['field'], foreground=ink,
+        'TEntry', padding=(13, 10), fieldbackground=palette['field'], foreground=ink,
         borderwidth=2, relief='solid', bordercolor=palette['border'],
         lightcolor=palette['border'], darkcolor=palette['border'],
         insertwidth=2,
@@ -672,7 +700,7 @@ def make_style(root: Tk, primary: str | None = None, secondary: str | None = Non
               lightcolor=[('focus', primary_color), ('!focus', palette['border'])],
               darkcolor=[('focus', primary_color), ('!focus', palette['border'])])
     style.configure(
-        'TCombobox', padding=(10, 7), fieldbackground=palette['field'], foreground=ink,
+        'TCombobox', padding=(12, 9), fieldbackground=palette['field'], foreground=ink,
         arrowsize=16, borderwidth=2, relief='solid', bordercolor=palette['border'],
         lightcolor=palette['border'], darkcolor=palette['border'],
     )
@@ -689,10 +717,10 @@ def make_style(root: Tk, primary: str | None = None, secondary: str | None = Non
     style.configure('TNotebook.Tab', padding=(17, 11), font=('Segoe UI', 9, 'bold'), background=palette['heading'])
     style.map('TNotebook.Tab', background=[('selected', surface), ('active', palette['selected'])],
               foreground=[('selected', primary_color), ('active', ink)])
-    style.configure('Treeview', font=('Segoe UI', 10), rowheight=39, background=surface,
+    style.configure('Treeview', font=('Segoe UI', 10), rowheight=43, background=surface,
                     fieldbackground=surface, foreground=ink, borderwidth=0, relief='flat')
-    style.configure('Treeview.Heading', font=('Segoe UI', 9, 'bold'), background=palette['heading'],
-                    foreground=ink, padding=(12, 12), relief='flat', anchor='e')
+    style.configure('Treeview.Heading', font=('Segoe UI', 10, 'bold'), background=palette['heading'],
+                    foreground=ink, padding=(14, 13), relief='flat', anchor='e')
     style.map('Treeview', background=[('selected', palette['selected'])],
               foreground=[('selected', ink)])
     style.configure('Horizontal.TProgressbar', troughcolor=palette['border'], background=palette['accent'])
@@ -709,17 +737,17 @@ def make_style(root: Tk, primary: str | None = None, secondary: str | None = Non
 
     # Apply a stronger, consistent type weight across the application while
     # preserving the larger title sizes already defined above.
-    for style_name, font_size in {
-        'TLabel': 10, 'Hint.TLabel': 10, 'Subtitle.TLabel': 10,
-        'PageSubtitle.TLabel': 10, 'LoginSubtitle.TLabel': 10,
-        'SidebarSub.TLabel': 10, 'SidebarProfileRole.TLabel': 9,
-        'HeroText.TLabel': 10, 'MetricHint.TLabel': 9,
-        'CardTitle.TLabel': 10, 'DialogMessage.TLabel': 10,
-        'ShortcutDesc.TLabel': 10, 'Status.TLabel': 10,
-        'TEntry': 10, 'TCombobox': 10, 'Treeview': 10,
-        'Treeview.Heading': 10, 'TCheckbutton': 10, 'TRadiobutton': 10,
+    for style_name, font_spec in {
+        'TLabel': (10, 'normal'), 'Hint.TLabel': (9, 'normal'), 'Subtitle.TLabel': (10, 'normal'),
+        'PageSubtitle.TLabel': (10, 'normal'), 'LoginSubtitle.TLabel': (10, 'normal'),
+        'SidebarSub.TLabel': (9, 'normal'), 'SidebarProfileRole.TLabel': (9, 'normal'),
+        'HeroText.TLabel': (10, 'normal'), 'MetricHint.TLabel': (9, 'normal),
+        'CardTitle.TLabel': (9, 'normal'), 'DialogMessage.TLabel': (10, 'normal'),
+        'ShortcutDesc.TLabel': (10, 'normal'), 'Status.TLabel': (9, 'normal'),
+        'TEntry': (10, 'normal'), 'TCombobox': (10, 'normal'), 'Treeview': (10, 'normal'),
+        'Treeview.Heading': (10, 'bold'), 'TCheckbutton': (9, 'normal'), 'TRadiobutton': (9, 'normal'),
     }.items():
-        style.configure(style_name, font=('Segoe UI', font_size, 'bold'))
+        style.configure(style_name, font=('Segoe UI', font_spec[0], font_spec[1]))
 
     # The outer image elements give all entry boxes, combo boxes and main cards
     # genuinely rounded corners. Entry focus and disabled states remain distinct.
