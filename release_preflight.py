@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-EXPECTED = "4.9.0"
+EXPECTED = "4.9.1"
 
 
 def main() -> int:
@@ -123,7 +123,7 @@ def main() -> int:
     )
     for marker, description in modern_ui_markers:
         if marker not in app_source:
-            errors.append(f"SchoolPass 4.9.0 visual feature missing: {description}")
+            errors.append(f"SchoolPass 4.9.1 visual feature missing: {description}")
 
     polish_test = (ROOT / "test_ui_polish_regressions.py").read_text(encoding="utf-8-sig")
     for marker, description in (
@@ -136,7 +136,7 @@ def main() -> int:
         ("def test_statistics_chart_uses_theme_aware_surface_and_grid():", "theme-aware statistics chart regression test"),
     ):
         if marker not in polish_test:
-            errors.append(f"SchoolPass 4.9.0 visual test missing: {description}")
+            errors.append(f"SchoolPass 4.9.1 visual test missing: {description}")
 
     if "requested_w * 0.90" in app_source or "requested_h * 0.88" in app_source:
         errors.append("Dialog geometry must not be arbitrarily scaled down; this clips buttons on school screens.")
