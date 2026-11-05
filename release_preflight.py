@@ -49,6 +49,8 @@ def main() -> int:
         "app.py", "schoolpass_core.py", "requirements.txt", "requirements_dev.txt",
         "SchoolPass_Setup.iss", "build_windows.ps1", "build_installer_only.ps1",
         "release_preflight.py", ".github/workflows/release-windows.yml", "app.ico",
+        "cloud_bridge.py", "cloudflare/worker.js", "cloudflare/schema.sql",
+        "cloudflare/wrangler.toml", "cloudflare/migrations/0001_initial.sql",
     ]
     for name in required:
         if not (ROOT / name).is_file():
@@ -77,6 +79,19 @@ def main() -> int:
         errors.append("GitHub release workflow does not publish SchoolPass_Setup.exe")
     if "schoolpass_setup.exe" not in (ROOT / "app.py").read_text(encoding="utf-8").lower():
         errors.append("In-app update checker does not verify the setup asset")
+    bridge_source = (ROOT / "cloud_bridge.py").read_text(encoding="utf-8")
+    if "def sync_local_permits(" not in bridge_source or "def pending_return_requests(" not in bridge_source:
+        errors.append("Cloud bridge client is missing synchronization or pending-request polling")
+    if "def generate_cloud_bridge_key_as(" not in core_source or "def cloud_bridge_config(" not in core_source:
+        errors.append("Cloudflare device key must be generated and encrypted with Windows DPAPI")
+    if "cloud_bridge_url()" not in core_source:
+        errors.append("Cloudflare public HTTPS QR URL selection is missing")
+    worker_source = (ROOT / "cloudflare/worker.js").read_text(encoding="utf-8")
+    for marker in ("/api/permits/batch", "/api/return-requests/pending", "/api/return-requests/", "طلب تسجيل عودة التلميذ"):
+        if marker not in worker_source:
+            errors.append(f"Cloudflare Worker feature missing: {marker}")
+    if "00000001-00000004-0000511a-0461ce5f5b3059c7cd597e4a3fc196b8" not in (ROOT / "cloudflare/wrangler.toml").read_text(encoding="utf-8"):
+        errors.append("Cloudflare D1 database binding is not configured")
     if "--icon" not in (ROOT / "build_windows.ps1").read_text(encoding="utf-8"):
         errors.append("Windows build does not embed app.ico in SchoolPass.exe")
     if "--add-data" not in (ROOT / "build_windows.ps1").read_text(encoding="utf-8"):
