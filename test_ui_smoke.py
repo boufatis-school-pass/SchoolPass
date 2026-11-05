@@ -572,6 +572,16 @@ class TestGuiSmoke(unittest.TestCase):
         self.assertEqual(label.kw['text'], self.app.rtl_display(label_text))
         self.assertEqual(label.kw['justify'], 'right')
         self.assertEqual(label.kw['anchor'], 'e')
+
+        # ttk.Button, Checkbutton and Radiobutton do not accept the Label-only
+        # anchor/justify options. They must still receive Arabic text shaping.
+        button = self.app.ttk.Button(owner, text='حفظ')
+        check = self.app.ttk.Checkbutton(owner, text='تفعيل')
+        radio = self.app.ttk.Radiobutton(owner, text='اختيار')
+        for widget in (button, check, radio):
+            self.assertNotIn('anchor', widget.kw)
+            self.assertNotIn('justify', widget.kw)
+            self.assertEqual(widget.kw['text'], self.app.rtl_display(widget.kw['text']))
         label.configure(text='إدارة الأولياء')
         self.assertEqual(label.kw['text'], self.app.rtl_display('إدارة الأولياء'))
 
