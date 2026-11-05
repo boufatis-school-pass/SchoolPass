@@ -65,3 +65,24 @@ def test_dropdown_lists_follow_the_current_light_or_dark_palette():
     assert "root.option_add('*TCombobox*Listbox.background', palette['field'])" in APP
     assert "root.option_add('*Listbox.selectBackground', palette['primary'])" in APP
     assert "root.option_add('*Text.background', palette['field'])" in APP
+
+
+def test_semantic_buttons_keep_contrast_in_dark_mode():
+    assert "palette['success_button'] = '#167B67' if dark else palette['good_fg']" in APP
+    assert "palette['danger_button'] = '#A83C4C' if dark else palette['danger_fg']" in APP
+    assert "('Success.TButton', palette['success_button']" in APP
+    assert "('Danger.TButton', palette['danger_button']" in APP
+
+
+def test_student_notes_and_admin_history_share_the_live_theme():
+    assert "style='FormSection.TFrame'" in APP
+    assert "background=UI_PALETTE.get('field', '#EAF1FA')" in APP
+    assert "highlightbackground=UI_PALETTE.get('border', '#AEBFD4')" in APP
+    assert "def _apply_record_tree_tags(self, tree):" in APP
+    assert "self._apply_record_tree_tags(tree)" in APP
+
+
+def test_statistics_chart_uses_theme_aware_surface_and_grid():
+    assert "background=UI_PALETTE.get('canvas', '#FFFFFF')" in APP
+    assert "highlightbackground=UI_PALETTE.get('border', '#C5D2E2')" in APP
+    assert "fill=UI_PALETTE.get('muted', '#687A91')" in APP
