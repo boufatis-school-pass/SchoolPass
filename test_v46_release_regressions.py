@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Focused regressions for the 4.6 receipt safeguards and 4.9.2 release metadata."""
+"""Focused regressions for the 4.6 receipt safeguards and 4.9.3 release metadata."""
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -43,11 +43,11 @@ def test_keyboard_help_lists_only_bound_shortcuts_and_has_f1_entry_point():
 
 def test_database_schema_and_version_metadata_are_consistent():
     core_source = (ROOT / "schoolpass_core.py").read_text(encoding="utf-8")
-    assert 'APP_VERSION = "4.9.2"' in core_source
+    assert 'APP_VERSION = "4.9.3"' in core_source
     assert 'SCHEMA_VERSION = "9"' in core_source
-    assert (ROOT / "VERSION.txt").read_text(encoding="ascii").strip() == "4.9.2"
+    assert (ROOT / "VERSION.txt").read_text(encoding="ascii").strip() == "4.9.3"
     setup = (ROOT / "SchoolPass_Setup.iss").read_text(encoding="utf-8-sig")
-    assert '#define MyAppVersion "4.9.2"' in setup
+    assert '#define MyAppVersion "4.9.3"' in setup
 
 
 def _ascii_for_pdf_tests(value):
