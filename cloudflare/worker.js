@@ -170,7 +170,20 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     if (request.method === "GET" && url.pathname === "/health") {
-      return json({ ok: true, service: "SchoolPass Cloud Bridge", version: "4.9.3" });
+      try {
+        await env.DB.prepare("SELECT 1 FROM permits LIMIT 1").first();
+        await env.DB.prepare("SELECT 1 FROM return_requests LIMIT 1").first();
+        await env.DB.prepare("SELECT 1 FROM rate_limits LIMIT 1").first();
+        return json({
+          ok: true,
+          database: true,
+          device_auth_configured: Boolean(env.DEVICE_API_KEY),
+          service: "SchoolPass Cloud Bridge",
+          version: "4.9.3"
+        });
+      } catch (_) {
+        return json({ ok: false, database: false, error: "d1_not_ready" }, 503);
+      }
     }
 
     const publicMatch = url.pathname.match(/^\/v\/([0-9a-f]{48})$/);
