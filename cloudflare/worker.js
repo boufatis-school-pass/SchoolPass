@@ -154,7 +154,7 @@ function permitPage(row) {
   const button = canRequest ? (row.pending_request_at ?
     "<div class='status'>تم إرسال طلب العودة إلى المؤسسة في " + escapeHtml(row.pending_request_at) + ". انتظر تأكيد المشرف.</div>" :
     "<button id='request' type='button'>طلب تسجيل عودة التلميذ</button><div id='message' role='status' aria-live='polite'></div>") : "";
-  const script = canRequest ?
+  const script = canRequest && !row.pending_request_at ?
     "<script>(function(){const b=document.getElementById('request'),m=document.getElementById('message');" +
     "b.addEventListener('click',async()=>{b.disabled=true;m.textContent='جارٍ إرسال الطلب...';" +
     "try{const r=await fetch('/api/return-requests',{method:'POST',headers:{'content-type':'application/json'}," +
