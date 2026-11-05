@@ -3155,7 +3155,7 @@ class SchoolPassApp:
                 set_open(True)
             return body
 
-        nav('⌂   لوحة التحكم الرئيسية', self.refresh_all)
+        nav('⌂   لوحة التحكم الرئيسية', self.refresh_all, 'NavActive.TButton')
         operations_group = nav_group('operations', 'إجراءات الدخول والخروج', 'SidebarGroupOps.TFrame', 'SidebarGroupOpsTitle.TLabel')
         entry_group = ttk.Frame(operations_group, style='SidebarSubmenu.TFrame', padding=(8, 6))
         # Keep the dropdown labels as clean Arabic text. Mixing arrows and Latin-style
