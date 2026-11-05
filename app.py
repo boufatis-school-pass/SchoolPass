@@ -325,8 +325,13 @@ def _install_rounded_button_surfaces(root, style, palette: dict[str, str]) -> in
         ('NavGroupData.TButton', '#286B62', '#34877A', '#20564F', '#526C67', '#FFFFFF', 13, 'e'),
         ('NavGroupReports.TButton', '#66518A', '#7A65A1', '#554274', '#6C6478', '#FFFFFF', 13, 'e'),
         ('NavGroupAdmin.TButton', '#8A6435', '#A47A45', '#704F29', '#777064', '#FFFFFF', 13, 'e'),
+        ('NavGroupOpsOpen.TButton', '#3475A5', '#3F83B8', '#245B86', '#52687E', '#FFFFFF', 13, 'e'),
+        ('NavGroupDataOpen.TButton', '#34877A', '#419A8C', '#286B62', '#526C67', '#FFFFFF', 13, 'e'),
+        ('NavGroupReportsOpen.TButton', '#7A65A1', '#8A76B0', '#66518A', '#6C6478', '#FFFFFF', 13, 'e'),
+        ('NavGroupAdminOpen.TButton', '#A47A45', '#B78D55', '#8A6435', '#777064', '#FFFFFF', 13, 'e'),
         ('Nav.TButton', palette['sidebar'], palette['sidebar_hover'], _shade(palette['sidebar'], 0.86), palette['sidebar'], palette['sidebar_muted'], 12, 'e'),
         ('NavHover.TButton', palette['sidebar_hover'], palette['primary'], _shade(palette['sidebar_hover'], 0.88), palette['sidebar'], '#FFFFFF', 12, 'e'),
+        ('NavActive.TButton', palette['sidebar_hover'], palette['primary'], _shade(palette['sidebar_hover'], 0.88), palette['sidebar'], '#FFFFFF', 12, 'e'),
         ('SubNav.TButton', palette['surface_alt'], palette['primary_soft'], _shade(palette['surface_alt'], 0.96), palette['surface_alt'], palette['ink'], 10, 'e'),
         ('SubNavHover.TButton', palette['primary_soft'], palette['selected'], _shade(palette['primary_soft'], 0.94), palette['surface_alt'], palette['primary'], 10, 'e'),
         ('Link.TButton', palette['surface'], palette['primary_soft'], palette['surface_alt'], palette['surface_alt'], palette['primary'], 10, 'e'),
@@ -793,6 +798,16 @@ def make_style(root: Tk, primary: str | None = None, secondary: str | None = Non
                     borderwidth=0, padding=(16, 14), anchor='e', font=('Segoe UI', 13, 'bold'), relief='flat')
     style.configure('NavGroupAdmin.TButton', background='#8A6435', foreground='#FFFFFF',
                     borderwidth=0, padding=(16, 14), anchor='e', font=('Segoe UI', 13, 'bold'), relief='flat')
+    _group_open_colors = {
+        'NavGroupOpsOpen.TButton': '#3475A5',
+        'NavGroupDataOpen.TButton': '#34877A',
+        'NavGroupReportsOpen.TButton': '#7A65A1',
+        'NavGroupAdminOpen.TButton': '#A47A45',
+    }
+    for _open_style, _open_color in _group_open_colors.items():
+        style.configure(_open_style, background=_open_color, foreground='#FFFFFF',
+                        borderwidth=1, focuscolor=palette['accent'], padding=(16, 14),
+                        anchor='e', font=('Segoe UI', 13, 'bold'), relief='flat')
     for _group_style, _group_color in (
         ('NavGroupOps.TButton', '#3475A5'), ('NavGroupData.TButton', '#34877A'),
         ('NavGroupReports.TButton', '#7A65A1'), ('NavGroupAdmin.TButton', '#A47A45')):
@@ -805,6 +820,9 @@ def make_style(root: Tk, primary: str | None = None, secondary: str | None = Non
                                          ('pressed', palette['sidebar_hover'])],
               foreground=[('active', '#FFFFFF')])
     style.configure('NavHover.TButton', background=palette['sidebar_hover'], foreground='#FFFFFF',
+                    borderwidth=1, focusthickness=1, focuscolor=palette['accent'],
+                    padding=(17, 12), anchor='e', font=('Segoe UI', 10, 'bold'), relief='flat')
+    style.configure('NavActive.TButton', background=palette['sidebar_hover'], foreground='#FFFFFF',
                     borderwidth=1, focusthickness=1, focuscolor=palette['accent'],
                     padding=(17, 12), anchor='e', font=('Segoe UI', 10, 'bold'), relief='flat')
     style.configure('SubNav.TButton', background=palette['surface_alt'], foreground=palette['ink'],
@@ -3106,6 +3124,12 @@ class SchoolPassApp:
             'reports': 'NavGroupReports.TButton',
             'admin': 'NavGroupAdmin.TButton',
         }
+        _group_open_styles = {
+            'operations': 'NavGroupOpsOpen.TButton',
+            'data': 'NavGroupDataOpen.TButton',
+            'reports': 'NavGroupReportsOpen.TButton',
+            'admin': 'NavGroupAdminOpen.TButton',
+        }
 
         def nav_group(key, label, frame_style, title_style):
             # Category headers stay large and visible; content is independently collapsible.
@@ -3113,7 +3137,7 @@ class SchoolPassApp:
             group.pack(fill=X, padx=8, pady=5)
             expanded = {'value': False}
             body = ttk.Frame(group, style=frame_style)
-            toggle = ttk.Button(group, text='＋   ' + label + '   ▾',
+            toggle = ttk.Button(group, text=label,
                                 style=_group_styles.get(key, 'Nav.TButton'))
             toggle.pack(fill=X, padx=5, pady=(4, 3))
 
@@ -3123,18 +3147,18 @@ class SchoolPassApp:
                 if opened:
                     body.pack(fill=X, padx=4, pady=(0, 6))
                     expanded['value'] = True
-                    toggle.configure(text='−   ' + label + '   ▴')
+                    toggle.configure(text=label, style=_group_open_styles.get(key, 'NavHover.TButton'))
                 else:
                     body.pack_forget()
                     expanded['value'] = False
-                    toggle.configure(text='＋   ' + label + '   ▾')
+                    toggle.configure(text=label, style=_group_styles.get(key, 'Nav.TButton'))
 
             def toggle_group():
                 set_open(not expanded['value'])
 
             toggle.configure(command=toggle_group)
-            toggle.bind('<Enter>', lambda _event, target=toggle, style=_group_styles.get(key, 'Nav.TButton'): target.configure(style=style))
-            toggle.bind('<Leave>', lambda _event, target=toggle, style=_group_styles.get(key, 'Nav.TButton'): target.configure(style=style))
+            # ttk's active state already drives the rounded hover surface; do not
+            # overwrite an expanded group style on mouse leave.
             self._sidebar_group_setters[key] = set_open
             if key in _saved_groups:
                 set_open(True)
@@ -3157,9 +3181,14 @@ class SchoolPassApp:
         def toggle_entry_group(_event=None):
             if entry_group.winfo_ismapped():
                 entry_group.pack_forget()
+                entry_toggle.configure(style='Nav.TButton')
             else:
                 entry_group.pack(fill=X, padx=8, pady=(0, 4), before=exit_button)
+                entry_toggle.configure(style='NavActive.TButton')
         entry_toggle.configure(command=toggle_entry_group)
+        entry_toggle.bind('<Enter>', lambda _event: entry_toggle.configure(style='NavHover.TButton'), add='+')
+        entry_toggle.bind('<Leave>', lambda _event: entry_toggle.configure(
+            style='NavActive.TButton' if entry_group.winfo_ismapped() else 'Nav.TButton'), add='+')
 
         data_group = nav_group('data', 'إدارة البيانات', 'SidebarGroupData.TFrame', 'SidebarGroupDataTitle.TLabel')
         if self.current_user['role'] == 'admin':
