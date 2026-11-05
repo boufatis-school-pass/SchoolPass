@@ -5,7 +5,7 @@ compatibility_date = "2026-11-01"
 [[d1_databases]]
 binding = "DB"
 database_name = "schoolpass-cloud"
-database_id = "00000001-00000004-0000511a-0461ce5f5b3059c7cd597e4a3fc196b8"
+database_id = "REPLACE_WITH_D1_DATABASE_UUID"
   migrations_dir = "migrations"
 
 # Configure DEVICE_API_KEY as a Worker secret; never commit its value.
