@@ -41,7 +41,8 @@ def test_windows_tk_installs_rounded_buttons_entries_and_dropdowns():
         style = ttk.Style(root)
         assert getattr(root, "_schoolpass_button_skin_count", 0) >= 6, (
             "Rounded button surfaces were not installed: "
-            + repr(getattr(root, "_schoolpass_button_skin_errors", {}))
+            + " import_error=" + repr(getattr(root, "_schoolpass_button_skin_import_error", None))
+            + " per_style_errors=" + repr(getattr(root, "_schoolpass_button_skin_errors", {}))
         )
 
         # Standard and semantic action buttons must use a rounded image as the
