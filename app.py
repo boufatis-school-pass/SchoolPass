@@ -296,6 +296,84 @@ def _install_rounded_widget_surfaces(root, style, palette: dict[str, str]):
 
 
 
+def _install_rounded_button_surfaces(root, style, palette: dict[str, str]) -> int:
+    """Create true rounded button backgrounds while keeping native text labels visible."""
+    try:
+        from ttkbootstrap import Assets, El, image_element, layout
+        assets = Assets(style)
+    except Exception:
+        return 0
+
+    specs = (
+        ('TButton', palette['button_bg'], palette['button_hover'], palette['button_pressed'], palette['surface_alt'], palette['ink'], 12, 'center'),
+        ('Accent.TButton', palette['primary'], palette['primary_hover'], _shade(palette['primary'], 0.78), _shade(palette['primary'], 0.55), palette['primary_text'], 14, 'center'),
+        ('Gold.TButton', palette['gold'], _shade(palette['gold'], 0.94), _shade(palette['gold'], 0.82), '#C8CBD0', '#26364B', 12, 'center'),
+        ('Success.TButton', palette['good_fg'], _shade(palette['good_fg'], 0.92), _shade(palette['good_fg'], 0.78), '#A9B6B2', '#FFFFFF', 12, 'center'),
+        ('Danger.TButton', palette['danger_fg'], _shade(palette['danger_fg'], 0.92), _shade(palette['danger_fg'], 0.78), '#B9A9AC', '#FFFFFF', 12, 'center'),
+        ('Info.TButton', palette['primary_soft'], palette['selected'], _shade(palette['primary_soft'], 0.94), palette['surface_alt'], palette['primary'], 12, 'center'),
+        ('NavGroupOps.TButton', '#245B86', '#3475A5', '#1D4A70', '#52687E', '#FFFFFF', 13, 'e'),
+        ('NavGroupData.TButton', '#286B62', '#34877A', '#20564F', '#526C67', '#FFFFFF', 13, 'e'),
+        ('NavGroupReports.TButton', '#66518A', '#7A65A1', '#554274', '#6C6478', '#FFFFFF', 13, 'e'),
+        ('NavGroupAdmin.TButton', '#8A6435', '#A47A45', '#704F29', '#777064', '#FFFFFF', 13, 'e'),
+        ('Nav.TButton', palette['sidebar'], palette['sidebar_hover'], _shade(palette['sidebar'], 0.86), palette['sidebar'], palette['sidebar_muted'], 12, 'e'),
+        ('NavHover.TButton', palette['sidebar_hover'], palette['primary'], _shade(palette['sidebar_hover'], 0.88), palette['sidebar'], '#FFFFFF', 12, 'e'),
+        ('SubNav.TButton', palette['surface_alt'], palette['primary_soft'], _shade(palette['surface_alt'], 0.96), palette['surface_alt'], palette['ink'], 10, 'e'),
+        ('SubNavHover.TButton', palette['primary_soft'], palette['selected'], _shade(palette['primary_soft'], 0.94), palette['surface_alt'], palette['primary'], 10, 'e'),
+        ('Link.TButton', palette['surface'], palette['primary_soft'], palette['surface_alt'], palette['surface_alt'], palette['primary'], 10, 'e'),
+    )
+    installed = getattr(root, '_schoolpass_button_skin_keys', set())
+    retained = list(getattr(root, '_schoolpass_button_images', ()))
+    try:
+        theme_name = str(style.theme_use())
+    except Exception:
+        theme_name = 'default'
+
+    count = 0
+    for style_name, fill, hover, pressed, disabled, foreground, radius, anchor in specs:
+        fingerprint = ''.join(ch if ch.isalnum() else '_' for ch in
+                              f'{theme_name}_{style_name}_{fill}_{hover}_{pressed}_{disabled}_{foreground}_{radius}')
+        key = (theme_name, style_name, fingerprint)
+        if key in installed:
+            count += 1
+            continue
+        element_name = f'{style_name}.SchoolPassRounded_{fingerprint}'
+        try:
+            normal_img = assets.rounded_rect(fill, size=(150, 44), radius=radius)
+            hover_img = assets.rounded_rect(hover, size=(150, 44), radius=radius)
+            pressed_img = assets.rounded_rect(pressed, size=(150, 44), radius=radius)
+            disabled_img = assets.rounded_rect(disabled, size=(150, 44), radius=radius)
+            image_element(
+                style, element_name, default=normal_img,
+                states={'disabled': disabled_img, 'pressed': pressed_img, 'active': hover_img},
+                border=radius + 2, sticky='nsew',
+            )
+            layout(
+                style, style_name,
+                El(element_name, sticky='nsew', children=[
+                    El('Button.label', side='left', expand=True)
+                ]),
+            )
+            style.configure(
+                style_name, background=fill, foreground=foreground, borderwidth=0,
+                focusthickness=1, focuscolor=palette['accent'], relief='flat',
+                padding=(15, 10), anchor=anchor,
+            )
+            style.map(
+                style_name,
+                foreground=[('disabled', palette['muted']), ('pressed', foreground),
+                            ('active', foreground), ('!disabled', foreground)],
+            )
+            retained.extend((normal_img, hover_img, pressed_img, disabled_img))
+            installed.add(key)
+            count += 1
+        except Exception:
+            # If a theme cannot build a custom element, native ttk styling remains usable.
+            continue
+    root._schoolpass_button_skin_keys = installed
+    root._schoolpass_button_images = retained
+    return count
+
+
 def _center_toplevel_window(win):
     """Center a mapped dialog over its owner, or over the desktop as a fallback."""
     try:
@@ -741,7 +819,7 @@ def make_style(root: Tk, primary: str | None = None, secondary: str | None = Non
         'TLabel': (10, 'normal'), 'Hint.TLabel': (9, 'normal'), 'Subtitle.TLabel': (10, 'normal'),
         'PageSubtitle.TLabel': (10, 'normal'), 'LoginSubtitle.TLabel': (10, 'normal'),
         'SidebarSub.TLabel': (9, 'normal'), 'SidebarProfileRole.TLabel': (9, 'normal'),
-        'HeroText.TLabel': (10, 'normal'), 'MetricHint.TLabel': (9, 'normal),
+        'HeroText.TLabel': (10, 'normal'), 'MetricHint.TLabel': (9, 'normal'),
         'CardTitle.TLabel': (9, 'normal'), 'DialogMessage.TLabel': (10, 'normal'),
         'ShortcutDesc.TLabel': (10, 'normal'), 'Status.TLabel': (9, 'normal'),
         'TEntry': (10, 'normal'), 'TCombobox': (10, 'normal'), 'Treeview': (10, 'normal'),
@@ -752,6 +830,7 @@ def make_style(root: Tk, primary: str | None = None, secondary: str | None = Non
     # The outer image elements give all entry boxes, combo boxes and main cards
     # genuinely rounded corners. Entry focus and disabled states remain distinct.
     _install_rounded_widget_surfaces(root, style, palette)
+    _install_rounded_button_surfaces(root, style, palette)
 
 
 RTL_SHAPING_ENABLED = True
