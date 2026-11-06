@@ -165,7 +165,8 @@ def db_connect() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH, timeout=15, factory=_ClosingConnection)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys=ON")
-    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=15000")
+    conn.execute("PRAGMA synchronous=NORMAL")
     return conn
 
 
@@ -299,12 +300,15 @@ def _migrate_absence_day_counts(conn: sqlite3.Connection, prior_version: str) ->
 
 def init_db() -> None:
     with db_connect() as conn:
+        # WAL is persistent for this database; set it once at initialization,
+        # not on every short-lived read/write connection.
+        conn.execute("PRAGMA journal_mode=WAL")
         conn.executescript(_SCHEMA)
         # Explicit issue timestamp; older records retain their historical created_at value.
         columns = {r[1] for r in conn.execute("PRAGMA table_info(records)")}
         if "issued_at" not in columns:
             conn.execute("ALTER TABLE records ADD COLUMN issued_at TEXT NOT NULL DEFAULT ''")
-        conn.execute("UPDATE records SET issued_at=created_at WHERE TRIM(COALESCE(issued_at,''))=''")
+            conn.execute("UPDATE records SET issued_at=created_at WHERE TRIM(COALESCE(issued_at,''))=''")
         # Rebuild the immutable trigger so issue timestamp cannot be altered independently.
         # Schema v6 corrects historical absence day counts: the return date is not
         # an absence day. Only this derived value is migrated; record identity,
