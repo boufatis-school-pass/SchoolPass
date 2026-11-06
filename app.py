@@ -7,7 +7,6 @@ import hashlib
 import tempfile
 import subprocess
 import os
-import queue
 import socket
 import sys
 import time
@@ -26,9 +25,9 @@ from tkinter import ttk
 
 import schoolpass_core as core
 from schoolpass_core import (
-    APP_VERSION, SCHOOL_NAME, SERVER_PORT, AUTO_LOCK_SECONDS, DATA_DIR, LOG_PATH,
+    APP_VERSION, SCHOOL_NAME, AUTO_LOCK_SECONDS, DATA_DIR, LOG_PATH,
     PermissionDenied, db_connect, setting, set_setting, audit, date_today, now_iso,
-    kind_label, status_label, student_name, record_by_id, record_by_token, get_user,
+    kind_label, status_label, student_name, record_by_id, get_user,
 )
 
 USER_ERRORS = (ValueError, RuntimeError, PermissionDenied, FileNotFoundError, OSError)
@@ -1185,19 +1184,14 @@ class SchoolPassApp:
         self.root.after(180, self._maximize_on_start)
         self.root.bind('<F11>', lambda _e: self.toggle_fullscreen())
         self.root.bind('<Escape>', lambda _e: self.leave_fullscreen())
-        ok, ip = core.ensure_local_server()
-        self.server_ok = ok
-        host = core.ensure_qr_host_saved() if ok else ''
         role = 'مدير النظام' if user['role'] == 'admin' else 'مشرف'
-        qr_state = f"QR عبر الشبكة: {host}:{SERVER_PORT}" if ok else f"خدمة QR غير متاحة (قد يكون البرنامج مفتوحًا مرتين): {ip}"
-        self.base_status = f"المستخدم: {user['display_name']} ({role})  |  قاعدة البيانات محلية  |  {qr_state}"
+        self.base_status = f"المستخدم: {user['display_name']} ({role})  |  قاعدة البيانات محلية  |  لا توجد خدمات QR أو اتصال خارجي"
         self.status_text.set(self.base_status)
         self.refresh_records()
         self.root.bind_all('<Key>', self.touch)
         self.root.bind_all('<Button>', self.touch)
         self.root.bind('<Configure>', lambda _e: self._sync_window_button() if hasattr(self, 'maximize_button') else None)
         self.root.protocol('WM_DELETE_WINDOW', self.close)
-        self.root.after(1000, self.poll_qr_events)
         self.root.after(5000, self.check_inactivity)
         self.root.after(60 * 60 * 1000, self.periodic_backup)
         mismatch = core.qr_host_mismatch() if ok else None
@@ -2754,7 +2748,6 @@ class SchoolPassApp:
         settings_scroll.pack(fill=BOTH, expand=True, padx=12, pady=4)
         form = settings_scroll.inner
         name = StringVar(value=setting('school_name', SCHOOL_NAME))
-        host = StringVar(value=core.qr_host())
         primary_saved, secondary_saved = core.get_theme_colors()
         primary = StringVar(value=primary_saved)
         secondary = StringVar(value=secondary_saved)
@@ -2763,9 +2756,6 @@ class SchoolPassApp:
         rtl_enabled = BooleanVar(value=True)
         ttk.Label(form, text='اسم المؤسسة على الوصول والتصاريح:').pack(anchor=E)
         ttk.Entry(form, textvariable=name, justify='right').pack(fill=X, pady=6)
-        ttk.Label(form, text='عنوان هذا الحاسوب داخل رموز QR (يُفضّل عنوان ثابت):').pack(anchor=E, pady=(8, 0))
-        ttk.Entry(form, textvariable=host, justify='center').pack(fill=X, pady=6)
-        ttk.Button(form, text=f'استعمال العنوان الحالي ({core.get_local_ip()})', command=lambda: host.set(core.get_local_ip())).pack(anchor=E)
         ttk.Label(form, text='طريقة الطباعة: فتح ملف PDF للمعاينة قبل الطباعة (A6 و100%).', style='SubTitle.TLabel').pack(anchor=E, pady=(10, 0))
         ttk.Label(form, text='ألوان الواجهة (يمكن تغييرها في أي وقت):', style='Title.TLabel').pack(anchor=E, pady=(14, 5))
         color_row = ttk.Frame(form)
@@ -2813,19 +2803,12 @@ class SchoolPassApp:
             selected = filedialog.askdirectory(parent=win, title='اختيار مجلد النسخ الاحتياطي الخارجي')
             if selected: backup_path.set(selected)
         ttk.Button(backup_row, text='اختيار مجلد', command=pick_backup_dir).pack(side=RIGHT)
-        def test_qr():
-            ok, url, detail = core.qr_health_check()
-            if ok:
-                messagebox.showinfo('اختبار QR ناجح', f'خادم التحقق يعمل على هذا الحاسوب.\nالعنوان الذي يمكن اختباره من الهاتف: {url}\nالنتيجة: {detail}', parent=win)
-            else:
-                messagebox.showerror('فشل اختبار QR', f'تعذر الوصول إلى خادم QR.\n{url}\n{detail}', parent=win)
-        ttk.Button(form, text='اختبار رابط QR الآن', command=test_qr).pack(anchor=E, pady=5)
         ttk.Label(win, wraplength=650, justify='right',
-                  text='الهاتف والحاسوب يجب أن يكونا على شبكة Wi-Fi نفسها. استخدم عنوانًا ثابتًا للحاسوب. النسخة الخارجية تُفحص بعد نسخها، ويُفضّل تشفير USB بـ BitLocker. تأكد من تفعيل ضبط الوقت والمنطقة الزمنية تلقائيًا في Windows؛ يمنع البرنامج إصدار رخصة إذا كانت الساعة أقدم من توقيت سجل محفوظ.').pack(pady=8)
+                  text='رمز QR يحتوي بيانات الرخصة ووقت إصدارها وانتهائها فقط؛ لا يتصل بالبرنامج ولا يحتاج إلى شبكة. عند قراءته قارن وقت الهاتف بوقت الانتهاء الظاهر في الرمز.').pack(pady=8)
 
         def save():
             try:
-                core.save_preferences_as(self.current_user['id'], name.get(), host.get(), primary.get(), secondary.get(), late_threshold.get(), backup_path.get(), rtl_enabled.get())
+                core.save_preferences_as(self.current_user['id'], name.get(), primary.get(), secondary.get(), late_threshold.get(), backup_path.get(), rtl_enabled.get())
             except USER_ERRORS as exc:
                 show_error(win, 'تعذر الحفظ', exc)
                 return
@@ -2867,21 +2850,6 @@ class SchoolPassApp:
             tree.insert('', END, values=(r['happened_at'], r['username'] or '—', r['action'], r['target_type'], r['target_id'], r['description']))
 
     # ------------------------------------------------------------ session
-    def poll_qr_events(self):
-        try:
-            while True:
-                token = core.EVENT_QUEUE.get_nowait()
-                if self._locked:
-                    continue  # no data is shown while the session is locked
-                row = record_by_token(token)
-                if row:
-                    audit(None, 'تحقق بواسطة QR (الشبكة المحلية)', 'record', row['id'], row['record_no'])
-                    self.status_text.set(f"تم التحقق من QR للسجل {row['record_no']} ({status_label(row['status'])}) — {now_iso()}؛ راجع سجل العمليات عند الحاجة.")
-        except queue.Empty:
-            pass
-        if self.root.winfo_exists():
-            self.root.after(1000, self.poll_qr_events)
-
     def check_inactivity(self):
         if not self.root.winfo_exists():
             return
@@ -2908,7 +2876,6 @@ class SchoolPassApp:
                 core.automatic_backup_if_due(self.current_user['id'])
             except Exception as exc:
                 messagebox.showwarning('تعذر تحديث النسخة الاحتياطية', f'سيُغلق البرنامج، لكن لم يكتمل آخر تحديث للنسخة الاحتياطية.\n{exc}', parent=self.root)
-            core.stop_local_server()
             self.root.destroy()
 
 
@@ -2931,7 +2898,7 @@ def _single_instance() -> bool:
     global _INSTANCE_LOCK
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
-        s.bind(('127.0.0.1', SERVER_PORT + 1))
+        s.bind(('127.0.0.1', 38765))
     except OSError:
         s.close()
         return False
