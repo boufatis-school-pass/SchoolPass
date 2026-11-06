@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""SchoolPass core logic (no GUI imports): database, security, import, records, PDF, QR server, backup.
+"""SchoolPass core logic (no GUI imports): database, security, import, records, PDF, static QR, backup.
 
 Every function that changes data takes the acting ``user_id`` and checks the role/active flag
 in the database itself, so permissions do not depend on which buttons the GUI shows.
@@ -11,32 +11,25 @@ from collections import Counter
 import csv
 import hashlib
 import hmac
-import html
 import io
 import json
 import os
-import queue
 import re
 import secrets
-import socket
 import sqlite3
-import threading
 import time
 from datetime import date, datetime, timedelta
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import NamedTuple
 
 APP_NAME = "SchoolPass"
-APP_VERSION = "4.9.3"
+APP_VERSION = "3.0.0"
 SCHOOL_NAME = "ثانوية المجاهد بسجراري لخضر بوفاطيس"
 MINISTRY_NAME = "الجمهورية الجزائرية الديمقراطية الشعبية — وزارة التربية الوطنية"
-SERVER_PORT = 8765
+QR_VALIDITY_HOURS = 2
 AUTO_LOCK_SECONDS = 600
 RECORD_KINDS = ("late", "absence_return", "special_entry", "exit_permit", "exit_return")
 ABSENCE_CERTIFICATE_MAX_DURATION_DAYS = 2
-RECORD_VALIDITY_HOURS = 2
-TIME_LIMITED_RECORD_KINDS = frozenset({"late", "absence_return", "special_entry", "exit_return"})
 # Backward-compatible alias for integrations that referenced the earlier constant name.
 ABSENCE_CERTIFICATE_MAX_DATE_DIFFERENCE = ABSENCE_CERTIFICATE_MAX_DURATION_DAYS
 
@@ -62,9 +55,6 @@ def app_data_dir() -> Path:
 DATA_DIR = app_data_dir()
 DB_PATH = DATA_DIR / "schoolpass.sqlite3"
 LOG_PATH = DATA_DIR / "logs" / "schoolpass.log"
-EVENT_QUEUE: "queue.Queue[str]" = queue.Queue(maxsize=200)
-_SERVER: ThreadingHTTPServer | None = None
-_SERVER_THREAD: threading.Thread | None = None
 
 
 def now_iso() -> str:
@@ -81,27 +71,6 @@ _AR_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567
 
 def normalize_digits(text: str) -> str:
     return str(text or "").translate(_AR_DIGITS)
-
-
-def get_local_ip() -> str:
-    """Resolve the local interface address without requiring Internet access."""
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    try:
-        s.connect(("192.0.2.1", 80))  # UDP connect sends no data
-        ip = s.getsockname()[0]
-        if ip and not ip.startswith("127."):
-            return ip
-    except OSError:
-        pass
-    finally:
-        s.close()
-    try:
-        for ip in socket.gethostbyname_ex(socket.gethostname())[2]:
-            if not ip.startswith("127."):
-                return ip
-    except OSError:
-        pass
-    return "127.0.0.1"
 
 
 # ----------------------------------------------------------------------------- passwords
@@ -200,7 +169,7 @@ def db_connect() -> sqlite3.Connection:
     return conn
 
 
-SCHEMA_VERSION = "9"
+SCHEMA_VERSION = "6"
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -228,56 +197,6 @@ CREATE TABLE IF NOT EXISTS students (
     active INTEGER NOT NULL DEFAULT 1,
     imported_at TEXT NOT NULL
 );
--- Guardian identity is encrypted with Windows DPAPI; the HMAC is used only for duplicate detection.
-CREATE TABLE IF NOT EXISTS guardians (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    full_name TEXT NOT NULL,
-    national_id_enc TEXT NOT NULL,
-    national_id_hash TEXT NOT NULL UNIQUE,
-    national_id_last4 TEXT NOT NULL,
-    national_id_length INTEGER NOT NULL,
-    phone TEXT NOT NULL DEFAULT '',
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    created_by INTEGER,
-    updated_by INTEGER,
-    FOREIGN KEY(created_by) REFERENCES users(id),
-    FOREIGN KEY(updated_by) REFERENCES users(id)
-);
-CREATE TABLE IF NOT EXISTS student_guardians (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    student_id INTEGER NOT NULL,
-    guardian_id INTEGER NOT NULL,
-    relationship TEXT NOT NULL CHECK(relationship IN ('الأب','الأم','الوصي بالكفالة','أخرى')),
-    relationship_other TEXT NOT NULL DEFAULT '',
-    is_primary INTEGER NOT NULL DEFAULT 0 CHECK(is_primary IN (0,1)),
-    created_at TEXT NOT NULL,
-    created_by INTEGER,
-    UNIQUE(student_id, guardian_id),
-    FOREIGN KEY(student_id) REFERENCES students(id),
-    FOREIGN KEY(guardian_id) REFERENCES guardians(id),
-    FOREIGN KEY(created_by) REFERENCES users(id)
-);
-CREATE INDEX IF NOT EXISTS idx_student_guardians_student ON student_guardians(student_id, is_primary DESC);
-CREATE INDEX IF NOT EXISTS idx_student_guardians_guardian ON student_guardians(guardian_id);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_student_guardians_one_primary
-    ON student_guardians(student_id) WHERE is_primary=1;
-CREATE TABLE IF NOT EXISTS teachers (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    full_name TEXT NOT NULL,
-    subject TEXT NOT NULL,
-    classes TEXT NOT NULL DEFAULT '',
-    active INTEGER NOT NULL DEFAULT 1,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    created_by INTEGER,
-    updated_by INTEGER,
-    FOREIGN KEY(created_by) REFERENCES users(id),
-    FOREIGN KEY(updated_by) REFERENCES users(id)
-);
-CREATE INDEX IF NOT EXISTS idx_teachers_active_name ON teachers(active, full_name);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_teachers_name_subject
-    ON teachers(lower(trim(full_name)), lower(trim(subject)));
 CREATE TABLE IF NOT EXISTS records (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     record_no TEXT NOT NULL UNIQUE,
@@ -299,8 +218,6 @@ CREATE TABLE IF NOT EXISTS records (
     returned_at TEXT DEFAULT '',
     returned_by INTEGER,
     printed_count INTEGER NOT NULL DEFAULT 0,
-    exit_executed_at TEXT NOT NULL DEFAULT '',
-    exit_executed_by INTEGER,
     FOREIGN KEY(user_id) REFERENCES users(id),
     FOREIGN KEY(related_record_id) REFERENCES records(id),
     FOREIGN KEY(cancelled_by) REFERENCES users(id),
@@ -316,19 +233,6 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     description TEXT NOT NULL DEFAULT '',
     FOREIGN KEY(user_id) REFERENCES users(id)
 );
-CREATE TABLE IF NOT EXISTS student_notes (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    student_key TEXT NOT NULL,
-    note TEXT NOT NULL CHECK(length(trim(note)) BETWEEN 1 AND 500),
-    created_at TEXT NOT NULL,
-    user_id INTEGER,
-    FOREIGN KEY(user_id) REFERENCES users(id)
-);
-CREATE INDEX IF NOT EXISTS idx_student_notes_key_time ON student_notes(student_key, created_at DESC);
-CREATE TRIGGER IF NOT EXISTS trg_student_notes_no_update BEFORE UPDATE ON student_notes
-BEGIN SELECT RAISE(ABORT, 'append-only student notes'); END;
-CREATE TRIGGER IF NOT EXISTS trg_student_notes_no_delete BEFORE DELETE ON student_notes
-BEGIN SELECT RAISE(ABORT, 'append-only student notes'); END;
 CREATE TABLE IF NOT EXISTS settings (
     setting_key TEXT PRIMARY KEY,
     setting_value TEXT NOT NULL
@@ -400,10 +304,6 @@ def init_db() -> None:
         columns = {r[1] for r in conn.execute("PRAGMA table_info(records)")}
         if "issued_at" not in columns:
             conn.execute("ALTER TABLE records ADD COLUMN issued_at TEXT NOT NULL DEFAULT ''")
-        if "exit_executed_at" not in columns:
-            conn.execute("ALTER TABLE records ADD COLUMN exit_executed_at TEXT NOT NULL DEFAULT ''")
-        if "exit_executed_by" not in columns:
-            conn.execute("ALTER TABLE records ADD COLUMN exit_executed_by INTEGER")
         conn.execute("UPDATE records SET issued_at=created_at WHERE TRIM(COALESCE(issued_at,''))=''")
         # Rebuild the immutable trigger so issue timestamp cannot be altered independently.
         # Schema v6 corrects historical absence day counts: the return date is not
@@ -423,13 +323,20 @@ def init_db() -> None:
         conn.execute("INSERT OR IGNORE INTO settings(setting_key,setting_value) VALUES('theme_primary','#185A8D')")
         conn.execute("INSERT OR IGNORE INTO settings(setting_key,setting_value) VALUES('theme_secondary','#F2F5F9')")
         conn.execute("INSERT OR IGNORE INTO settings(setting_key,setting_value) VALUES('late_alert_threshold','3')")
-        conn.execute("INSERT OR IGNORE INTO settings(setting_key,setting_value) VALUES('absence_alert_threshold_days','5')")
         conn.execute("INSERT OR IGNORE INTO settings(setting_key,setting_value) VALUES('rtl_shaping','1')")
         conn.execute("INSERT OR IGNORE INTO settings(setting_key,setting_value) VALUES('external_backup_path','')")
+        conn.execute("DELETE FROM settings WHERE setting_key='qr_host'")
         # Older experimental silent printing could ignore A6; force safe PDF preview after upgrade.
         conn.execute("UPDATE settings SET setting_value='open' WHERE setting_key='print_mode' AND setting_value='direct'")
+        # A rollback to this application version must never lower a newer database
+        # schema marker. Newer tables/columns are intentionally left untouched.
+        try:
+            effective_schema_version = str(max(int(prior_version or "0"), int(SCHEMA_VERSION)))
+        except (TypeError, ValueError):
+            effective_schema_version = SCHEMA_VERSION
         conn.execute("INSERT INTO settings(setting_key,setting_value) VALUES('schema_version',?) "
-                     "ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value", (SCHEMA_VERSION,))
+                     "ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value",
+                     (effective_schema_version,))
 
 
 def check_database_integrity() -> None:
@@ -453,57 +360,6 @@ def set_setting(key: str, value: str) -> None:
     with db_connect() as conn:
         conn.execute("INSERT INTO settings(setting_key,setting_value) VALUES(?,?) "
                      "ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value", (key, value))
-
-
-def cloud_bridge_url() -> str:
-    """Return the configured HTTPS Cloudflare Worker base URL, without a trailing slash."""
-    return setting("cloud_bridge_url", "").strip().rstrip("/")
-
-
-def cloud_bridge_config() -> dict[str, str]:
-    """Read the Worker URL and decrypt its device key with the current Windows profile."""
-    encrypted = setting("cloud_bridge_api_key_enc", "").strip()
-    api_key = reveal_sensitive_text(encrypted) if encrypted else ""
-    return {"url": cloud_bridge_url(), "api_key": api_key}
-
-
-def save_cloud_bridge_url_as(actor, url: str) -> str:
-    """Admin-only configuration of a public HTTPS Worker URL; local IPs are rejected."""
-    admin = require_admin(actor)
-    value = str(url or "").strip().rstrip("/")
-    if value:
-        if not re.fullmatch(r"https://[A-Za-z0-9.-]+(?::443)?", value, re.I):
-            raise ValueError("أدخل رابط Cloudflare Worker كاملًا ويبدأ بـ https://، دون مسار أو رمز سري.")
-        host = value.split("://", 1)[1].split(":", 1)[0]
-        if "." not in host or host.lower() in {"localhost", "127.0.0.1"}:
-            raise ValueError("يجب أن يكون عنوان الخدمة عنوانًا عامًا على الإنترنت.")
-    previous = cloud_bridge_url()
-    set_setting("cloud_bridge_url", value)
-    audit(admin["id"], "تغيير رابط Cloudflare", "settings", "cloud_bridge_url", value or "تعطيل الربط")
-    return value
-
-
-def save_cloud_bridge_api_key_as(actor, api_key: str) -> None:
-    """Encrypt the shared device key at rest using Windows DPAPI before saving it."""
-    admin = require_admin(actor)
-    value = str(api_key or "").strip()
-    if not value:
-        set_setting("cloud_bridge_api_key_enc", "")
-        audit(admin["id"], "مسح مفتاح Cloudflare", "settings", "cloud_bridge_api_key_enc", "تم مسح المفتاح")
-        return
-    if len(value) < 32 or len(value) > 256 or not re.fullmatch(r"[A-Za-z0-9._~-]+", value):
-        raise ValueError("مفتاح الربط يجب أن يكون بين 32 و256 محرفًا لاتينيًا آمنًا.")
-    encrypted = protect_sensitive_text(value)
-    set_setting("cloud_bridge_api_key_enc", encrypted)
-    audit(admin["id"], "تحديث مفتاح Cloudflare", "settings", "cloud_bridge_api_key_enc", "تم حفظ المفتاح مشفرًا بواسطة Windows DPAPI")
-
-
-def generate_cloud_bridge_key_as(actor) -> str:
-    """Create a high-entropy device key, store it encrypted, and return it once for Worker setup."""
-    key = secrets.token_urlsafe(48)
-    save_cloud_bridge_api_key_as(actor, key)
-    return key
-
 
 
 def audit(user_id: int | None, action: str, target_type: str = "", target_id="", description: str = "") -> None:
@@ -936,220 +792,6 @@ def get_student(key: str) -> sqlite3.Row | None:
 _PREFIXES = {"late": "SP", "absence_return": "SP", "special_entry": "SP", "exit_permit": "SP", "exit_return": "SP"}
 
 
-
-
-def _teacher_text(value: str, label: str, limit: int) -> str:
-    value = re.sub(r"\s+", " ", str(value or "")).strip()
-    if not value:
-        raise ValueError(f"أدخل {label}.")
-    if len(value) > limit:
-        raise ValueError(f"{label} طويل جدًا (الحد الأقصى {limit} حرفًا).")
-    return value
-
-
-def list_teachers(active_only: bool = True) -> list[sqlite3.Row]:
-    query = "SELECT * FROM teachers"
-    if active_only:
-        query += " WHERE active=1"
-    query += " ORDER BY full_name COLLATE NOCASE, subject COLLATE NOCASE, id"
-    with db_connect() as conn:
-        return conn.execute(query).fetchall()
-
-
-def search_teachers(query: str = "", limit: int = 15) -> list[sqlite3.Row]:
-    q = re.sub(r"\s+", " ", str(query or "")).strip()
-    with db_connect() as conn:
-        return conn.execute(
-            "SELECT * FROM teachers WHERE active=1 AND (full_name LIKE ? OR subject LIKE ? OR classes LIKE ?) "
-            "ORDER BY full_name COLLATE NOCASE, subject COLLATE NOCASE LIMIT ?",
-            (f"%{q}%", f"%{q}%", f"%{q}%", max(1, min(int(limit), 50))),
-        ).fetchall()
-
-
-def get_teacher(teacher_id: int, active_only: bool = False) -> sqlite3.Row | None:
-    with db_connect() as conn:
-        query = "SELECT * FROM teachers WHERE id=?" + (" AND active=1" if active_only else "")
-        return conn.execute(query, (int(teacher_id),)).fetchone()
-
-
-def create_teacher_as(actor, full_name: str, subject: str, classes: str = "") -> sqlite3.Row:
-    admin = require_admin(actor)
-    name = _teacher_text(full_name, "اسم الأستاذ", 120)
-    subject_text = _teacher_text(subject, "المادة", 100)
-    classes_text = re.sub(r"\s+", " ", str(classes or "")).strip()
-    if len(classes_text) > 240:
-        raise ValueError("قائمة الأقسام طويلة جدًا (الحد الأقصى 240 حرفًا).")
-    timestamp = now_iso()
-    try:
-        with db_connect() as conn:
-            cur = conn.execute(
-                "INSERT INTO teachers(full_name,subject,classes,active,created_at,updated_at,created_by,updated_by) "
-                "VALUES(?,?,?,1,?,?,?,?)",
-                (name, subject_text, classes_text, timestamp, timestamp, admin["id"], admin["id"]),
-            )
-            teacher_id = cur.lastrowid
-            conn.execute(
-                "INSERT INTO audit_logs(happened_at,user_id,action,target_type,target_id,description) VALUES(?,?,?,?,?,?)",
-                (timestamp, admin["id"], "إضافة أستاذ", "teacher", str(teacher_id), f"{name} — {subject_text}"),
-            )
-            return conn.execute("SELECT * FROM teachers WHERE id=?", (teacher_id,)).fetchone()
-    except sqlite3.IntegrityError as exc:
-        raise ValueError("هذا الأستاذ مسجل مسبقًا بالمادة نفسها.") from exc
-
-
-def update_teacher_as(actor, teacher_id: int, full_name: str, subject: str, classes: str = "") -> sqlite3.Row:
-    admin = require_admin(actor)
-    name = _teacher_text(full_name, "اسم الأستاذ", 120)
-    subject_text = _teacher_text(subject, "المادة", 100)
-    classes_text = re.sub(r"\s+", " ", str(classes or "")).strip()
-    if len(classes_text) > 240:
-        raise ValueError("قائمة الأقسام طويلة جدًا (الحد الأقصى 240 حرفًا).")
-    timestamp = now_iso()
-    try:
-        with db_connect() as conn:
-            old = conn.execute("SELECT * FROM teachers WHERE id=?", (int(teacher_id),)).fetchone()
-            if not old:
-                raise ValueError("الأستاذ غير موجود.")
-            conn.execute(
-                "UPDATE teachers SET full_name=?,subject=?,classes=?,updated_at=?,updated_by=? WHERE id=?",
-                (name, subject_text, classes_text, timestamp, admin["id"], int(teacher_id)),
-            )
-            conn.execute(
-                "INSERT INTO audit_logs(happened_at,user_id,action,target_type,target_id,description) VALUES(?,?,?,?,?,?)",
-                (timestamp, admin["id"], "تعديل بيانات أستاذ", "teacher", str(teacher_id),
-                 f"{old['full_name']} — {old['subject']} ← {name} — {subject_text}"),
-            )
-            return conn.execute("SELECT * FROM teachers WHERE id=?", (int(teacher_id),)).fetchone()
-    except sqlite3.IntegrityError as exc:
-        raise ValueError("يوجد أستاذ مسجل بالاسم والمادة نفسيهما.") from exc
-
-
-def set_teacher_active_as(actor, teacher_id: int, active: bool) -> None:
-    admin = require_admin(actor)
-    with db_connect() as conn:
-        row = conn.execute("SELECT * FROM teachers WHERE id=?", (int(teacher_id),)).fetchone()
-        if not row:
-            raise ValueError("الأستاذ غير موجود.")
-        conn.execute("UPDATE teachers SET active=?,updated_at=?,updated_by=? WHERE id=?",
-                     (1 if active else 0, now_iso(), admin["id"], int(teacher_id)))
-        conn.execute(
-            "INSERT INTO audit_logs(happened_at,user_id,action,target_type,target_id,description) VALUES(?,?,?,?,?,?)",
-            (now_iso(), admin["id"], "تفعيل أستاذ" if active else "إيقاف أستاذ", "teacher",
-             str(teacher_id), f"{row['full_name']} — {row['subject']}"),
-        )
-
-
-def _read_teacher_rows(path: str) -> list[dict]:
-    suffix = Path(path).suffix.lower()
-    if suffix in (".xlsx", ".xlsm"):
-        from openpyxl import load_workbook
-        workbook = load_workbook(path, read_only=True, data_only=True)
-        try:
-            rows = [list(row) for row in workbook.active.iter_rows(values_only=True)]
-        finally:
-            workbook.close()
-    elif suffix == ".csv":
-        with open(path, "r", encoding="utf-8-sig", newline="") as stream:
-            rows = list(csv.reader(stream))
-    else:
-        raise ValueError("استعمل ملف Excel بصيغة .xlsx أو .xlsm أو ملف CSV.")
-    if not rows:
-        raise ValueError("الملف فارغ.")
-    def key(value):
-        return re.sub(r"[\s_\-]+", "", _norm_header(value)).lower()
-    headers = [key(value) for value in rows[0]]
-    name_keys = {"اسمالأستاذ", "اسمالاستاذ", "الأستاذ", "الاستاذ", "الاسمواللقب", "teachername", "fullname", "name"}
-    subject_keys = {"المادة", "المادةالدراسية", "التخصص", "subject", "discipline"}
-    class_keys = {"الأقسام", "القسم", "الأقسامالمسندة", "classes", "class", "sections"}
-    def index_for(choices):
-        return next((i for i, item in enumerate(headers) if item in choices), None)
-    ni, si, ci = index_for(name_keys), index_for(subject_keys), index_for(class_keys)
-    if ni is None or si is None:
-        raise ValueError("يجب أن يحتوي الصف الأول على عمودَي اسم الأستاذ والمادة، ويمكن إضافة عمود الأقسام.")
-    prepared = []
-    for row_no, values in enumerate(rows[1:], start=2):
-        def cell(i):
-            return "" if i is None or i >= len(values) or values[i] is None else str(values[i]).strip()
-        name, subject, classes = cell(ni), cell(si), cell(ci)
-        if name or subject or classes:
-            prepared.append({"row": row_no, "full_name": name, "subject": subject, "classes": classes})
-    return prepared
-
-
-def preview_teacher_import(path: str) -> dict:
-    source = _read_teacher_rows(path)
-    with db_connect() as conn:
-        existing_rows = conn.execute("SELECT full_name,subject FROM teachers").fetchall()
-    existing = {(re.sub(r"\s+", " ", r["full_name"]).strip().casefold(),
-                  re.sub(r"\s+", " ", r["subject"]).strip().casefold()) for r in existing_rows}
-    seen, preview = set(), []
-    counts = {"ready": 0, "existing": 0, "duplicate_file": 0, "invalid": 0}
-    for item in source:
-        name = re.sub(r"\s+", " ", item["full_name"]).strip()
-        subject = re.sub(r"\s+", " ", item["subject"]).strip()
-        key = (name.casefold(), subject.casefold())
-        status, message = "ready", "جاهز للإضافة"
-        if not name or not subject or len(name) > 120 or len(subject) > 100 or len(item["classes"]) > 240:
-            status, message = "invalid", "بيانات ناقصة أو أطول من الحد المسموح"
-        elif key in existing:
-            status, message = "existing", "مسجل مسبقًا — لن تتغير بياناته"
-        elif key in seen:
-            status, message = "duplicate_file", "مكرر داخل الملف — ستُضاف نسخة واحدة فقط"
-        else:
-            seen.add(key)
-        counts[status] += 1
-        preview.append({**item, "full_name": name, "subject": subject, "status": status, "message": message})
-    return {"rows": preview, "counts": counts, "total": len(preview)}
-
-
-def import_teachers_as(path: str, actor) -> dict:
-    admin = require_admin(actor)
-    preview = preview_teacher_import(path)
-    added = 0
-    timestamp = now_iso()
-    with db_connect() as conn:
-        conn.execute("BEGIN IMMEDIATE")
-        for item in preview["rows"]:
-            if item["status"] != "ready":
-                continue
-            try:
-                conn.execute(
-                    "INSERT INTO teachers(full_name,subject,classes,active,created_at,updated_at,created_by,updated_by) "
-                    "VALUES(?,?,?,1,?,?,?,?)",
-                    (item["full_name"], item["subject"], item["classes"], timestamp, timestamp, admin["id"], admin["id"]),
-                )
-                added += 1
-            except sqlite3.IntegrityError:
-                pass
-        conn.execute(
-            "INSERT INTO audit_logs(happened_at,user_id,action,target_type,target_id,description) VALUES(?,?,?,?,?,?)",
-            (timestamp, admin["id"], "استيراد قائمة الأساتذة", "teacher", "",
-             f"أضيف {added} أستاذًا؛ لم تُستبدل أو تُحذف أي بيانات موجودة."),
-        )
-    return {"added": added, "preview": preview}
-
-
-def list_active_accounts() -> list[sqlite3.Row]:
-    with db_connect() as conn:
-        return conn.execute(
-            "SELECT id,username,display_name,role FROM users WHERE active=1 "
-            "ORDER BY CASE role WHEN 'admin' THEN 0 ELSE 1 END, display_name COLLATE NOCASE"
-        ).fetchall()
-
-
-def search_students(query: str = "", limit: int = 20) -> list[sqlite3.Row]:
-    q = re.sub(r"\s+", " ", str(query or "")).strip()
-    p = f"%{q}%"
-    with db_connect() as conn:
-        return conn.execute(
-            "SELECT * FROM students WHERE active=1 AND "
-            "(student_key LIKE ? OR last_name LIKE ? OR first_name LIKE ? OR "
-            "(last_name||' '||first_name) LIKE ? OR (first_name||' '||last_name) LIKE ? OR class_name LIKE ?) "
-            "ORDER BY last_name COLLATE NOCASE, first_name COLLATE NOCASE LIMIT ?",
-            (p, p, p, p, p, p, max(1, min(int(limit), 50))),
-        ).fetchall()
-
-
 def next_record_no(kind: str, conn: sqlite3.Connection) -> str:
     prefix, year = _PREFIXES.get(kind, "SP"), date.today().year
     stem = f"{prefix}-{year}-"
@@ -1258,79 +900,6 @@ def monthly_late_count(student_key: str, month: str | None = None) -> int:
                                 (str(student_key), month)).fetchone()[0])
 
 
-
-
-def list_student_notes(student_key: str, user_id) -> list[dict]:
-    """List the pupil's append-only administrative notes for active staff."""
-    require_user(user_id)
-    with db_connect() as conn:
-        rows=conn.execute(
-            """SELECT n.id,n.student_key,n.note,n.created_at,n.user_id,
-                      COALESCE(u.display_name,'غير معروف') AS supervisor
-               FROM student_notes n LEFT JOIN users u ON u.id=n.user_id
-               WHERE n.student_key=? ORDER BY n.created_at DESC,n.id DESC LIMIT 200""",
-            (str(student_key),)).fetchall()
-    return [dict(r) for r in rows]
-
-
-def add_student_note(student_key: str, user_id, note: str) -> dict:
-    """Append an administrative note; database triggers prevent later edits/deletion."""
-    actor=require_user(user_id)
-    key,value=str(student_key or '').strip(),str(note or '').strip()
-    if not key or not value:
-        raise ValueError("اكتب الملاحظة الإدارية وحدد التلميذ.")
-    if len(value)>500:
-        raise ValueError("الملاحظة الإدارية طويلة جدًا؛ الحد الأقصى 500 حرف.")
-    with db_connect() as conn:
-        conn.execute("BEGIN IMMEDIATE")
-        if not conn.execute("SELECT 1 FROM students WHERE student_key=?",(key,)).fetchone():
-            raise ValueError("التلميذ غير موجود في قاعدة البيانات.")
-        cur=conn.execute("INSERT INTO student_notes(student_key,note,created_at,user_id) VALUES(?,?,?,?)",
-                         (key,value,now_iso(),actor["id"]))
-        note_id=int(cur.lastrowid)
-        conn.execute("INSERT INTO audit_logs(happened_at,user_id,action,target_type,target_id,description) VALUES(?,?,?,?,?,?)",
-                     (now_iso(),actor["id"],"إضافة ملاحظة إدارية للتلميذ","student_note",str(note_id),
-                      f"التلميذ: {key}؛ أضيفت ملاحظة إدارية."))
-        row=conn.execute(
-            """SELECT n.id,n.student_key,n.note,n.created_at,n.user_id,
-                      COALESCE(u.display_name,'غير معروف') AS supervisor
-               FROM student_notes n LEFT JOIN users u ON u.id=n.user_id WHERE n.id=?""",
-            (note_id,)).fetchone()
-    return dict(row)
-
-
-def student_monthly_attention(student_key: str, user_id, month: str | None = None) -> dict:
-    """Count monthly lates and real absence-days overlapping the selected calendar month."""
-    require_user(user_id)
-    month=month or date.today().strftime("%Y-%m")
-    if not re.fullmatch(r"\d{4}-\d{2}",month):
-        raise ValueError("صيغة الشهر غير صحيحة؛ استعمل YYYY-MM.")
-    try:
-        year,number=(int(x) for x in month.split("-"))
-        start_month=date(year,number,1)
-        next_month=date(year+1,1,1) if number==12 else date(year,number+1,1)
-    except ValueError as exc:
-        raise ValueError("الشهر المحدد غير صحيح.") from exc
-    late_count=monthly_late_count(str(student_key),month)
-    with db_connect() as conn:
-        absence_rows=conn.execute(
-            "SELECT details_json FROM records WHERE student_key=? AND kind='absence_return' AND status<>'cancelled'",
-            (str(student_key),)).fetchall()
-    days=0
-    for row in absence_rows:
-        try:
-            details=json.loads(row["details_json"] or "{}")
-            first=date.fromisoformat(str(details.get("absence_start",""))[:10])
-            last=date.fromisoformat(str(details.get("return_date",""))[:10])
-            left,right=max(first,start_month),min(last,next_month)
-            if right>left: days+=(right-left).days
-        except (ValueError,TypeError,json.JSONDecodeError):
-            continue
-    notes_rows=list_student_notes(str(student_key),user_id)
-    return {"month":month,"late_count":int(late_count),"absence_days":int(days),
-            "absence_return_count":len(absence_rows),"note_count":len(notes_rows),"recent_notes":notes_rows[:2]}
-
-
 LATE_REASON_LABELS = {
     "consultation": "التواجد في الاستشارة",
     "transport": "التأخر بسبب انعدام النقل",
@@ -1360,7 +929,7 @@ def create_late_slip(student, user_id, reason: str, note: str = "") -> sqlite3.R
 
 
 def create_special_entry(student, user_id, entry_reason: str, teacher_name: str = "",
-                          subject: str = "", note: str = "", teacher_id: int | None = None) -> sqlite3.Row:
+                         subject: str = "", note: str = "") -> sqlite3.Row:
     """Create a special entry permit without counting it as an ordinary absence."""
     entry_reason = str(entry_reason or "").strip()
     teacher_name, subject, note = str(teacher_name or "").strip(), str(subject or "").strip(), str(note or "").strip()
@@ -1370,15 +939,9 @@ def create_special_entry(student, user_id, entry_reason: str, teacher_name: str 
         raise ValueError("الملاحظة طويلة جدًا (الحد الأقصى 200 حرف).")
     details = {"entry_reason": entry_reason, "entry_reason_label": SPECIAL_ENTRY_LABELS[entry_reason]}
     if entry_reason == "class_expulsion":
-        if teacher_id is not None:
-            teacher = get_teacher(int(teacher_id), active_only=True)
-            if not teacher:
-                raise ValueError("الأستاذ المحدد غير موجود أو غير نشط. حدّث القائمة واختر أستاذًا نشطًا.")
-            teacher_name, subject = str(teacher["full_name"]), str(teacher["subject"])
-            details["expelling_teacher_id"] = int(teacher["id"])
         if not teacher_name or not subject:
-            raise ValueError("عند الطرد من الحصة يجب إدخال اسم الأستاذ والمادة واختيارهما من قائمة الأساتذة.")
-        if len(teacher_name) > 120 or len(subject) > 100:
+            raise ValueError("عند الطرد من الحصة يجب تسجيل اسم الأستاذ والمادة.")
+        if len(teacher_name) > 100 or len(subject) > 80:
             raise ValueError("اسم الأستاذ أو المادة أطول من الحد المسموح.")
         details.update({"expelling_teacher": teacher_name, "subject": subject})
         reason = f"{SPECIAL_ENTRY_LABELS[entry_reason]} — الأستاذ: {teacher_name} — المادة: {subject}"
@@ -1486,239 +1049,6 @@ def validate_national_id(value: str) -> str:
     return nid
 
 
-GUARDIAN_RELATIONSHIPS = ("الأب", "الأم", "الوصي بالكفالة", "أخرى")
-
-
-def _guardian_national_id_hash(national_id: str) -> str:
-    """Keyed digest used to detect duplicate guardian identities without storing an ID in clear text."""
-    secret = setting("secret")
-    if not secret:
-        raise RuntimeError("مفتاح حماية قاعدة البيانات غير موجود؛ أعد تشغيل تهيئة SchoolPass قبل تسجيل ولي جديد.")
-    return hmac.new(secret.encode("utf-8"), national_id.encode("ascii"), hashlib.sha256).hexdigest()
-
-
-def list_student_guardians(student_id: int, user_id) -> list[dict]:
-    """Return linked guardians for permit forms; full IDs are decrypted only in memory and access is audited."""
-    user = require_user(user_id)
-    with db_connect() as conn:
-        rows = conn.execute(
-            """SELECT g.id,g.full_name,g.national_id_enc,g.national_id_last4,g.national_id_length,g.phone,
-                      sg.relationship,sg.relationship_other,sg.is_primary
-               FROM student_guardians sg JOIN guardians g ON g.id=sg.guardian_id
-               WHERE sg.student_id=? ORDER BY sg.is_primary DESC, g.full_name COLLATE NOCASE""",
-            (int(student_id),),
-        ).fetchall()
-    result = []
-    for row in rows:
-        item = dict(row)
-        try:
-            item["national_id"] = reveal_sensitive_text(item.pop("national_id_enc"))
-        except Exception as exc:
-            raise RuntimeError(
-                "تعذر فك تشفير رقم بطاقة الولي على حساب Windows الحالي. "
-                "استعمل حساب Windows الذي سُجلت به البيانات أو اطلب من المدير نقلها بطريقة آمنة."
-            ) from exc
-        item["national_id_masked"] = "*" * max(4, int(item["national_id_length"] or 0) - 4) + item["national_id_last4"]
-        item["relationship_label"] = item["relationship_other"] if item["relationship"] == "أخرى" else item["relationship"]
-        result.append(item)
-    if rows:
-        audit(user["id"], "عرض بيانات أولياء التلميذ", "student", student_id,
-              f"عدد الأولياء المعروضين: {len(rows)}؛ أرقام الهوية لم تُدرج في سجل التدقيق.")
-    return result
-
-
-def create_guardian_for_student(actor, student_id: int, full_name: str, relationship: str,
-                                national_id: str, phone: str = "", relationship_other: str = "",
-                                make_primary: bool = False) -> dict:
-    """Create or reuse a guardian profile, link it to a student, and optionally mark it primary.
-    
-    Supervisors may add guardians while issuing a permit. The full ID is never stored in clear text.
-    """
-    user = require_user(actor)
-    name = re.sub(r"\s+", " ", str(full_name or "")).strip()
-    rel = str(relationship or "").strip()
-    other = re.sub(r"\s+", " ", str(relationship_other or "")).strip()
-    phone_text = re.sub(r"\s+", " ", str(phone or "")).strip()
-    if not name or len(name) > 120:
-        raise ValueError("أدخل الاسم الكامل للولي (حتى 120 حرفًا).")
-    if rel not in GUARDIAN_RELATIONSHIPS:
-        raise ValueError("اختر صلة القرابة من القائمة.")
-    if rel == "أخرى" and (not other or len(other) > 80):
-        raise ValueError("حدد صلة القرابة الأخرى (حتى 80 حرفًا).")
-    if len(phone_text) > 30:
-        raise ValueError("رقم الهاتف طويل جدًا (الحد الأقصى 30 حرفًا).")
-    nid = validate_national_id(national_id)
-    try:
-        encrypted = protect_sensitive_text(nid)
-    except Exception as exc:
-        raise RuntimeError(f"تعذر تشفير رقم بطاقة الولي على حساب Windows الحالي؛ لم تُحفظ البيانات.\n{exc}") from exc
-    digest = _guardian_national_id_hash(nid)
-    stamp = now_iso()
-    student_id = int(student_id)
-    with db_connect() as conn:
-        conn.execute("BEGIN IMMEDIATE")
-        if not conn.execute("SELECT 1 FROM students WHERE id=?", (student_id,)).fetchone():
-            raise ValueError("التلميذ غير موجود؛ حدّث قائمة التلاميذ ثم أعد المحاولة.")
-        guardian = conn.execute("SELECT * FROM guardians WHERE national_id_hash=?", (digest,)).fetchone()
-        if guardian and guardian["full_name"].casefold() != name.casefold():
-            raise ValueError(
-                f"رقم بطاقة التعريف مسجل سابقًا باسم «{guardian['full_name']}». "
-                "اختر بيانات الولي المسجل بدل إنشاء شخص مكرر."
-            )
-        if guardian:
-            guardian_id = int(guardian["id"])
-            if phone_text and not guardian["phone"]:
-                conn.execute("UPDATE guardians SET phone=?,updated_at=?,updated_by=? WHERE id=?",
-                             (phone_text, stamp, user["id"], guardian_id))
-        else:
-            cur = conn.execute(
-                """INSERT INTO guardians(full_name,national_id_enc,national_id_hash,national_id_last4,
-                       national_id_length,phone,created_at,updated_at,created_by,updated_by)
-                   VALUES(?,?,?,?,?,?,?,?,?,?)""",
-                (name, encrypted, digest, nid[-4:], len(nid), phone_text,
-                 stamp, stamp, user["id"], user["id"]),
-            )
-            guardian_id = int(cur.lastrowid)
-        linked = conn.execute(
-            "SELECT id,is_primary FROM student_guardians WHERE student_id=? AND guardian_id=?",
-            (student_id, guardian_id),
-        ).fetchone()
-        primary = bool(make_primary or not conn.execute(
-            "SELECT 1 FROM student_guardians WHERE student_id=? AND is_primary=1", (student_id,)
-        ).fetchone())
-        if primary:
-            conn.execute("UPDATE student_guardians SET is_primary=0 WHERE student_id=?", (student_id,))
-        if linked:
-            conn.execute(
-                """UPDATE student_guardians SET relationship=?,relationship_other=?,is_primary=?
-                   WHERE id=?""",
-                (rel, other if rel == "أخرى" else "", 1 if primary else int(linked["is_primary"]), linked["id"]),
-            )
-        else:
-            conn.execute(
-                """INSERT INTO student_guardians(student_id,guardian_id,relationship,relationship_other,
-                       is_primary,created_at,created_by) VALUES(?,?,?,?,?,?,?)""",
-                (student_id, guardian_id, rel, other if rel == "أخرى" else "", 1 if primary else 0,
-                 stamp, user["id"]),
-            )
-        conn.execute(
-            "INSERT INTO audit_logs(happened_at,user_id,action,target_type,target_id,description) VALUES(?,?,?,?,?,?)",
-            (stamp, user["id"], "إضافة أو ربط ولي بتلميذ", "guardian", str(guardian_id),
-             f"{name}؛ التلميذ #{student_id}؛ الصلة: {other if rel == 'أخرى' else rel}؛ ولي أساسي: {'نعم' if primary else 'لا'}"),
-        )
-    for item in list_student_guardians(student_id, user["id"]):
-        if item["id"] == guardian_id:
-            return item
-    raise RuntimeError("تم حفظ بيانات الولي لكن تعذر استرجاعها؛ أعد فتح نموذج الرخصة.")
-
-
-def set_primary_student_guardian(actor, student_id: int, guardian_id: int) -> None:
-    user = require_user(actor)
-    with db_connect() as conn:
-        conn.execute("BEGIN IMMEDIATE")
-        link = conn.execute(
-            "SELECT 1 FROM student_guardians WHERE student_id=? AND guardian_id=?",
-            (int(student_id), int(guardian_id)),
-        ).fetchone()
-        if not link:
-            raise ValueError("هذا الولي غير مرتبط بالتلميذ المحدد.")
-        conn.execute("UPDATE student_guardians SET is_primary=0 WHERE student_id=?", (int(student_id),))
-        conn.execute("UPDATE student_guardians SET is_primary=1 WHERE student_id=? AND guardian_id=?",
-                     (int(student_id), int(guardian_id)))
-        conn.execute(
-            "INSERT INTO audit_logs(happened_at,user_id,action,target_type,target_id,description) VALUES(?,?,?,?,?,?)",
-            (now_iso(), user["id"], "تعيين الولي الأساسي", "student", str(student_id),
-             f"الولي #{guardian_id} أصبح الولي الأساسي."),
-        )
-
-
-def list_guardians_as_admin(actor, query: str = "") -> list[dict]:
-    admin = require_admin(actor)
-    term = re.sub(r"\s+", " ", str(query or "")).strip()
-    params: list[object] = []
-    where = ""
-    if term:
-        where = "WHERE g.full_name LIKE ? OR g.phone LIKE ? OR g.national_id_last4 LIKE ?"
-        params.extend([f"%{term}%", f"%{term}%", f"%{term[-4:]}%"])
-        if term.isdigit() and 6 <= len(term) <= 20:
-            where = "(" + where[6:] + " OR g.national_id_hash=?)"
-            params.append(_guardian_national_id_hash(validate_national_id(term)))
-    with db_connect() as conn:
-        rows = conn.execute(
-            f"""SELECT g.id,g.full_name,g.national_id_last4,g.national_id_length,g.phone,
-                       COUNT(DISTINCT sg.student_id) AS student_count,
-                       GROUP_CONCAT(DISTINCT s.last_name||' '||s.first_name||' — '||
-                           CASE WHEN sg.relationship='أخرى' THEN sg.relationship_other ELSE sg.relationship END) AS linked_students
-                FROM guardians g
-                LEFT JOIN student_guardians sg ON sg.guardian_id=g.id
-                LEFT JOIN students s ON s.id=sg.student_id
-                {where}
-                GROUP BY g.id
-                ORDER BY g.full_name COLLATE NOCASE LIMIT 1000""",
-            params,
-        ).fetchall()
-    # Directory filtering runs on every keystroke; only full-ID disclosure is audit-logged.
-    return [dict(row) for row in rows]
-
-
-def get_guardian_as_admin(actor, guardian_id: int) -> dict:
-    admin = require_admin(actor)
-    with db_connect() as conn:
-        row = conn.execute("SELECT * FROM guardians WHERE id=?", (int(guardian_id),)).fetchone()
-    if not row:
-        raise ValueError("الولي غير موجود.")
-    result = dict(row)
-    try:
-        result["national_id"] = reveal_sensitive_text(result.pop("national_id_enc"))
-    except Exception as exc:
-        raise RuntimeError("تعذر فك تشفير رقم بطاقة الولي على حساب Windows الحالي.") from exc
-    audit(admin["id"], "عرض رقم بطاقة ولي كامل", "guardian", guardian_id,
-          "تم عرض الرقم للمدير في نافذة تعديل بيانات الولي.")
-    return result
-
-
-def update_guardian_as_admin(actor, guardian_id: int, full_name: str, phone: str = "",
-                             national_id: str = "") -> dict:
-    admin = require_admin(actor)
-    name = re.sub(r"\s+", " ", str(full_name or "")).strip()
-    phone_text = re.sub(r"\s+", " ", str(phone or "")).strip()
-    if not name or len(name) > 120:
-        raise ValueError("أدخل الاسم الكامل للولي (حتى 120 حرفًا).")
-    if len(phone_text) > 30:
-        raise ValueError("رقم الهاتف طويل جدًا (الحد الأقصى 30 حرفًا).")
-    stamp = now_iso()
-    with db_connect() as conn:
-        conn.execute("BEGIN IMMEDIATE")
-        old = conn.execute("SELECT * FROM guardians WHERE id=?", (int(guardian_id),)).fetchone()
-        if not old:
-            raise ValueError("الولي غير موجود.")
-        if str(national_id or "").strip():
-            nid = validate_national_id(national_id)
-            digest = _guardian_national_id_hash(nid)
-            duplicate = conn.execute("SELECT id FROM guardians WHERE national_id_hash=? AND id<>?",
-                                     (digest, int(guardian_id))).fetchone()
-            if duplicate:
-                raise ValueError("رقم بطاقة التعريف مرتبط بملف ولي آخر.")
-            try:
-                encrypted = protect_sensitive_text(nid)
-            except Exception as exc:
-                raise RuntimeError(f"تعذر تشفير رقم بطاقة الولي؛ لم تُحفظ التعديلات.\n{exc}") from exc
-            conn.execute(
-                """UPDATE guardians SET full_name=?,phone=?,national_id_enc=?,national_id_hash=?,
-                       national_id_last4=?,national_id_length=?,updated_at=?,updated_by=? WHERE id=?""",
-                (name, phone_text, encrypted, digest, nid[-4:], len(nid), stamp, admin["id"], int(guardian_id)),
-            )
-        else:
-            conn.execute("UPDATE guardians SET full_name=?,phone=?,updated_at=?,updated_by=? WHERE id=?",
-                         (name, phone_text, stamp, admin["id"], int(guardian_id)))
-        conn.execute(
-            "INSERT INTO audit_logs(happened_at,user_id,action,target_type,target_id,description) VALUES(?,?,?,?,?,?)",
-            (stamp, admin["id"], "تعديل بيانات ولي", "guardian", str(guardian_id),
-             f"{old['full_name']} ← {name}؛ لم يُسجل رقم الهوية في سجل التدقيق."),
-        )
-    return get_guardian_as_admin(admin["id"], guardian_id)
-
-
 def create_exit_permit(student, user_id, reason: str, guardian_name: str, relationship: str, national_id: str) -> sqlite3.Row:
     reason, guardian_name, relationship = reason.strip(), guardian_name.strip(), relationship.strip()
     if not (reason and guardian_name and relationship and national_id.strip()):
@@ -1800,92 +1130,6 @@ def return_from_exit(record_id: int, user_id) -> sqlite3.Row:
         conn.execute("INSERT INTO audit_logs(happened_at,user_id,action,target_type,target_id,description) VALUES(?,?,?,?,?,?)",
                      (now_iso(), user["id"], "تسجيل عودة بعد خروج استثنائي", "record", str(record_id), f"{permit['record_no']} → {slip['record_no']}"))
     return slip
-
-
-
-
-def mark_exit_executed(record_id: int, user_id) -> sqlite3.Row:
-    """Record gatekeeper-confirmed physical exit separately from permit issuance."""
-    actor=require_user(user_id)
-    with db_connect() as conn:
-        conn.execute("BEGIN IMMEDIATE")
-        row=conn.execute("SELECT * FROM records WHERE id=?",(int(record_id),)).fetchone()
-        if not row or row["kind"]!="exit_permit":
-            raise ValueError("السجل المحدد ليس رخصة خروج.")
-        if row["status"]!="valid":
-            raise ValueError("لا يمكن تأكيد خروج فعلي لرخصة ملغاة أو أُغلقت بالعودة.")
-        if str(row["exit_executed_at"] or "").strip():
-            raise ValueError("تم تسجيل تنفيذ الخروج لهذه الرخصة مسبقًا.")
-        happened=now_iso()
-        changed=conn.execute(
-            "UPDATE records SET exit_executed_at=?,exit_executed_by=? WHERE id=? AND status='valid' AND TRIM(COALESCE(exit_executed_at,''))=''",
-            (happened,actor["id"],int(record_id))).rowcount
-        if changed!=1: raise ValueError("سُجل تنفيذ الخروج من جلسة أخرى؛ حدّث السجل.")
-        conn.execute("INSERT INTO audit_logs(happened_at,user_id,action,target_type,target_id,description) VALUES(?,?,?,?,?,?)",
-                     (happened,actor["id"],"تأكيد تنفيذ خروج التلميذ عند الحاجب","record",str(record_id),
-                      f"الرخصة: {row['record_no']}؛ التلميذ: {row['student_name']}"))
-        updated=conn.execute("SELECT * FROM records WHERE id=?",(int(record_id),)).fetchone()
-    return updated
-
-
-def get_gatekeeper_log(user_id, date_from: str = "", date_to: str = "", state: str = "all") -> list[dict]:
-    """List exit permits with separate issued, actually-exited and returned events."""
-    require_user(user_id)
-    if state not in {"all","pending","executed","returned","cancelled"}:
-        raise ValueError("حالة سجل الحاجب غير صحيحة.")
-    first,last=str(date_from or "").strip(),str(date_to or "").strip()
-    for value in (first,last):
-        if value:
-            try: date.fromisoformat(value)
-            except ValueError as exc: raise ValueError("تاريخ سجل الحاجب غير صحيح؛ استعمل YYYY-MM-DD.") from exc
-    if first and last and last<first: raise ValueError("تاريخ النهاية يجب أن يكون بعد تاريخ البداية.")
-    issue="COALESCE(NULLIF(r.issued_at,''),r.created_at)"
-    where,params=["r.kind='exit_permit'"],[]
-    if first: where.append(f"substr({issue},1,10)>=?");params.append(first)
-    if last: where.append(f"substr({issue},1,10)<=?");params.append(last)
-    if state=="pending":where.append("r.status='valid' AND TRIM(COALESCE(r.exit_executed_at,''))=''")
-    elif state=="executed":where.append("r.status='valid' AND TRIM(COALESCE(r.exit_executed_at,''))<>''")
-    elif state=="returned":where.append("r.status='returned'")
-    elif state=="cancelled":where.append("r.status='cancelled'")
-    with db_connect() as conn:
-        rows=conn.execute(
-            f"""SELECT r.*,COALESCE(issuer.display_name,'غير معروف') AS issuer_name,
-                       COALESCE(executor.display_name,'—') AS exit_executor_name,
-                       COALESCE(returner.display_name,'—') AS returner_name
-                FROM records r LEFT JOIN users issuer ON issuer.id=r.user_id
-                LEFT JOIN users executor ON executor.id=r.exit_executed_by
-                LEFT JOIN users returner ON returner.id=r.returned_by
-                WHERE {' AND '.join(where)} ORDER BY {issue} DESC,r.id DESC LIMIT 2000""",
-            tuple(params)).fetchall()
-    return [dict(r) for r in rows]
-
-
-def record_expiry_at(record) -> datetime | None:
-    """Return the two-hour expiry for entry permits; exceptional exits stay open until return."""
-    if not record or record["kind"] not in TIME_LIMITED_RECORD_KINDS:
-        return None
-    issued = str(record["issued_at"] or record["created_at"] or "").strip()
-    try:
-        parsed = datetime.strptime(issued, "%Y-%m-%d %H:%M:%S").astimezone()
-    except ValueError:
-        try:
-            parsed = datetime.fromisoformat(issued)
-            if parsed.tzinfo is None:
-                parsed = parsed.astimezone()
-        except ValueError:
-            return None
-    return parsed + timedelta(hours=RECORD_VALIDITY_HOURS)
-
-
-def record_is_expired(record, at: datetime | None = None) -> bool:
-    """Check expiry without deleting or mutating the historical record."""
-    expires = record_expiry_at(record)
-    if expires is None:
-        return False
-    current = at or datetime.now().astimezone()
-    if current.tzinfo is None:
-        current = current.astimezone()
-    return current >= expires
 
 
 def record_by_token(token: str) -> sqlite3.Row | None:
@@ -1993,313 +1237,6 @@ def compute_stats(today: date | None = None) -> dict:
     out["absence_totals"] = sorted(totals.values(), key=lambda t: (-t["days"], t["student_name"]))[:30]
     return out
 
-
-
-def create_statistics_report_pdf(dest_path, user_id) -> Path:
-    """Create a paginated A4-landscape statistical report, including expulsions by teacher.
-
-    The report deliberately contains operational counts only; it excludes guardian
-    national-ID values and other sensitive identity data.
-    """
-    actor = require_user(user_id)
-    stats = compute_stats()
-    from reportlab.pdfgen import canvas
-    from reportlab.lib.pagesizes import A4, landscape
-    from reportlab.lib.units import mm
-    from reportlab.lib import colors
-
-    out = Path(dest_path)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    page_w, page_h = landscape(A4)
-    margin = 13 * mm
-    font = _font_setup()
-    report = canvas.Canvas(str(out), pagesize=(page_w, page_h), pageCompression=1)
-    report.setTitle(f"SchoolPass Statistics {stats['day']}")
-    report.setAuthor(APP_NAME)
-    generated_at = now_iso()
-    page_number = 0
-    y = 0.0
-
-    def visual(value):
-        return _arabic_visual(str(value if value is not None else '—'))
-
-    def footer():
-        report.setStrokeColor(colors.HexColor('#CAD5D2'))
-        report.setLineWidth(0.4)
-        report.line(margin, 9 * mm, page_w - margin, 9 * mm)
-        report.setFillColor(colors.HexColor('#647875'))
-        report.setFont(font, 7)
-        report.drawString(margin, 5 * mm, visual(f"صفحة {page_number}"))
-        report.drawRightString(page_w - margin, 5 * mm, visual(f"تاريخ الإنشاء: {generated_at}"))
-
-    def page_header():
-        nonlocal page_number, y
-        page_number += 1
-        report.setFillColor(colors.HexColor('#173D39'))
-        report.setFont(font, 14)
-        report.drawRightString(page_w - margin, page_h - 15 * mm, visual(setting('school_name', SCHOOL_NAME)))
-        report.setFillColor(colors.HexColor('#1B655C'))
-        report.setFont(font, 11)
-        report.drawRightString(page_w - margin, page_h - 22 * mm, visual('التقرير الإحصائي الشامل — SchoolPass 4.6.1'))
-        report.setFillColor(colors.HexColor('#647875'))
-        report.setFont(font, 8)
-        report.drawRightString(page_w - margin, page_h - 28 * mm,
-                               visual(f"اليوم: {stats['day']} | الشهر: {stats['month']} | آخر 7 أيام تبدأ: {stats['week_start']}"))
-        report.setStrokeColor(colors.HexColor('#78A9A0'))
-        report.setLineWidth(0.8)
-        report.line(margin, page_h - 32 * mm, page_w - margin, page_h - 32 * mm)
-        y = page_h - 39 * mm
-
-    def section(title):
-        nonlocal y
-        if y < 22 * mm:
-            footer()
-            report.showPage()
-            page_header()
-        report.setFillColor(colors.HexColor('#E8F1EF'))
-        report.roundRect(margin, y - 6.5 * mm, page_w - 2 * margin, 7 * mm, 2 * mm, stroke=0, fill=1)
-        report.setFillColor(colors.HexColor('#174E48'))
-        report.setFont(font, 9)
-        report.drawRightString(page_w - margin - 3 * mm, y - 4.5 * mm, visual(title))
-        y -= 11 * mm
-
-    def line(text, size=7.6, indent=0):
-        nonlocal y
-        parts = _wrap_to_width(str(text), font, size, page_w - 2 * margin - 6 * mm - indent)
-        line_gap = 4.7 * mm
-        for part in parts:
-            if y < 13 * mm + line_gap:
-                footer()
-                report.showPage()
-                page_header()
-            report.setFillColor(colors.HexColor('#263B39'))
-            report.setFont(font, size)
-            report.drawRightString(page_w - margin - 3 * mm - indent, y, visual(part))
-            y -= line_gap
-        y -= 1.0 * mm
-
-    page_header()
-    section('المؤشرات الرئيسية')
-    metrics = [
-        f"التلاميذ النشطون: {stats['active_students']}",
-        f"عمليات اليوم: {stats['today_total']} — تلاميذ مختلفون: {stats['today_unique_students']}",
-        f"عمليات آخر 7 أيام: {stats['week_total']} — تلاميذ مختلفون: {stats['week_unique_students']}",
-        f"عمليات الشهر: {stats['month_total']} — تلاميذ مختلفون: {stats['month_unique_students']}",
-        f"رخص الخروج المفتوحة التي لم تُسجل عودتها: {stats['open_exits']}",
-    ]
-    for item in metrics:
-        line(item, 8.2)
-
-    section('حالات الطرد من الحصة حسب الأستاذ — الشهر الحالي')
-    if stats['expulsion_by_teacher']:
-        for item in stats['expulsion_by_teacher']:
-            line(f"{item['teacher']} — {item['count']} حالة طرد — {item['student_count']} تلميذًا مختلفًا — الأسماء: {', '.join(item['students']) or '—'}")
-    else:
-        line('لا توجد حالات طرد مسجلة خلال الشهر الحالي.')
-
-    sections = [
-        ('عمليات الشهر حسب القسم', [f"{item['class_name']} — {kind_label(item['kind'])}: {item['n']}" for item in stats['by_class']]),
-        ('عمليات الشهر حسب المشرف', [f"{item['supervisor']} — {kind_label(item['kind'])}: {item['n']}" for item in stats['by_supervisor']]),
-        ('عمليات اليوم حسب النوع والحالة', [f"{kind_label(item['kind'])} — {status_label(item['status'])}: {item['n']}" for item in stats['today_by_kind']]),
-        ('عمليات آخر 7 أيام حسب النوع والحالة', [f"{kind_label(item['kind'])} — {status_label(item['status'])}: {item['n']}" for item in stats['week_by_kind']]),
-        ('عمليات الشهر حسب النوع والحالة', [f"{kind_label(item['kind'])} — {status_label(item['status'])}: {item['n']}" for item in stats['month_by_kind']]),
-        ('أكثر أسباب العمليات المسجلة', [f"{kind_label(item['kind'])} — {item['reason']}: {item['n']}" for item in stats['by_reason']]),
-        ('فترات الغياب التراكمية المدخلة يدويًا', [f"{item['student_name']} — {item['class_name']}: {item['n']} فترة، {item['days']} يومًا" for item in stats['absence_totals']]),
-        ('السجلات الملغاة خلال الشهر', [f"{item['record_no']} — {item['student_name']} — {item['class_name']} — {item['cancelled_at'] or '—'} — السبب: {item['cancelled_reason'] or '—'} — ألغاه: {item['cancelled_by'] or '—'}" for item in stats['cancellations']]),
-    ]
-    for title, values in sections:
-        section(title)
-        if values:
-            for value in values:
-                line(value)
-        else:
-            line('لا توجد بيانات في هذا القسم.')
-
-    if y < 22 * mm:
-        footer()
-        report.showPage()
-        page_header()
-    report.setFillColor(colors.HexColor('#647875'))
-    report.setFont(font, 7)
-    report.drawRightString(page_w - margin, y - 2 * mm,
-                           visual(f"أُعد التقرير بواسطة: {actor['display_name']} — استنادًا إلى سجلات SchoolPass."))
-    footer()
-    report.save()
-    audit(actor['id'], 'إنشاء التقرير الإحصائي الشامل PDF', 'report', out.name,
-          f"اليوم {stats['day']}؛ الشهر {stats['month']}؛ حالات الطرد حسب الأستاذ: {sum(x['count'] for x in stats['expulsion_by_teacher'])}")
-    return out
-
-
-
-def create_student_history_report_pdf(dest_path, student_id: int, user_id) -> Path:
-    """Create a printable A4-landscape student history report without full guardian IDs."""
-    actor = require_user(user_id)
-    with db_connect() as conn:
-        student_row = conn.execute("SELECT * FROM students WHERE id=?", (int(student_id),)).fetchone()
-        if not student_row:
-            raise ValueError("التلميذ غير موجود أو تم حذفه من القائمة.")
-        student = dict(student_row)
-        records = [dict(row) for row in conn.execute(
-            "SELECT r.*,u.display_name AS supervisor FROM records r "
-            "LEFT JOIN users u ON u.id=r.user_id WHERE r.student_key=? "
-            "ORDER BY COALESCE(NULLIF(r.issued_at,''),r.created_at),r.id",
-            (student["student_key"],)).fetchall()]
-
-    from reportlab.pdfgen import canvas
-    from reportlab.lib.pagesizes import A4, landscape
-    from reportlab.lib.units import mm
-    from reportlab.lib import colors
-
-    out = Path(dest_path)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    page_w, page_h = landscape(A4)
-    margin = 14 * mm
-    font = _font_setup()
-    report = canvas.Canvas(str(out), pagesize=(page_w, page_h), pageCompression=1)
-    report.setTitle(f"SchoolPass Student History {student['student_key']}")
-    report.setAuthor(APP_NAME)
-    page_number = 0
-    y = 0.0
-    generated_at = now_iso()
-    name = student_name(student)
-    active_records = [r for r in records if r["status"] != "cancelled"]
-    late_count = sum(r["kind"] == "late" for r in active_records)
-    absence_rows = [r for r in active_records if r["kind"] == "absence_return"]
-    absence_days_total = 0
-    for row in absence_rows:
-        try:
-            absence_days_total += max(0, int(json.loads(row.get("details_json") or "{}").get("days_count", 0) or 0))
-        except (TypeError, ValueError, json.JSONDecodeError):
-            pass
-    exit_rows = [r for r in active_records if r["kind"] == "exit_permit"]
-    open_exits = sum(r["status"] == "valid" for r in exit_rows)
-    expulsion_count = 0
-    for row in active_records:
-        if row["kind"] != "special_entry":
-            continue
-        try:
-            if json.loads(row.get("details_json") or "{}").get("entry_reason") == "class_expulsion":
-                expulsion_count += 1
-        except (TypeError, json.JSONDecodeError):
-            pass
-
-    def visual(value):
-        return _arabic_visual(str(value if value is not None else "—"))
-
-    def footer():
-        report.setStrokeColor(colors.HexColor("#CAD5D2"))
-        report.setLineWidth(0.4)
-        report.line(margin, 9 * mm, page_w - margin, 9 * mm)
-        report.setFillColor(colors.HexColor("#647875"))
-        report.setFont(font, 7)
-        report.drawString(margin, 5 * mm, visual(f"صفحة {page_number}"))
-        report.drawRightString(page_w - margin, 5 * mm, visual(f"تاريخ الإنشاء: {generated_at}"))
-
-    def page_header():
-        nonlocal page_number, y
-        page_number += 1
-        report.setFillColor(colors.HexColor("#173D39"))
-        report.setFont(font, 14)
-        report.drawRightString(page_w - margin, page_h - 14 * mm, visual(setting("school_name", SCHOOL_NAME)))
-        report.setFillColor(colors.HexColor("#1B655C"))
-        report.setFont(font, 11)
-        report.drawRightString(page_w - margin, page_h - 21 * mm, visual("الملف التاريخي الشامل للتلميذ"))
-        report.setFillColor(colors.HexColor("#263B39"))
-        report.setFont(font, 8.5)
-        info_lines = _wrap_to_width(f"التلميذ: {name}", font, 8.5, page_w - 2 * margin)
-        info_lines.extend(_wrap_to_width(
-            f"رقم التعريف: {student['student_key']} | القسم: {student['class_name']} | الحالة: {'نشط' if student['active'] else 'غير نشط'}",
-            font, 8.5, page_w - 2 * margin))
-        info_y = page_h - 29 * mm
-        for info_line in info_lines:
-            report.drawRightString(page_w - margin, info_y, visual(info_line))
-            info_y -= 4.5 * mm
-        rule_y = info_y - 1.5 * mm
-        report.setStrokeColor(colors.HexColor("#78A9A0"))
-        report.setLineWidth(0.8)
-        report.line(margin, rule_y, page_w - margin, rule_y)
-        y = rule_y - 8 * mm
-
-    def ensure_space(required=6 * mm):
-        nonlocal y
-        if y - required < 13 * mm:
-            footer()
-            report.showPage()
-            page_header()
-
-    def write_line(text, size=7.5, indent=0):
-        nonlocal y
-        lines = _wrap_to_width(str(text), font, size, page_w - 2 * margin - indent)
-        for part in lines:
-            ensure_space(5 * mm)
-            report.setFillColor(colors.HexColor("#263B39"))
-            report.setFont(font, size)
-            report.drawRightString(page_w - margin - indent, y, visual(part))
-            y -= 4.7 * mm
-
-    page_header()
-    report.setFillColor(colors.HexColor("#E8F1EF"))
-    report.roundRect(margin, y - 7 * mm, page_w - 2 * margin, 8 * mm, 2 * mm, stroke=0, fill=1)
-    report.setFillColor(colors.HexColor("#174E48"))
-    report.setFont(font, 9)
-    report.drawRightString(page_w - margin - 3 * mm, y - 4.5 * mm, visual("ملخص الملف"))
-    y -= 14 * mm
-    for metric in (
-        f"إجمالي العمليات: {len(records)} — العمليات غير الملغاة: {len(active_records)}",
-        f"مرات التأخر: {late_count} — مرات العودة بعد الغياب: {len(absence_rows)} — أيام الغياب المدخلة: {absence_days_total}",
-        f"حالات الدخول الخاص/الطرد: {sum(r['kind'] == 'special_entry' for r in active_records)} — حالات الطرد المسجلة: {expulsion_count}",
-        f"تصاريح الخروج: {len(exit_rows)} — تصاريح خروج لم تُسجل عودتها: {open_exits}",
-    ):
-        write_line(metric, 8)
-
-    ensure_space(12 * mm)
-    report.setFillColor(colors.HexColor("#E8F1EF"))
-    report.roundRect(margin, y - 7 * mm, page_w - 2 * margin, 8 * mm, 2 * mm, stroke=0, fill=1)
-    report.setFillColor(colors.HexColor("#174E48"))
-    report.setFont(font, 9)
-    report.drawRightString(page_w - margin - 3 * mm, y - 4.5 * mm, visual("السجل الزمني الكامل"))
-    y -= 14 * mm
-
-    if not records:
-        write_line("لا توجد عمليات مسجلة لهذا التلميذ.", 8)
-    for index, row in enumerate(records, 1):
-        try:
-            details = json.loads(row.get("details_json") or "{}")
-        except (TypeError, json.JSONDecodeError):
-            details = {}
-        record_title = f"{index}. {row.get('record_no') or '—'} — {kind_label(row['kind'])} — {status_label(row['status'])}"
-        base_lines = [
-            record_title,
-            f"التاريخ والوقت: {row.get('issued_at') or row.get('created_at') or '—'} | المشرف: {row.get('supervisor') or '—'}",
-            f"السبب: {row.get('reason') or '—'}",
-        ]
-        if row["kind"] == "absence_return":
-            base_lines.append(f"بداية الغياب: {details.get('absence_start', '—')} | تاريخ العودة: {details.get('return_date', '—')} | أيام الغياب (دون يوم العودة): {details.get('days_count', '—')}")
-        if row["kind"] == "special_entry" and details.get("entry_reason") == "class_expulsion":
-            base_lines.append(f"الأستاذ الذي قام بالطرد: {details.get('expelling_teacher', '—')} | المادة: {details.get('subject', '—')}")
-        if row["kind"] == "exit_permit":
-            base_lines.append(f"ولي الأمر: {details.get('guardian_name', '—')} | صلة القرابة: {details.get('relationship', '—')} | آخر أربعة أرقام من الهوية: {details.get('national_id_last4', '—')}")
-        if row["kind"] == "exit_return":
-            base_lines.append(f"مرجع تصريح الخروج: {details.get('permit_no', '—')}")
-        if row["status"] == "cancelled":
-            base_lines.append(f"سبب الإلغاء: {row.get('cancelled_reason') or '—'} | تاريخ الإلغاء: {row.get('cancelled_at') or '—'}")
-        ensure_space(9 * mm)
-        report.setFillColor(colors.HexColor("#F0F5F3" if row["status"] != "cancelled" else "#F9EEEE"))
-        report.roundRect(margin, y - 3 * mm, page_w - 2 * margin, 5 * mm, 1.5 * mm, stroke=0, fill=1)
-        y -= 1.5 * mm
-        for text in base_lines:
-            write_line(text, 7.2, indent=2 * mm)
-        y -= 2 * mm
-
-    ensure_space(8 * mm)
-    report.setFillColor(colors.HexColor("#647875"))
-    report.setFont(font, 7)
-    report.drawRightString(page_w - margin, y, visual(f"أُعد التقرير بواسطة: {actor['display_name']} — لا يتضمن أرقام الهوية الوطنية كاملة."))
-    footer()
-    report.save()
-    audit(actor["id"], "إنشاء الملف التاريخي للتلميذ PDF", "student", student["student_key"],
-          f"{len(records)} عملية؛ {absence_days_total} يوم غياب مدخل يدويًا")
-    return out
 
 def csv_safe(value):
     """Neutralise spreadsheet formulas (CSV injection) in exported text."""
@@ -2761,17 +1698,14 @@ def set_print_mode_as(actor, mode: str) -> None:
     audit(admin["id"], "تثبيت الطباعة عبر معاينة PDF", "settings", "print_mode", "open")
 
 
-def save_preferences_as(actor, school_name: str, host: str, primary: str, secondary: str,
+def save_preferences_as(actor, school_name: str, primary: str, secondary: str,
                         late_alert_threshold: int = 3, external_backup_path: str = "",
                         rtl_shaping_enabled: bool = True) -> None:
     """Validate and save all administrator preferences atomically, with one audit event per setting."""
     admin = require_admin(actor)
     school_name = str(school_name or "").strip()
-    host = str(host or "").strip()
     if not school_name:
         raise ValueError("أدخل اسم المؤسسة.")
-    if not re.fullmatch(r"[A-Za-z0-9]([A-Za-z0-9.\-]{0,60}[A-Za-z0-9])?", host):
-        raise ValueError("أدخل عنوان IP أو اسم حاسوب صالحًا دون http:// أو منفذ.")
     primary = _validate_hex_color(primary, "اللون الرئيسي")
     secondary = _validate_hex_color(secondary, "اللون الثانوي")
     if primary == secondary:
@@ -2797,7 +1731,6 @@ def save_preferences_as(actor, school_name: str, host: str, primary: str, second
         external_backup_path = str(resolved_backup)
     changes = {
         "school_name": school_name,
-        "qr_host": host,
         "theme_primary": primary,
         "theme_secondary": secondary,
         "print_mode": "open",
@@ -2807,7 +1740,6 @@ def save_preferences_as(actor, school_name: str, host: str, primary: str, second
     }
     labels = {
         "school_name": ("تغيير اسم المؤسسة", "اسم المؤسسة"),
-        "qr_host": ("تغيير عنوان رمز QR", "عنوان QR"),
         "theme_primary": ("تغيير ألوان الواجهة", "اللون الرئيسي"),
         "theme_secondary": ("تغيير ألوان الواجهة", "اللون الثانوي"),
         "print_mode": ("تثبيت الطباعة عبر معاينة PDF", "طريقة الطباعة"),
@@ -2824,172 +1756,39 @@ def save_preferences_as(actor, school_name: str, host: str, primary: str, second
                          (now_iso(), admin["id"], action, "settings", key, f"{desc}: {value}"))
 
 
-# ----------------------------------------------------------------------------- QR host / local verification server
-def qr_host() -> str:
-    """Address written into printed QR codes. Saved once so old printouts keep working."""
-    return setting("qr_host", "").strip() or get_local_ip()
-
-
-def ensure_qr_host_saved() -> str:
-    host = setting("qr_host", "").strip()
-    if not host:
-        ip = get_local_ip()
-        if not ip.startswith("127."):
-            set_setting("qr_host", ip)
-            host = ip
-    return host or get_local_ip()
-
-
-def qr_host_mismatch() -> tuple[str, str] | None:
-    """(configured, current) when the saved IP is no longer this computer's IP; old QR codes would break."""
-    configured, current = setting("qr_host", "").strip(), get_local_ip()
-    if configured and re.fullmatch(r"\d{1,3}(\.\d{1,3}){3}", configured) and current != configured and not current.startswith("127."):
-        return configured, current
-    return None
-
-
-def set_qr_host_as(actor, host: str) -> None:
-    admin = require_admin(actor)
-    host = host.strip()
-    if not re.fullmatch(r"[A-Za-z0-9]([A-Za-z0-9.\-]{0,60}[A-Za-z0-9])?", host):
-        raise ValueError("أدخل عنوان IP (مثل 192.168.1.20) أو اسم حاسوب صالحًا دون http:// أو منفذ.")
-    set_setting("qr_host", host)
-    audit(admin["id"], "تغيير عنوان رمز QR", "settings", "qr_host", host)
-
-
-def qr_url(token: str) -> str:
-    """Prefer the public Cloudflare bridge for new printouts; retain LAN fallback for legacy setup."""
-    cloud = cloud_bridge_url()
-    if cloud:
-        return f"{cloud}/v/{token}"
-    return f"http://{qr_host()}:{SERVER_PORT}/v/{token}"
-
-
-_TOKEN_RE = re.compile(r"^[0-9a-f]{48}$")
-_RATE: dict[str, list[float]] = {}
-_RATE_LOCK = threading.Lock()
-
-
-def _rate_limited(ip: str, limit: int = 20, window: float = 60.0) -> bool:
-    now = time.time()
-    with _RATE_LOCK:
-        hits = [t for t in _RATE.get(ip, []) if now - t < window]
-        hits.append(now)
-        _RATE[ip] = hits
-        if len(_RATE) > 500:
-            _RATE.clear()
-        return len(hits) > limit
-
-
-def verification_page(token: str) -> tuple[int, bytes, dict | None]:
-    """Build the phone verification page. Never includes national ID or guardian data."""
-    row = None
-    if _TOKEN_RE.match(token or ""):
-        with db_connect() as conn:
-            row = conn.execute("SELECT record_no,kind,student_name,class_name,status,created_at,issued_at,cancelled_at,returned_at FROM records WHERE qr_token=?",
-                               (token,)).fetchone()
-    school = html.escape(setting("school_name", SCHOOL_NAME))
-    if not row:
-        title, body = "رمز غير معروف", "<p>لم يتم العثور على هذا السجل في قاعدة بيانات SchoolPass.</p>"
-    else:
-        title = "التحقق من الرخصة"
-        body = (f'<p><b>الرقم:</b> {html.escape(row["record_no"])}</p><p><b>النوع:</b> {html.escape(kind_label(row["kind"]))}</p>'
-                f'<p><b>التلميذ:</b> {html.escape(row["student_name"])}</p><p><b>القسم:</b> {html.escape(row["class_name"])}</p>'
-                f'<p><b>التاريخ:</b> {html.escape(row["created_at"])}</p>'
-                f'<p><b>الحالة:</b> <strong>{html.escape(status_label(row["status"]))}</strong></p>')
-        if row["status"] == "cancelled":
-            body += f'<p class="bad">تنبيه: هذا السجل ملغى منذ {html.escape(row["cancelled_at"] or "")} ولا يجوز الاعتماد عليه.</p>'
-        elif row["status"] == "returned":
-            body += f'<p>سُجّلت عودة التلميذ بموجب هذا التصريح في {html.escape(row["returned_at"] or "")}.</p>'
-        elif record_is_expired(row):
-            expires = record_expiry_at(row)
-            body += f'<p class="bad">انتهت صلاحية هذه الرخصة بعد ساعتين من إصدارها ({html.escape(expires.strftime("%Y-%m-%d %H:%M:%S") if expires else "")}). لا يجوز استعمالها.</p>'
-        else:
-            expires = record_expiry_at(row)
-            if expires:
-                body += f'<p>السجل سارٍ حتى {html.escape(expires.strftime("%Y-%m-%d %H:%M:%S"))}. طابق الاسم والقسم مع التلميذ الحاضر.</p>'
-            else:
-                body += "<p>رخصة الخروج الاستثنائي تبقى سارية إلى حين تسجيل عودة التلميذ.</p>"
-    page = (f'<!doctype html><html lang="ar" dir="rtl"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
-            f'<title>{html.escape(title)}</title><style>body{{font-family:Tahoma,Arial,sans-serif;background:#f4f7fb;margin:0;padding:22px;color:#17243a}}'
-            f'main{{max-width:480px;margin:auto;background:#fff;border-radius:14px;padding:22px}}h2{{color:#174a77}}p{{padding:9px 0;border-bottom:1px solid #edf0f5}}'
-            f'.bad{{color:#b00020;font-weight:bold}}</style><main><h2>{school}</h2><h3>{html.escape(title)}</h3>{body}'
-            f'<p>صفحة تحقق محلية؛ لا تتضمن رقم بطاقة الهوية.</p></main></html>').encode("utf-8")
-    return (200 if row else 404), page, ({"qr_token": token} if row else None)
-
-
-def ensure_local_server(port: int | None = None) -> tuple[bool, str]:
-    global _SERVER, _SERVER_THREAD
-    if _SERVER is not None:
-        return True, get_local_ip()
-
-    class Handler(BaseHTTPRequestHandler):
-        server_version = "SchoolPass"
-        sys_version = ""
-
-        def log_message(self, *_args):
-            return
-
-        def _send(self, code: int, body: bytes, ctype: str):
-            self.send_response(code)
-            self.send_header("Content-Type", ctype)
-            self.send_header("Content-Length", str(len(body)))
-            self.send_header("Cache-Control", "no-store")
-            self.send_header("X-Content-Type-Options", "nosniff")
-            self.send_header("Referrer-Policy", "no-referrer")
-            self.send_header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'")
-            self.end_headers()
-            self.wfile.write(body)
-
-        def do_GET(self):
-            path = self.path.split("?", 1)[0]
-            if path == "/health":
-                return self._send(200, b"SchoolPass OK", "text/plain; charset=utf-8")
-            if not path.startswith("/v/"):
-                return self._send(404, b"Not found", "text/plain; charset=utf-8")
-            if _rate_limited(self.client_address[0]):
-                return self._send(429, b"Too many requests", "text/plain; charset=utf-8")
-            code, page, ev = verification_page(path[3:].strip("/"))
-            if ev:
-                try:
-                    EVENT_QUEUE.put_nowait(ev["qr_token"])
-                except queue.Full:
-                    pass
-            self._send(code, page, "text/html; charset=utf-8")
-
+# ----------------------------------------------------------------------------- static QR data
+def qr_payload(row) -> str:
+    """Return a self-contained, human-readable permit payload; no URL, server or network."""
+    issued_text = str(row["issued_at"] or row["created_at"] or "").strip()
     try:
-        _SERVER = ThreadingHTTPServer(("0.0.0.0", SERVER_PORT if port is None else port), Handler)
-        # Wait for request-handler threads during shutdown so tests and restore
-        # operations never race a handler that still has SQLite open.
-        _SERVER.daemon_threads = False
-        _SERVER.block_on_close = True
-        _SERVER_THREAD = threading.Thread(target=_SERVER.serve_forever, daemon=True)
-        _SERVER_THREAD.start()
-        return True, get_local_ip()
-    except OSError as exc:
-        _SERVER = _SERVER_THREAD = None
-        return False, str(exc)
-
-
-def stop_local_server() -> bool:
-    global _SERVER, _SERVER_THREAD
-    server, thread = _SERVER, _SERVER_THREAD
-    was = server is not None
-    # Detach globals first: a concurrent UI action cannot mistake a server
-    # being shut down for a healthy listener.
-    _SERVER = _SERVER_THREAD = None
-    if server is not None:
-        try:
-            server.shutdown()
-        except Exception:
-            pass
-        try:
-            server.server_close()  # waits for non-daemon request handlers
-        except Exception:
-            pass
-    if thread is not None and thread is not threading.current_thread():
-        thread.join(timeout=10)
-    return was
+        issued = datetime.fromisoformat(issued_text)
+        if issued.tzinfo is None:
+            issued = issued.astimezone()
+        else:
+            issued = issued.astimezone()
+    except (TypeError, ValueError):
+        raise ValueError("توقيت إصدار الرخصة غير صالح؛ لا يمكن إنشاء رمز تحقق موثوق.")
+    expires = issued + timedelta(hours=QR_VALIDITY_HOURS)
+    status = str(row["status"] or "active")
+    if status == "cancelled":
+        state = "ملغاة"
+    elif status == "returned":
+        state = "عودة مسجلة"
+    else:
+        state = "سارية عند الطباعة"
+    lines = [
+        "SchoolPass",
+        f"رقم: {row['record_no']}",
+        f"النوع: {kind_label(row['kind'])}",
+        f"التلميذ: {row['student_name']}",
+        f"القسم: {row['class_name']}",
+        f"إصدار: {issued.isoformat(timespec='seconds')}",
+        f"انتهاء: {expires.isoformat(timespec='seconds')}",
+        "صلاحية: ساعتان",
+        f"الحالة: {state}",
+        "التحقق: الرخصة صالحة فقط بين وقت الإصدار والانتهاء.",
+    ]
+    return "\n".join(lines)
 
 
 # ----------------------------------------------------------------------------- A6 PDF
@@ -3033,35 +1832,7 @@ def _arabic_visual(text: str) -> str:
         from bidi.algorithm import get_display
     except ImportError:  # pragma: no cover
         from bidi import get_display
-
-    # Hyphens, slashes and colons can be treated as neutral separators by the
-    # Unicode bidi algorithm. In an RTL sentence that may visually reverse a
-    # numeric date such as 04-11-2026 into 2026-11-04. Hold complete LTR tokens
-    # while shaping the Arabic sentence, then restore them unchanged.
-    held_tokens: list[tuple[str, str]] = []
-
-    def hold_numeric_token(match):
-        number = len(held_tokens)
-        suffix = ""
-        while True:
-            suffix = chr(ord("A") + number % 26) + suffix
-            number //= 26
-            if number == 0:
-                break
-        token = f"SCHOOLPASSNUMTOKEN{suffix}"
-        while token in value:
-            token += "X"
-        held_tokens.append((token, match.group(0)))
-        return token
-
-    ltr_numeric = re.compile(
-        r"(?<![A-Za-z0-9])(?:[A-Za-z]{1,12}[-_/])?[0-9]+(?:[-/:.][0-9]+)+(?:[A-Za-z]{0,8})?(?![A-Za-z0-9])"
-    )
-    protected = ltr_numeric.sub(hold_numeric_token, value)
-    displayed = get_display(arabic_reshaper.reshape(protected), base_dir="R")
-    for token, original in held_tokens:
-        displayed = displayed.replace(token, original)
-    return displayed
+    return get_display(arabic_reshaper.reshape(value), base_dir="R")
 
 
 def _text_width(text: str, font: str, size: float) -> float:
@@ -3103,28 +1874,11 @@ def _academic_year(value: datetime | None = None) -> str:
     return f"{start}/{start + 1}"
 
 
-def _draw_admin_signature_box(c, x: float, y: float, font: str, border_color: tuple[float, float, float],
-                              line_color: tuple[float, float, float], *,
-                              width: float = 48.0 * MM, height: float = 32.0 * MM) -> None:
-    """Draw a larger blank area reserved for the school's physical stamp and signature."""
-    c.saveState()
-    c.setStrokeColorRGB(*border_color)
-    c.setLineWidth(0.9)
-    c.roundRect(x, y, width, height, 1.7 * MM, stroke=1, fill=0)
-    c.setFillColorRGB(*border_color)
-    c.setFont(font, 8.0)
-    c.drawCentredString(x + width / 2, y + height - 7.0 * MM, _arabic_visual("ختم الإدارة"))
-    c.setStrokeColorRGB(*line_color)
-    c.setLineWidth(0.55)
-    c.line(x + 4.0 * MM, y + 5.5 * MM, x + width - 4.0 * MM, y + 5.5 * MM)
-    c.restoreState()
-
-
 def _draw_entry_page(c, row, details: dict, reprint: bool, font: str, school: str, reprint_at: str = "") -> None:
-    """Premium A6 entry permit with its dedicated information layout.
+    """Premium A6 entry permit; follows the approved exit-permit visual language.
 
-    The shared administration signature component is used by both entry and exit
-    permits so the handwritten authorization area stays consistent.
+    This renderer is intentionally isolated from the exit-permit renderer below:
+    the approved exceptional-exit design remains byte-for-byte untouched.
     """
     from reportlab.lib.utils import ImageReader
 
@@ -3151,6 +1905,7 @@ def _draw_entry_page(c, row, details: dict, reprint: bool, font: str, school: st
         str(details.get("entry_reason_label", "رخصة دخول لحالة خاصة")) if is_special else
         "إثبات عودة من خروج استثنائي"
     )
+    signature = hashlib.sha256(str(row["qr_token"]).encode("utf-8")).hexdigest()[:12].upper()
     issuer = "الإدارة"
     if row["user_id"] is not None:
         user = get_user(row["user_id"])
@@ -3218,26 +1973,14 @@ def _draw_entry_page(c, row, details: dict, reprint: bool, font: str, school: st
     c.setFont(font, 6.8)
     c.drawRightString(right - 2.2 * mm, student_top - 3.8 * mm, _arabic_visual("اسم التلميذ"))
     c.setFillColorRGB(*ink)
-    name_size = 14.4
-    name_text = str(row["student_name"] or "—")
-    while name_size > 10.8 and _text_width(name_text, font, name_size) > usable - 8.0 * mm:
-        name_size -= 0.3
-    name_lines = _wrap_to_width(name_text, font, name_size, usable - 8.0 * mm)
-    # Use the same centered name position on every entry permit, with a subtle
-    # text overprint to produce a bold effect even when only the regular Arabic
-    # font is bundled with the Windows installer.
-    def draw_student_name(value, baseline, size):
-        visual = _arabic_visual(value)
-        c.setFont(font, size)
-        c.drawCentredString(W / 2 - 0.10 * mm, baseline, visual)
-        c.drawCentredString(W / 2 + 0.10 * mm, baseline, visual)
-        c.drawCentredString(W / 2, baseline, visual)
+    c.setFont(font, 12.0)
+    name_lines = _wrap_to_width(str(row["student_name"] or "—"), font, 12.0, usable - 5.0 * mm)
     if len(name_lines) == 1:
-        draw_student_name(name_lines[0], student_bottom + 2.4 * mm, name_size)
+        c.drawRightString(right - 2.2 * mm, student_bottom + 2.4 * mm, _arabic_visual(name_lines[0]))
     else:
-        two_line_size = min(10.8, name_size)
-        draw_student_name(name_lines[0], student_bottom + 1.8 * mm, two_line_size)
-        draw_student_name(name_lines[1], student_bottom + 5.4 * mm, two_line_size)
+        c.setFont(font, 9.8)
+        c.drawRightString(right - 2.2 * mm, student_bottom + 1.8 * mm, _arabic_visual(name_lines[0]))
+        c.drawRightString(right - 2.2 * mm, student_bottom + 5.4 * mm, _arabic_visual(name_lines[1]))
 
     # Two equal information tiles; entry time is deliberately larger and dominant.
     tile_y = student_bottom - 3.0 * mm
@@ -3253,11 +1996,8 @@ def _draw_entry_page(c, row, details: dict, reprint: bool, font: str, school: st
     c.setFont(font, 7.0)
     c.drawCentredString(right_x + tile_w / 2, tile_y - 3.3 * mm, _arabic_visual("وقت الدخول"))
     c.setFillColorRGB(*green)
-    c.setFont(font, 17.0)
-    time_visual = _arabic_visual(issue_time)
-    # Draw once: offset overprinting made the printed time visually heavier but
-    # duplicated digits in PDF text extraction and could reduce print clarity.
-    c.drawCentredString(right_x + tile_w / 2, tile_y - 9.2 * mm, time_visual)
+    c.setFont(font, 13.0)
+    c.drawCentredString(right_x + tile_w / 2, tile_y - 9.0 * mm, _arabic_visual(issue_time))
     c.setFillColorRGB(*dark_muted)
     c.setFont(font, 7.0)
     c.drawCentredString(left_x + tile_w / 2, tile_y - 3.3 * mm, _arabic_visual("القسم"))
@@ -3314,15 +2054,15 @@ def _draw_entry_page(c, row, details: dict, reprint: bool, font: str, school: st
         c.roundRect(margin, y_bottom, usable, row_h - 0.6 * mm, 0.7 * mm, stroke=0, fill=1)
         c.setFillColorRGB(*dark_muted)
         baseline = y_top - 2.35 * mm
-        label_size = 6.5 if row_h <= 5.2 * mm else 7.2
-        value_size = 6.9 if row_h <= 5.2 * mm else 8.1
+        label_size = 6.2 if row_h <= 5.2 * mm else 6.8
+        value_size = 6.6 if row_h <= 5.2 * mm else 7.6
         if not label_b:
             # Full-width field for long reason / guardian details; reduce the
             # font slightly rather than silently dropping the end of a value.
             c.setFillColorRGB(*dark_muted)
             c.setFont(font, label_size)
             c.drawRightString(right - 1.8 * mm, baseline, _arabic_visual(label_a + ":"))
-            value_font = 7.4 if row_h > 5.2 * mm else 6.3
+            value_font = 7.0 if row_h > 5.2 * mm else 6.1
             max_value_w = usable - 24 * mm
             while value_font > 5.2 and _text_width(value_a, font, value_font) > max_value_w:
                 value_font -= 0.2
@@ -3351,11 +2091,11 @@ def _draw_entry_page(c, row, details: dict, reprint: bool, font: str, school: st
             c.setFont(font, value_b_font)
             c.drawRightString(left_cell_right - 18.0 * mm, baseline, _arabic_visual(value_b))
 
-    # QR verification remains separate from the handwritten administration signature area.
-    qr_x, qr_y, qr_size = margin + 1.0 * mm, 8.0 * mm, 23.0 * mm
+    # QR and signature/stamp area intentionally matches the approved exit slip.
+    qr_x, qr_y, qr_size = margin + 1.0 * mm, 8.0 * mm, 27.0 * mm
     import qrcode
     qr = qrcode.QRCode(version=None, error_correction=qrcode.constants.ERROR_CORRECT_M, box_size=6, border=2)
-    qr.add_data(qr_url(row["qr_token"]))
+    qr.add_data(qr_payload(row))
     qr.make(fit=True)
     img = qr.make_image(fill_color="black", back_color="white").convert("RGB")
     buf = io.BytesIO()
@@ -3367,9 +2107,22 @@ def _draw_entry_page(c, row, details: dict, reprint: bool, font: str, school: st
     c.setFont(font, 5.1)
     c.drawCentredString(qr_x + qr_size / 2, qr_y - 2.0 * mm, _arabic_visual("امسح للتحقق"))
 
-    signature_w, signature_h = 48.0 * mm, 32.0 * mm
-    sx, sy = right - signature_w, 3.5 * mm
-    _draw_admin_signature_box(c, sx, sy, font, green, line, width=signature_w, height=signature_h)
+    sx, sy = W - margin - 34 * mm, 9.0 * mm
+    c.setStrokeColorRGB(*green)
+    c.setLineWidth(0.6)
+    c.roundRect(sx, sy, 32 * mm, 22 * mm, 1.2 * mm, stroke=1, fill=0)
+    c.setFillColorRGB(*green)
+    c.setFont(font, 6.3)
+    c.drawCentredString(sx + 16 * mm, sy + 16.5 * mm, _arabic_visual("توقيع الإدارة"))
+    c.setStrokeColorRGB(*line)
+    c.line(sx + 3 * mm, sy + 6.7 * mm, sx + 29 * mm, sy + 6.7 * mm)
+    c.setFillColorRGB(*dark_muted)
+    c.setFont(font, 5.4)
+    c.drawCentredString(sx + 16 * mm, sy + 2.8 * mm, _arabic_visual("ختم المؤسسة"))
+
+    c.setFillColorRGB(*dark_muted)
+    c.setFont(font, 5.0)
+    c.drawRightString(right, 3.5 * mm, _arabic_visual(f"توقيع رقمي: {signature}"))
     if cancelled:
         c.saveState()
         c.translate(W / 2, H / 2)
@@ -3414,7 +2167,7 @@ def _draw_page(c, row, details: dict, copy_type: str | None, reprint: bool, font
     c.setFillColorRGB(0.055, 0.31, 0.53)
     c.roundRect(margin + 2 * MM, H - 36.5 * MM, usable - 4 * MM, 8.2 * MM, 1.7 * MM, stroke=0, fill=1)
     c.setFillColorRGB(1, 1, 1)
-    c.setFont(font, 10.8)
+    c.setFont(font, 10.0)
     c.drawCentredString(W / 2, H - 33.6 * MM, _arabic_visual(kind_label(row["kind"])))
     c.restoreState()
     y = H - 41.5 * MM
@@ -3458,11 +2211,11 @@ def _draw_page(c, row, details: dict, copy_type: str | None, reprint: bool, font
     if audit_user:
         items.append((f"المشرف: {audit_user}", 7.2, 4.1, False))
     if copy_type:
-        items.append((f"النسخة: {copy_type}", 9.6, 5.2, False))
+        items.append((f"النسخة: {copy_type}", 6.6, 3.8, False))
 
     # --- bottom zones
-    qr_x, qr_y, qr_size = margin, 8 * MM, 24 * MM
-    box_bottom = 36 * MM  # warning box is reserved above the QR and signature zones
+    qr_x, qr_y, qr_size = margin, 8 * MM, 27.0 * MM
+    box_bottom = 36 * MM  # warning box (permits) sits above QR/stamp
     warn_lines: list[str] = []
     warn_gap = 3.15 * MM
     if row["kind"] == "exit_permit":
@@ -3475,7 +2228,7 @@ def _draw_page(c, row, details: dict, copy_type: str | None, reprint: bool, font
     def build(scale: float, max_reason_lines: int):
         out = []
         for text, size, gap, red in items:
-            s = size * scale * 1.16
+            s = size * scale * 1.12
             lines = _wrap_to_width(text, font, s, usable)
             if text.startswith(("السبب:", "سبب الإلغاء:")) and len(lines) > max_reason_lines:
                 lines = lines[:max_reason_lines]
@@ -3490,15 +2243,6 @@ def _draw_page(c, row, details: dict, copy_type: str | None, reprint: bool, font
     else:
         raise ValueError("بيانات الرخصة طويلة جدًا ولا تتسع في ورقة A6؛ اختصر السبب أو اسم ولي الأمر.")
     for idx, (text, size, gap, red) in enumerate(built):
-        if text.startswith("النسخة:"):
-            c.setFillColorRGB(0.91, 0.95, 0.98)
-            c.roundRect(margin + 0.7 * MM, y - 2.1 * MM, usable - 1.4 * MM, 5.5 * MM,
-                        1.0 * MM, stroke=0, fill=1)
-            c.setFillColorRGB(0.055, 0.22, 0.39)
-            c.setFont(font, size)
-            c.drawCentredString(W / 2, y - 0.15 * MM, _arabic_visual(text))
-            y -= gap * MM
-            continue
         # Soft alternating information rows improve scanning without wasting A6 space.
         row_h = max(3.0 * MM, gap * MM * 0.82)
         if idx % 2 == 0 and not red:
@@ -3507,19 +2251,14 @@ def _draw_page(c, row, details: dict, copy_type: str | None, reprint: bool, font
                         0.7 * MM, stroke=0, fill=1)
         c.setFillColorRGB(0.72, 0.05, 0.08) if red else c.setFillColorRGB(0.055, 0.16, 0.27)
         c.setFont(font, size)
-        if text.startswith("التلميذ: "):
-            # Slight overprint increases visual weight while preserving the existing A6 layout.
-            c.drawRightString(x_right - 1.30 * MM, y, _arabic_visual(text))
-            c.drawRightString(x_right - 1.10 * MM, y, _arabic_visual(text))
-        else:
-            c.drawRightString(x_right - 1.4 * MM, y, _arabic_visual(text))
+        c.drawRightString(x_right - 1.4 * MM, y, _arabic_visual(text))
         y -= gap * MM
     c.setFillColorRGB(0, 0, 0)
 
-    # --- QR (random token URL only) — failure must stop printing, never print a permit without QR
+    # --- Static QR payload: embedded permit details and issue/expiry times only.
     import qrcode
     qr = qrcode.QRCode(version=None, error_correction=qrcode.constants.ERROR_CORRECT_M, box_size=6, border=2)
-    qr.add_data(qr_url(row["qr_token"]))
+    qr.add_data(qr_payload(row))
     qr.make(fit=True)
     img = qr.make_image(fill_color="black", back_color="white").convert("RGB")
     buf = io.BytesIO()
@@ -3529,13 +2268,18 @@ def _draw_page(c, row, details: dict, copy_type: str | None, reprint: bool, font
     c.setFont(font, 5.6)
     c.drawString(qr_x, qr_y - 2.6 * MM, "SchoolPass " + row["record_no"])
 
-    # --- larger area reserved for the school's physical administration stamp.
-    signature_w, signature_h = 48.0 * MM, 32.0 * MM
-    sx, sy = x_right - signature_w, 3.5 * MM
-    _draw_admin_signature_box(
-        c, sx, sy, font, (0.08, 0.25, 0.42), (0.55, 0.62, 0.69),
-        width=signature_w, height=signature_h,
-    )
+    # --- stamp box
+    sx, sy = W - margin - 32 * MM, 9 * MM
+    c.setStrokeColorRGB(0.22, 0.48, 0.70)
+    c.setLineWidth(0.55)
+    c.roundRect(sx, sy, 30 * MM, 22 * MM, 1.2 * MM, stroke=1, fill=0)
+    c.setFillColorRGB(0.08, 0.25, 0.42)
+    c.setFont(font, 6.2)
+    c.drawCentredString(sx + 15 * MM, sy + 16.5 * MM, _arabic_visual("ختم المؤسسة"))
+    c.setStrokeColorRGB(0.55, 0.62, 0.69)
+    c.line(sx + 3 * MM, sy + 6 * MM, sx + 27 * MM, sy + 6 * MM)
+    c.setFont(font, 5.3)
+    c.drawCentredString(sx + 15 * MM, sy + 2.7 * MM, _arabic_visual("إمضاء المسؤول"))
     c.setFillColorRGB(0, 0, 0)
 
     # --- notice box (exit permit)
@@ -3569,7 +2313,7 @@ def _draw_page(c, row, details: dict, copy_type: str | None, reprint: bool, font
 
 
 def _render_record_page(c, row, details: dict, copy_type: str | None, reprint: bool, font: str, school: str, reprint_at: str = "") -> None:
-    """Route entry slips to their dedicated layout; exit permits retain the required two-copy flow."""
+    """Route special entry slips to the dedicated A6 entry renderer without modifying the approved exit artwork."""
     if row["kind"] == "special_entry":
         _draw_entry_page(c, row, details, reprint, font, school, reprint_at)
     else:
@@ -3599,32 +2343,33 @@ def create_pdf(record_id: int, copy_types: list[str | None] | None = None, repri
     return out
 
 
-def print_record(record_id: int, user_id, launch: bool = True, mode: str = "auto") -> list[Path]:
-    """Print the original once or explicitly reprint the same numbered permit."""
-    user=require_user(user_id)
-    if mode not in {"auto","initial","reprint"}: raise ValueError("وضع الطباعة غير معروف.")
-    row=record_by_id(record_id)
-    if not row: raise ValueError("السجل غير موجود.")
+def print_record(record_id: int, user_id, launch: bool = True) -> list[Path]:
+    """Create the PDF (re-print = same record, never a new number) and optionally hand it to Windows."""
+    user = require_user(user_id)
+    row = record_by_id(record_id)
+    if not row:
+        raise ValueError("السجل غير موجود.")
     with db_connect() as conn:
-        latest=conn.execute("SELECT record_no,printed_count FROM records WHERE id=?",(record_id,)).fetchone()
-    if not latest: raise ValueError("السجل غير موجود.")
-    already=int(latest["printed_count"] or 0)>0
-    if mode=="initial" and already: raise ValueError("هذه الرخصة طُبعت سابقًا؛ استخدم زر إعادة طباعة الرخصة.")
-    if mode=="reprint" and not already: raise ValueError("لم تُطبع هذه الرخصة من قبل؛ استخدم زر طباعة الرخصة.")
-    print_at=now_iso()
-    path=create_pdf(record_id,reprint=already,reprint_at=print_at if already else "")
+        latest = conn.execute("SELECT record_no,printed_count FROM records WHERE id=?", (record_id,)).fetchone()
+    if not latest:
+        raise ValueError("السجل غير موجود.")
+    is_reprint = int(latest["printed_count"] or 0) > 0
+    print_at = now_iso()
+    path = create_pdf(record_id, reprint=is_reprint, reprint_at=print_at if is_reprint else "")
     with db_connect() as conn:
         conn.execute("BEGIN IMMEDIATE")
-        latest=conn.execute("SELECT record_no,printed_count FROM records WHERE id=?",(record_id,)).fetchone()
-        if not latest: raise ValueError("السجل غير موجود.")
-        reprint_now=int(latest["printed_count"] or 0)>0
-        if mode=="initial" and reprint_now: raise ValueError("بدأت عملية طباعة أخرى لهذه الرخصة؛ حدّث السجل.")
-        if mode=="reprint" and not reprint_now: raise ValueError("لم تعد هذه الرخصة مؤهلة لإعادة الطباعة؛ حدّث السجل.")
-        changed=conn.execute("UPDATE records SET printed_count=printed_count+1 WHERE id=?",(record_id,)).rowcount
-        if changed!=1: raise RuntimeError("تعذر تحديث عدد مرات الطباعة.")
+        latest = conn.execute("SELECT record_no,printed_count FROM records WHERE id=?", (record_id,)).fetchone()
+        if not latest:
+            raise ValueError("السجل غير موجود.")
+        # If another workstation printed concurrently, preserve the record but expose that this is a reprint.
+        is_reprint_now = int(latest["printed_count"] or 0) > 0
+        changed = conn.execute("UPDATE records SET printed_count=printed_count+1 WHERE id=?", (record_id,)).rowcount
+        if changed != 1:
+            raise RuntimeError("تعذر تحديث عدد مرات الطباعة.")
         conn.execute("INSERT INTO audit_logs(happened_at,user_id,action,target_type,target_id,description) VALUES(?,?,?,?,?,?)",
-                     (print_at,user["id"],"إعادة طباعة رخصة" if reprint_now else "طباعة رخصة","record",str(record_id),latest["record_no"]))
-    if launch: open_pdf(path)
+                     (print_at, user["id"], "إعادة طباعة رخصة" if is_reprint_now else "طباعة رخصة", "record", str(record_id), latest["record_no"]))
+    if launch:
+        open_pdf(path)
     return [path]
 
 
@@ -3655,11 +2400,6 @@ def purge_old_prints(days: int = 30) -> int:
 # ----------------------------------------------------------------------------- backup / restore
 _REQUIRED_COLUMNS = {
     "users": {"id", "username", "display_name", "role", "salt", "password_hash", "active", "failed_count", "lock_until", "created_at"},
-    "teachers": {"id", "full_name", "subject", "classes", "active", "created_at", "updated_at", "created_by", "updated_by"},
-    "guardians": {"id", "full_name", "national_id_enc", "national_id_hash", "national_id_last4", "national_id_length",
-                  "phone", "created_at", "updated_at", "created_by", "updated_by"},
-    "student_guardians": {"id", "student_id", "guardian_id", "relationship", "relationship_other", "is_primary",
-                          "created_at", "created_by"},
     "students": {"id", "student_key", "last_name", "first_name", "gender", "year", "branch", "section", "class_name", "active", "imported_at"},
     "records": {"id", "record_no", "qr_token", "kind", "student_key", "student_name", "class_name", "created_at", "issued_at", "user_id", "reason", "status",
                 "details_json", "related_record_id", "cancelled_reason", "cancelled_at", "cancelled_by", "returned_at", "returned_by", "printed_count"},
@@ -3815,21 +2555,6 @@ def automatic_backup_if_due(user_id, keep_days: int = 30) -> Path | None:
         except OSError:
             pass
     return today_path
-
-
-def qr_health_check() -> tuple[bool, str, str]:
-    """Check local QR HTTP endpoint and return (ok, local-IP URL, response text)."""
-    import urllib.request
-    ip = get_local_ip()
-    port = int(_SERVER.server_address[1]) if _SERVER is not None else SERVER_PORT
-    url = f"http://127.0.0.1:{port}/health"
-    try:
-        with urllib.request.urlopen(url, timeout=3) as response:
-            body = response.read(120).decode("utf-8", errors="replace")
-            return response.status == 200 and "SchoolPass OK" in body, f"http://{ip}:{port}/health", body
-    except Exception as exc:
-        return False, f"http://{ip}:{port}/health", str(exc)
-
 
 
 def create_daily_report_pdf(dest_path, report_date: date | str, user_id) -> Path:
@@ -4267,13 +2992,12 @@ def restore_database(source_path, user_id) -> Path:
     previous = DATA_DIR / "backups" / f"before_restore_{stamp}.sqlite3"
     # Never validate legacy schemas against the newest columns before migrating them.
     _copy_db(source, stage)
-    server_was_running, replaced = False, False
+    replaced = False
     try:
         _migrate_staged_database(stage)
         validate_database(stage)
         _copy_db(DB_PATH, previous)  # safety copy of current data
         validate_database(previous)
-        server_was_running = stop_local_server()
         for suffix in ("-wal", "-shm"):
             Path(str(DB_PATH) + suffix).unlink(missing_ok=True)
         os.replace(stage, DB_PATH)
@@ -4285,15 +3009,12 @@ def restore_database(source_path, user_id) -> Path:
     except Exception as exc:
         if replaced and previous.exists():
             try:
-                stop_local_server()
                 for suffix in ("-wal", "-shm"):
                     Path(str(DB_PATH) + suffix).unlink(missing_ok=True)
                 os.replace(previous, DB_PATH)
                 init_db()
             except Exception as rb:  # pragma: no cover
                 raise RuntimeError(f"{exc}\nوفشل التراجع التلقائي أيضًا: {rb}. احتفظ بالملف: {previous}") from exc
-        if server_was_running:
-            ensure_local_server()
         raise
     finally:
         try:
@@ -4354,110 +3075,4 @@ def create_a4_two_record_sheet(record_ids: list[int]) -> Path:
     c.drawCentredString(page_w / 2, half_h + 2 * MM, _arabic_visual("خط القص"))
     c.restoreState()
     c.save()
-    return out
-
-
-
-def create_annual_report_pdf(dest_path, year: int, user_id) -> Path:
-    """Create a paginated A4-landscape annual archive and grouped totals."""
-    require_user(user_id)
-    year=int(year)
-    if not 2000<=year<=2100:
-        raise ValueError("السنة المحددة غير صحيحة.")
-    from reportlab.pdfgen import canvas
-    from reportlab.lib.pagesizes import A4, landscape
-    from reportlab.lib.units import mm
-    from reportlab.lib import colors
-    issue="COALESCE(NULLIF(r.issued_at,''),r.created_at)"
-    with db_connect() as conn:
-        rows=conn.execute(
-            f"""SELECT r.*,COALESCE(u.display_name,'غير معروف') AS supervisor
-                FROM records r LEFT JOIN users u ON u.id=r.user_id
-                WHERE substr({issue},1,4)=? ORDER BY {issue},r.record_no""",
-            (f"{year:04d}",)).fetchall()
-    out=Path(dest_path);out.parent.mkdir(parents=True,exist_ok=True)
-    page_w,page_h=landscape(A4);margin=10*mm
-    c=canvas.Canvas(str(out),pagesize=landscape(A4),pageCompression=1)
-    c.setTitle(f"SchoolPass Annual Archive {year}");c.setAuthor(APP_NAME)
-    font=_font_setup()
-    active=[r for r in rows if r["status"]!="cancelled"]
-    by_month=Counter(str((r["issued_at"] or r["created_at"])[:7]) for r in active)
-    by_class=Counter((r["class_name"] or "—") for r in active)
-    by_supervisor=Counter((r["supervisor"] or "—") for r in active)
-    by_kind=Counter(kind_label(r["kind"]) for r in active)
-    month_names=["جانفي","فيفري","مارس","أفريل","ماي","جوان","جويلية","أوت","سبتمبر","أكتوبر","نوفمبر","ديسمبر"]
-    y=page_h-margin
-    visual=lambda value:_arabic_visual(str(value))
-    def footer():
-        c.setStrokeColor(colors.HexColor("#B7C4BE"));c.line(margin,13*mm,page_w-margin,13*mm)
-        c.setFont(font,6.5);c.setFillColor(colors.HexColor("#52645D"))
-        c.drawString(margin,8*mm,visual(f"SchoolPass — الأرشيف السنوي {year}"))
-        c.drawRightString(page_w-margin,8*mm,visual(f"تاريخ الإنشاء: {now_iso()}"))
-    columns=[(68,"الرقم المرجعي"),(100,"التاريخ والوقت"),(120,"نوع الرخصة"),
-             (165,"التلميذ"),(105,"القسم"),(110,"المشرف"),(75,"الحالة")]
-    table_width=sum(width for width,_ in columns)
-    table_right=page_w-margin-(page_w-2*margin-table_width)/2
-    def draw_table_header():
-        nonlocal y
-        h=7*mm;c.setFillColor(colors.HexColor("#DDE8E2"))
-        c.rect(table_right-table_width,y-h,table_width,h,stroke=0,fill=1)
-        c.setFillColor(colors.HexColor("#173D36"));c.setFont(font,7.2);xr=table_right
-        for width,title in columns:
-            c.drawRightString(xr-3,y-4.8*mm,visual(title));xr-=width
-        y-=h
-    def draw_header(first=False):
-        nonlocal y
-        c.setFillColor(colors.HexColor("#173D36"))
-        c.roundRect(margin,page_h-24*mm,page_w-2*margin,13*mm,2*mm,stroke=0,fill=1)
-        c.setFillColor(colors.white);c.setFont(font,13)
-        c.drawCentredString(page_w/2,page_h-19*mm,visual(f"الأرشيف السنوي للرخص — {year}"))
-        c.setFillColor(colors.HexColor("#263B35"));c.setFont(font,8)
-        c.drawRightString(page_w-margin,page_h-31*mm,
-            visual(f"إجمالي السجلات: {len(rows)} | غير الملغاة: {len(active)} | الملغاة: {len(rows)-len(active)}"))
-        y=page_h-39*mm
-        if first:
-            sections=[
-                ("الإحصاء حسب الشهر",[f"{month_names[int(k[5:7])-1]}: {v}" for k,v in sorted(by_month.items())]),
-                ("حسب نوع الرخصة",[f"{k}: {v}" for k,v in by_kind.most_common()]),
-                ("حسب القسم",[f"{k}: {v}" for k,v in by_class.most_common(12)]),
-                ("حسب المشرف",[f"{k}: {v}" for k,v in by_supervisor.most_common(12)]),
-            ]
-            for title,values in sections:
-                c.setFillColor(colors.HexColor("#EAF0ED"))
-                c.roundRect(margin,y-5*mm,page_w-2*margin,6*mm,1*mm,stroke=0,fill=1)
-                c.setFillColor(colors.HexColor("#173D36"));c.setFont(font,8.5)
-                c.drawRightString(page_w-margin-2*mm,y-3.4*mm,visual(title));y-=8*mm
-                content=" ؛ ".join(values) if values else "لا توجد بيانات."
-                c.setFillColor(colors.HexColor("#253B35"));c.setFont(font,7.2)
-                for line in _wrap_to_width(content,font,7.2,page_w-2*margin-4*mm):
-                    if y<22*mm:
-                        footer();c.showPage();draw_header(False)
-                    c.drawRightString(page_w-margin-2*mm,y,visual(line));y-=4.4*mm
-                y-=1.5*mm
-        draw_table_header()
-    draw_header(True)
-    for index,row in enumerate(rows):
-        values=[row["record_no"],row["issued_at"] or row["created_at"],kind_label(row["kind"]),
-                row["student_name"],row["class_name"],row["supervisor"],status_label(row["status"])]
-        cells=[_wrap_to_width(str(value or "—"),font,6.8,width-6)
-               for (width,_),value in zip(columns,values)]
-        lines=max(1,max(len(cell) for cell in cells))
-        row_height=max(7*mm,lines*7.7+3)
-        if y-row_height<17*mm:
-            footer();c.showPage();draw_header(False)
-        if index%2:
-            c.setFillColor(colors.HexColor("#F5F8F6"))
-            c.rect(table_right-table_width,y-row_height,table_width,row_height,stroke=0,fill=1)
-        right=table_right
-        for (width,_),cell in zip(columns,cells):
-            baseline=y-4.5*mm
-            for line in cell:
-                c.setFillColor(colors.HexColor("#263B35"));c.setFont(font,6.8)
-                c.drawRightString(right-3,baseline,visual(line));baseline-=7.7
-            right-=width
-        c.setStrokeColor(colors.HexColor("#D8E1DC"))
-        c.line(table_right-table_width,y-row_height,table_right,y-row_height)
-        y-=row_height
-    footer();c.save()
-    audit(_uid(user_id),"إنشاء أرشيف سنوي PDF","report",str(year),f"عدد السجلات: {len(rows)}")
     return out

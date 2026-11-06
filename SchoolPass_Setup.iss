@@ -1,5 +1,5 @@
-﻿#define MyAppName "SchoolPass"
-#define MyAppVersion "4.9.3"
+#define MyAppName "SchoolPass"
+#define MyAppVersion "3.0.0"
 #define MyAppPublisher "SchoolPass"
 
 [Setup]
@@ -26,8 +26,8 @@ CloseApplications=yes
 RestartApplications=no
 Uninstallable=yes
 ChangesAssociations=no
-VersionInfoVersion=4.9.2.0
-VersionInfoProductVersion=4.9.2
+VersionInfoVersion=3.0.0.0
+VersionInfoProductVersion=3.0.0
 VersionInfoProductName=SchoolPass
 VersionInfoCompany=SchoolPass
 
@@ -40,7 +40,6 @@ Source: "app.ico"; DestDir: "{app}"; Flags: ignoreversion
 Source: "VERSION.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "قالب_قائمة_التلاميذ.csv"; DestDir: "{app}"; Flags: ignoreversion
 Source: "دليل_الاستخدام.txt"; DestDir: "{app}"; Flags: ignoreversion
-Source: "فتح_المنفذ_لرموز_QR_(كمدير).bat"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\SchoolPass"; Filename: "{app}\SchoolPass.exe"; IconFilename: "{app}\app.ico"

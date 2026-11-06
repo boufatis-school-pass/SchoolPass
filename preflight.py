@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """Strict dependency and Arabic-printing preflight used before Windows packaging."""
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ for _stream in (sys.stdout, sys.stderr):
 
 REQUIRED = (
     "reportlab", "qrcode", "PIL", "arabic_reshaper", "bidi", "openpyxl", "xlrd",
-    "pypdf", "pdfplumber", "PyInstaller", "ttkbootstrap", "tkinter",
+    "pypdf", "pdfplumber", "PyInstaller", "tkinter",
 )
 
 

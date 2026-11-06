@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """Focused regression tests for SchoolPass current-release dashboard metrics and daily handover report."""
 from __future__ import annotations
 import sys
@@ -15,7 +15,6 @@ core.PBKDF2_ITERATIONS = 2000
 
 
 def fresh_db():
-    core.stop_local_server()
     for suffix in ('', '-wal', '-shm'):
         Path(str(core.DB_PATH) + suffix).unlink(missing_ok=True)
     core.init_db()
@@ -40,12 +39,20 @@ class TestReleaseCurrent(unittest.TestCase):
         self.assertEqual(SchoolPassApp._version_parts('v2.5.2'), (2, 5, 2))
         self.assertEqual(SchoolPassApp._version_parts('v2.5.3'), (2, 5, 3))
         self.assertEqual(SchoolPassApp._version_parts('2.6.1'), (2, 6, 1))
-        self.assertEqual(SchoolPassApp._version_parts('v3.0.0'), (3, 0, 0))
-        self.assertEqual(SchoolPassApp._version_parts('v4.0.0'), (4, 0, 0))
-        self.assertEqual(SchoolPassApp._version_parts('v4.5.0'), (4, 5, 0))
-        self.assertEqual(SchoolPassApp._version_parts('v4.6.0'), (4, 6, 0))
         with self.assertRaises(ValueError):
             SchoolPassApp._version_parts('latest-release')
+
+    def test_update_checker_ignores_archived_other_major_releases(self):
+        from app import SchoolPassApp
+        releases = [
+            {"tag_name": "v4.9.4-local-fast-ui", "draft": False, "prerelease": False},
+            {"tag_name": "v3.0.0", "draft": False, "prerelease": False},
+            {"tag_name": "v3.1.0-beta", "draft": False, "prerelease": True},
+            {"tag_name": "v2.5.3", "draft": False, "prerelease": False},
+        ]
+        chosen = SchoolPassApp._select_release_for_current_major(releases, "3.0.0")
+        self.assertEqual(chosen["tag_name"], "v3.0.0")
+        self.assertEqual(SchoolPassApp._select_release_for_current_major(releases, "3.1.0")["tag_name"], "v3.0.0")
 
     def test_dashboard_uses_unique_students_and_separate_permit_counts(self):
         core.create_late_slip(self.s1, self.supervisor, 'تأخر أول')
@@ -83,52 +90,13 @@ class TestReleaseCurrent(unittest.TestCase):
         self.assertTrue('week_by_kind' in stats)
 
 
-    def test_expulsion_by_teacher_is_reported_and_cancelled_records_are_excluded(self):
-        first = core.create_special_entry(self.s1, self.supervisor, 'class_expulsion', 'الأستاذ أحمد', 'رياضيات')
-        second = core.create_special_entry(self.s2, self.supervisor, 'class_expulsion', 'الأستاذ أحمد', 'رياضيات')
-        core.create_special_entry(self.s1, self.supervisor, 'class_expulsion', 'الأستاذة سارة', 'علوم')
-        core.cancel_record(second['id'], self.supervisor, 'سجل تجريبي ملغى')
-        stats = core.compute_stats()
-        by_teacher = {item['teacher']: item for item in stats['expulsion_by_teacher']}
-        self.assertEqual(by_teacher['الأستاذ أحمد']['count'], 1)
-        self.assertEqual(by_teacher['الأستاذ أحمد']['student_count'], 1)
-        self.assertEqual(by_teacher['الأستاذة سارة']['count'], 1)
-        report = core.get_expulsion_report(core.date.today().replace(day=1).isoformat(), core.date.today().isoformat(), 'الأستاذ أحمد')
-        self.assertEqual(report['total'], 1)
-        self.assertEqual(report['records'][0]['id'], first['id'])
-
-    def test_exit_permit_renderer_preserves_two_copy_safeguards_and_uses_admin_signature_box(self):
+    def test_exit_permit_renderer_keeps_signature_and_static_qr(self):
         source = (HERE / 'schoolpass_core.py').read_text(encoding='utf-8')
-        start = source.index('def _draw_page(')
-        end = source.index('def _render_record_page(', start)
-        renderer = source[start:end]
-        self.assertIn('_draw_admin_signature_box(', renderer)
-        self.assertNotIn('ختم المؤسسة', renderer)
-        self.assertNotIn('إمضاء المسؤول', renderer)
-        self.assertIn('_WARN_GATE', renderer)
-        self.assertIn('_WARN_STUDENT', renderer)
-        self.assertIn('copy_type', renderer)
-        self.assertIn('mask_national_id(details)', renderer)
-        self.assertIn('box_bottom = 36 * MM', renderer)
-
-    def test_expulsion_by_teacher_pdf_is_generated_and_contains_filtered_teacher_rows(self):
-        core.create_special_entry(self.s1, self.supervisor, 'class_expulsion', 'TeacherA', 'Mathematics')
-        core.create_special_entry(self.s2, self.supervisor, 'class_expulsion', 'TeacherB', 'Science')
-        target = Path(tempfile.mkdtemp(dir=testenv.ROOT)) / 'expulsion-by-teacher.pdf'
-        def ascii_visual(value):
-            return ''.join(ch if ord(ch) < 128 else 'X' for ch in str(value))
-        with mock.patch.object(core, '_font_setup', return_value='Helvetica'), \
-             mock.patch.object(core, '_arabic_visual', side_effect=ascii_visual):
-            out = core.create_expulsion_report_pdf(
-                target, core.date.today().replace(day=1).isoformat(), core.date.today().isoformat(),
-                'TeacherA', self.supervisor)
-        self.assertTrue(out.exists())
-        self.assertGreater(out.stat().st_size, 600)
-        from pypdf import PdfReader
-        text = '\n'.join(page.extract_text() or '' for page in PdfReader(str(out)).pages)
-        self.assertIn('TeacherA', text)
-        self.assertIn('Mathematics', text)
-        self.assertNotIn('TeacherB', text)
+        self.assertIn('توقيع الإدارة', source)
+        self.assertIn('qr.add_data(qr_payload(row))', source)
+        self.assertIn('وقت الانتهاء', source) if 'وقت الانتهاء' in source else self.assertIn('انتهاء:', source)
+        self.assertNotIn('qr_url(row', source)
+        self.assertNotIn('ThreadingHTTPServer', source)
 
     def test_daily_report_pdf_created_on_a4_landscape_and_contains_all_record_types(self):
         report_day = core.date.today()

@@ -1,5 +1,5 @@
-﻿# -*- coding: utf-8 -*-
-"""Regression coverage for the preserved SchoolPass 2.x business rules in 3.0.0."""
+# -*- coding: utf-8 -*-
+"""Regression coverage for the combined SchoolPass 2.5.3 features."""
 from __future__ import annotations
 
 import json
@@ -20,7 +20,6 @@ core.PBKDF2_ITERATIONS = 2000
 
 class TestSchoolPass253(unittest.TestCase):
     def setUp(self):
-        core.stop_local_server()
         for suffix in ("", "-wal", "-shm"):
             Path(str(core.DB_PATH) + suffix).unlink(missing_ok=True)
         core.init_db()
@@ -141,6 +140,17 @@ class TestSchoolPass253(unittest.TestCase):
         self.assertTrue(result.exists())
         self.assertEqual(result.read_bytes()[:4], b"%PDF")
         self.assertGreater(result.stat().st_size, 500)
+
+
+    def test_rollback_preserves_newer_database_schema_and_tables(self):
+        with core.db_connect() as conn:
+            conn.execute("CREATE TABLE IF NOT EXISTS teachers (id INTEGER PRIMARY KEY, name TEXT)")
+            conn.execute("UPDATE settings SET setting_value='9' WHERE setting_key='schema_version'")
+        core.init_db()
+        self.assertEqual(core.setting("schema_version"), "9")
+        with core.db_connect() as conn:
+            self.assertIsNotNone(conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='teachers'").fetchone())
 
 
 if __name__ == "__main__":

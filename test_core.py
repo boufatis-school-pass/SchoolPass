@@ -34,14 +34,12 @@ fake_reveal = lambda v: v.split(":", 1)[1][::-1]
 
 
 def tearDownModule():
-    core.stop_local_server()
     pass
 
 
 def fresh_db():
     # Each test owns a fresh data directory; never unlink a database that may
     # still be held by SQLite or a background server thread.
-    core.stop_local_server()
     core.init_db()
     admin_id, code = core.bootstrap_admin("director", "المدير", PW)
     sup_id = core.create_user_as(admin_id, "sup1", "مشرف أول", PW)
@@ -58,7 +56,6 @@ def write_csv(path: Path, rows, header=("رقم التعريف", "اللقب", "
 
 class Base(unittest.TestCase):
     def setUp(self):
-        core.stop_local_server()
         self.tmp = Path(tempfile.mkdtemp(dir=TEST_ROOT))
         self.data_dir = self.tmp / "data"
         self.data_dir.mkdir(parents=True, exist_ok=True)
@@ -113,7 +110,6 @@ class TestSecurityAndPermissions(Base):
             core.create_user_as(self.admin, "samename1", "x", "samename1")
 
     def test_no_default_accounts_or_passwords(self):
-        core.stop_local_server()
         for suffix in ("", "-wal", "-shm"):
             Path(str(core.DB_PATH) + suffix).unlink(missing_ok=True)
         core.init_db()
@@ -127,7 +123,7 @@ class TestSecurityAndPermissions(Base):
                  lambda: core.set_user_active_as(sup, self.admin, False), lambda: core.import_students(str(self.csv), sup),
                  lambda: core.set_school_name_as(sup, "اسم"), lambda: core.backup_database(self.tmp / "b.sqlite3", sup),
                  lambda: core.restore_database(self.tmp / "b.sqlite3", sup), lambda: core.export_students_csv(str(self.tmp / "s.csv"), sup),
-                 lambda: core.issue_recovery_code_as(sup), lambda: core.set_qr_host_as(sup, "192.168.1.5"),
+                 lambda: core.issue_recovery_code_as(sup),
                  lambda: core.set_theme_as(sup, "#112233", "#FFFFFF"), lambda: core.set_print_mode_as(sup, "open"),
                  lambda: core.reveal_national_id(1, sup)]
         for i, fn in enumerate(calls):
@@ -165,17 +161,17 @@ class TestSecurityAndPermissions(Base):
         self.assertIn("#143B63", row["description"])
 
     def test_preferences_save_atomically_and_only_admin_can_change_them(self):
-        original = (core.setting("school_name"), core.qr_host(), core.get_theme_colors())
+        original = (core.setting("school_name"), core.get_theme_colors())
         with self.assertRaises(ValueError):
-            core.save_preferences_as(self.admin, "اسم جديد", "bad host", "#123456", "#ABCDEF")
-        self.assertEqual((core.setting("school_name"), core.qr_host(), core.get_theme_colors()), original)
+            core.save_preferences_as(self.admin, "اسم جديد", "bad", "#ABCDEF")
+        self.assertEqual((core.setting("school_name"), core.get_theme_colors()), original)
         with self.assertRaises(core.PermissionDenied):
-            core.save_preferences_as(self.sup, "اسم جديد", "192.168.1.10", "#123456", "#ABCDEF")
-        core.save_preferences_as(self.admin, "ثانوية اختبار", "school-pc.local", "#123456", "#ABCDEF")
+            core.save_preferences_as(self.sup, "اسم جديد", "#123456", "#ABCDEF")
+        core.save_preferences_as(self.admin, "ثانوية اختبار", "#123456", "#ABCDEF")
         self.assertEqual(core.setting("school_name"), "ثانوية اختبار")
-        self.assertEqual(core.qr_host(), "school-pc.local")
         self.assertEqual(core.get_theme_colors(), ("#123456", "#ABCDEF"))
         self.assertEqual(core.setting("print_mode"), "open")
+        self.assertEqual(core.setting("qr_host", ""), "")
 
     def test_print_mode_is_admin_only_and_validated(self):
         core.set_print_mode_as(self.admin, "open")
@@ -256,7 +252,6 @@ class TestDatabaseIntegrity(Base):
             c.execute("SELECT 1")
 
     def test_upgrade_from_0_2_0_database_keeps_data_and_adds_protection(self):
-        core.stop_local_server()
         for suffix in ("", "-wal", "-shm"):
             Path(str(core.DB_PATH) + suffix).unlink(missing_ok=True)
         old_schema = Path(__file__).resolve().parent / "tests_data" / "legacy_schema_fixture.sql"
@@ -370,7 +365,7 @@ class TestRecords(Base):
         a, b = core.create_late_slip(self.s1, self.sup, "x"), core.create_late_slip(self.s1, self.sup, "x")
         self.assertNotEqual(a["qr_token"], b["qr_token"])
         self.assertRegex(a["qr_token"], r"^[0-9a-f]{48}$")
-        self.assertNotIn("T-001", core.qr_url(a["qr_token"]))
+        self.assertNotIn("T-001", core.qr_payload(a))
 
     def test_late_slip_requires_reason_and_records_supervisor(self):
         with self.assertRaises(ValueError):
@@ -501,8 +496,8 @@ class TestRecords(Base):
         self.assertNotIn(FULL_NID, p["details_json"], "full NID must not be stored in clear text")
         self.assertNotIn(FULL_NID, core.mask_national_id(d))
         self.assertTrue(core.mask_national_id(d).endswith(FULL_NID[-4:]))
-        self.assertNotIn(FULL_NID, core.qr_url(p["qr_token"]))
-        self.assertNotIn(FULL_NID[-4:], core.qr_url(p["qr_token"]))
+        self.assertNotIn(FULL_NID, core.qr_payload(p))
+        self.assertNotIn(FULL_NID[-4:], core.qr_payload(p))
         self.assertTrue(p["record_no"].startswith("SP-"))
         for bad in ("12ab56", "123", "1" * 25, ""):
             with self.assertRaises(ValueError):
@@ -700,7 +695,7 @@ class TestBackupRestore(Base):
         restored = json.loads(core.record_by_id(row["id"])["details_json"])
         self.assertEqual(restored["days_count"], 2)
         self.assertEqual(restored["date_difference_days"], 2)
-        self.assertEqual(core.setting("schema_version"), core.SCHEMA_VERSION)
+        self.assertEqual(core.setting("schema_version"), "6")
 
     def test_external_daily_backup_is_mirrored_and_verified(self):
         external = self.tmp / "usb"; external.mkdir()
@@ -722,77 +717,37 @@ class TestBackupRestore(Base):
             core.backup_database(self.tmp / "no_such_dir" / "b.sqlite3", self.admin)
 
 
-class TestQrServer(Base):
-    def setUp(self):
-        super().setUp()
-        ok, msg = core.ensure_local_server(port=0)
-        self.assertTrue(ok, msg)
-        self.port = core._SERVER.server_address[1]
-        core._RATE.clear()
-        while not core.EVENT_QUEUE.empty():
-            core.EVENT_QUEUE.get_nowait()
+class TestStaticQr(Base):
+    def test_qr_contains_public_permit_details_and_two_hour_expiry(self):
+        permit = self.permit()
+        payload = core.qr_payload(permit)
+        self.assertIn(permit["record_no"], payload)
+        self.assertIn(permit["student_name"], payload)
+        self.assertIn(permit["class_name"], payload)
+        self.assertIn("إصدار", payload)
+        self.assertIn("انتهاء", payload)
+        self.assertIn("صلاحية: ساعتان", payload)
+        self.assertNotIn(FULL_NID, payload)
+        self.assertNotIn(FULL_NID[-4:], payload)
+        self.assertNotIn("http://", payload)
+        self.assertNotIn("https://", payload)
+        self.assertNotIn("192.168.", payload)
 
-    def tearDown(self):
-        core.stop_local_server()
+    def test_qr_marks_cancelled_or_returned_status_at_print_time(self):
+        permit = self.permit()
+        core.cancel_record(permit["id"], self.sup, "تصحيح")
+        self.assertIn("الحالة: ملغاة", core.qr_payload(core.record_by_id(permit["id"])))
+        exit_permit = self.permit(self.s2)
+        core.return_from_exit(exit_permit["id"], self.sup)
+        self.assertIn("عودة مسجلة", core.qr_payload(core.record_by_id(exit_permit["id"])))
 
-    def get(self, path):
-        try:
-            with urllib.request.urlopen(f"http://127.0.0.1:{self.port}{urllib.parse.quote(path, safe='/')}", timeout=5) as r:
-                return r.status, r.read().decode("utf-8"), dict(r.headers)
-        except urllib.error.HTTPError as e:
-            return e.code, e.read().decode("utf-8", "replace"), dict(e.headers)
+    def test_qr_expiry_is_two_hours_from_issue_time(self):
+        permit = self.permit()
+        payload = core.qr_payload(permit)
+        issued = datetime.fromisoformat(permit["issued_at"]).astimezone()
+        expires = issued + timedelta(hours=2)
+        self.assertIn(expires.isoformat(timespec="seconds"), payload)
 
-    def test_valid_cancelled_and_unknown_tokens(self):
-        p = self.permit()
-        code, body, hdr = self.get("/v/" + p["qr_token"])
-        self.assertEqual(code, 200); self.assertIn(p["record_no"], body); self.assertIn("ساري", body)
-        self.assertEqual(hdr.get("Cache-Control"), "no-store"); self.assertEqual(hdr.get("X-Content-Type-Options"), "nosniff")
-        for secret in (FULL_NID, FULL_NID[-4:], "ولي تجريبي", "T-001", "موعد طبي"):
-            self.assertNotIn(secret, body, "verification page must not leak guardian/ID/student key/reason")
-        core.cancel_record(p["id"], self.sup, "تراجع")
-        code, body, _ = self.get("/v/" + p["qr_token"])
-        self.assertEqual(code, 200); self.assertIn("ملغى", body); self.assertIn("لا يجوز الاعتماد", body)
-        for bad in ("/v/" + "0" * 48, "/v/abc", "/v/../../etc/passwd", "/v/' OR 1=1 --", "/", "/students", "/v/"):
-            code, body, _ = self.get(bad)
-            self.assertIn(code, (404,), bad)
-            self.assertNotIn("تجريبي", body)
-
-    def test_returned_status_and_scan_event(self):
-        p = self.permit(); core.return_from_exit(p["id"], self.sup)
-        _, body, _ = self.get("/v/" + p["qr_token"])
-        self.assertIn("تمت العودة", body)
-        self.assertEqual(core.EVENT_QUEUE.get(timeout=2), p["qr_token"])
-
-    def test_qr_health_check_returns_lan_address_and_success(self):
-        ok, url, detail = core.qr_health_check()
-        self.assertTrue(ok)
-        self.assertIn(f":{core._SERVER.server_address[1]}/health", url)
-        self.assertEqual(detail, "SchoolPass OK")
-
-    def test_rate_limit_and_health(self):
-        self.assertEqual(self.get("/health")[0], 200)
-        codes = {self.get("/v/" + "f" * 48)[0] for _ in range(45)}
-        self.assertIn(429, codes)
-
-    def test_html_is_escaped(self):
-        s = {"student_key": "X-1", "class_name": "<b>x</b>", "last_name": "<script>alert(1)</script>", "first_name": "q"}
-        r = core.create_late_slip(s, self.sup, "x")
-        _, body, _ = self.get("/v/" + r["qr_token"])
-        self.assertNotIn("<script>alert", body); self.assertIn("&lt;script&gt;", body)
-
-
-class TestQrHost(Base):
-    def test_host_saved_validated_and_used_in_urls(self):
-        with mock.patch.object(core, "get_local_ip", return_value="192.168.1.20"):
-            self.assertEqual(core.ensure_qr_host_saved(), "192.168.1.20")
-        with mock.patch.object(core, "get_local_ip", return_value="192.168.1.99"):   # DHCP changed the address
-            self.assertEqual(core.qr_host_mismatch(), ("192.168.1.20", "192.168.1.99"))
-            self.assertTrue(core.qr_url("t").startswith("http://192.168.1.20:8765/v/"))
-        for bad in ("http://x", "1.2.3.4:80", "a b", "", "../x"):
-            with self.assertRaises(ValueError):
-                core.set_qr_host_as(self.admin, bad)
-        core.set_qr_host_as(self.admin, "192.168.1.99")
-        self.assertEqual(core.setting("qr_host"), "192.168.1.99")
 
 
 if __name__ == "__main__":
