@@ -31,6 +31,7 @@ NID = "987654321098765432"
 
 
 def tearDownModule():
+    pass
 
 
 @unittest.skipUnless(HAVE_LIBS, "PDF libraries not installed")
