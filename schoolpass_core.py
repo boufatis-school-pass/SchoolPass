@@ -162,10 +162,14 @@ class _ClosingConnection(sqlite3.Connection):
 
 
 def db_connect() -> sqlite3.Connection:
+    """Open a responsive WAL connection without renegotiating journal mode on every query."""
     conn = sqlite3.connect(DB_PATH, timeout=15, factory=_ClosingConnection)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys=ON")
-    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=15000")
+    # NORMAL is safe with WAL: committed transactions remain consistent while
+    # avoiding an unnecessary full sync on every small administrative write.
+    conn.execute("PRAGMA synchronous=NORMAL")
     return conn
 
 
@@ -299,6 +303,9 @@ def _migrate_absence_day_counts(conn: sqlite3.Connection, prior_version: str) ->
 
 def init_db() -> None:
     with db_connect() as conn:
+        # WAL is persistent in the database file. Set it once during initialization,
+        # not on every short-lived connection opened by dashboard/search widgets.
+        conn.execute("PRAGMA journal_mode=WAL")
         conn.executescript(_SCHEMA)
         # Explicit issue timestamp; older records retain their historical created_at value.
         columns = {r[1] for r in conn.execute("PRAGMA table_info(records)")}
