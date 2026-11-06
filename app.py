@@ -1185,7 +1185,7 @@ class SchoolPassApp:
         self.root.bind('<F11>', lambda _e: self.toggle_fullscreen())
         self.root.bind('<Escape>', lambda _e: self.leave_fullscreen())
         role = 'مدير النظام' if user['role'] == 'admin' else 'مشرف'
-        self.base_status = f"المستخدم: {user['display_name']} ({role})  |  قاعدة البيانات محلية  |  لا توجد خدمات QR أو اتصال خارجي"
+        self.base_status = f"المستخدم: {user['display_name']} ({role})  |  قاعدة البيانات محلية  |  رمز QR ثابت؛ لا توجد خدمة خلفية أو اتصال خارجي"
         self.status_text.set(self.base_status)
         self.refresh_records()
         self.root.bind_all('<Key>', self.touch)
