@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""SchoolPass core logic (no GUI imports): database, security, import, records, PDF, QR server, backup.
+"""SchoolPass core logic (no GUI imports): database, security, import, records, PDF, static QR, backup.
 
 Every function that changes data takes the acting ``user_id`` and checks the role/active flag
 in the database itself, so permissions do not depend on which buttons the GUI shows.
@@ -11,27 +11,22 @@ from collections import Counter
 import csv
 import hashlib
 import hmac
-import html
 import io
 import json
 import os
-import queue
 import re
 import secrets
-import socket
 import sqlite3
-import threading
 import time
 from datetime import date, datetime, timedelta
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import NamedTuple
 
 APP_NAME = "SchoolPass"
-APP_VERSION = "2.5.4"
+APP_VERSION = "3.0.0"
 SCHOOL_NAME = "ثانوية المجاهد بسجراري لخضر بوفاطيس"
 MINISTRY_NAME = "الجمهورية الجزائرية الديمقراطية الشعبية — وزارة التربية الوطنية"
-SERVER_PORT = 8765
+QR_VALIDITY_HOURS = 2
 AUTO_LOCK_SECONDS = 600
 RECORD_KINDS = ("late", "absence_return", "special_entry", "exit_permit", "exit_return")
 ABSENCE_CERTIFICATE_MAX_DURATION_DAYS = 2
@@ -60,9 +55,6 @@ def app_data_dir() -> Path:
 DATA_DIR = app_data_dir()
 DB_PATH = DATA_DIR / "schoolpass.sqlite3"
 LOG_PATH = DATA_DIR / "logs" / "schoolpass.log"
-EVENT_QUEUE: "queue.Queue[str]" = queue.Queue(maxsize=200)
-_SERVER: ThreadingHTTPServer | None = None
-_SERVER_THREAD: threading.Thread | None = None
 
 
 def now_iso() -> str:
@@ -79,27 +71,6 @@ _AR_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567
 
 def normalize_digits(text: str) -> str:
     return str(text or "").translate(_AR_DIGITS)
-
-
-def get_local_ip() -> str:
-    """Resolve the local interface address without requiring Internet access."""
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    try:
-        s.connect(("192.0.2.1", 80))  # UDP connect sends no data
-        ip = s.getsockname()[0]
-        if ip and not ip.startswith("127."):
-            return ip
-    except OSError:
-        pass
-    finally:
-        s.close()
-    try:
-        for ip in socket.gethostbyname_ex(socket.gethostname())[2]:
-            if not ip.startswith("127."):
-                return ip
-    except OSError:
-        pass
-    return "127.0.0.1"
 
 
 # ----------------------------------------------------------------------------- passwords
@@ -1726,13 +1697,12 @@ def set_print_mode_as(actor, mode: str) -> None:
     audit(admin["id"], "تثبيت الطباعة عبر معاينة PDF", "settings", "print_mode", "open")
 
 
-def save_preferences_as(actor, school_name: str, host: str, primary: str, secondary: str,
+def save_preferences_as(actor, school_name: str, primary: str, secondary: str,
                         late_alert_threshold: int = 3, external_backup_path: str = "",
                         rtl_shaping_enabled: bool = True) -> None:
     """Validate and save all administrator preferences atomically, with one audit event per setting."""
     admin = require_admin(actor)
     school_name = str(school_name or "").strip()
-    host = str(host or "").strip()
     if not school_name:
         raise ValueError("أدخل اسم المؤسسة.")
     if not re.fullmatch(r"[A-Za-z0-9]([A-Za-z0-9.\-]{0,60}[A-Za-z0-9])?", host):
@@ -1762,7 +1732,6 @@ def save_preferences_as(actor, school_name: str, host: str, primary: str, second
         external_backup_path = str(resolved_backup)
     changes = {
         "school_name": school_name,
-        "qr_host": host,
         "theme_primary": primary,
         "theme_secondary": secondary,
         "print_mode": "open",
@@ -1789,161 +1758,39 @@ def save_preferences_as(actor, school_name: str, host: str, primary: str, second
                          (now_iso(), admin["id"], action, "settings", key, f"{desc}: {value}"))
 
 
-# ----------------------------------------------------------------------------- QR host / local verification server
-def qr_host() -> str:
-    """Address written into printed QR codes. Saved once so old printouts keep working."""
-    return setting("qr_host", "").strip() or get_local_ip()
-
-
-def ensure_qr_host_saved() -> str:
-    host = setting("qr_host", "").strip()
-    if not host:
-        ip = get_local_ip()
-        if not ip.startswith("127."):
-            set_setting("qr_host", ip)
-            host = ip
-    return host or get_local_ip()
-
-
-def qr_host_mismatch() -> tuple[str, str] | None:
-    """(configured, current) when the saved IP is no longer this computer's IP; old QR codes would break."""
-    configured, current = setting("qr_host", "").strip(), get_local_ip()
-    if configured and re.fullmatch(r"\d{1,3}(\.\d{1,3}){3}", configured) and current != configured and not current.startswith("127."):
-        return configured, current
-    return None
-
-
-def set_qr_host_as(actor, host: str) -> None:
-    admin = require_admin(actor)
-    host = host.strip()
-    if not re.fullmatch(r"[A-Za-z0-9]([A-Za-z0-9.\-]{0,60}[A-Za-z0-9])?", host):
-        raise ValueError("أدخل عنوان IP (مثل 192.168.1.20) أو اسم حاسوب صالحًا دون http:// أو منفذ.")
-    set_setting("qr_host", host)
-    audit(admin["id"], "تغيير عنوان رمز QR", "settings", "qr_host", host)
-
-
-def qr_url(token: str) -> str:
-    return f"http://{qr_host()}:{SERVER_PORT}/v/{token}"
-
-
-_TOKEN_RE = re.compile(r"^[0-9a-f]{48}$")
-_RATE: dict[str, list[float]] = {}
-_RATE_LOCK = threading.Lock()
-
-
-def _rate_limited(ip: str, limit: int = 20, window: float = 60.0) -> bool:
-    now = time.time()
-    with _RATE_LOCK:
-        hits = [t for t in _RATE.get(ip, []) if now - t < window]
-        hits.append(now)
-        _RATE[ip] = hits
-        if len(_RATE) > 500:
-            _RATE.clear()
-        return len(hits) > limit
-
-
-def verification_page(token: str) -> tuple[int, bytes, dict | None]:
-    """Build the phone verification page. Never includes national ID or guardian data."""
-    row = None
-    if _TOKEN_RE.match(token or ""):
-        with db_connect() as conn:
-            row = conn.execute("SELECT record_no,kind,student_name,class_name,status,created_at,cancelled_at FROM records WHERE qr_token=?",
-                               (token,)).fetchone()
-    school = html.escape(setting("school_name", SCHOOL_NAME))
-    if not row:
-        title, body = "رمز غير معروف", "<p>لم يتم العثور على هذا السجل في قاعدة بيانات SchoolPass.</p>"
-    else:
-        title = "التحقق من الرخصة"
-        body = (f'<p><b>الرقم:</b> {html.escape(row["record_no"])}</p><p><b>النوع:</b> {html.escape(kind_label(row["kind"]))}</p>'
-                f'<p><b>التلميذ:</b> {html.escape(row["student_name"])}</p><p><b>القسم:</b> {html.escape(row["class_name"])}</p>'
-                f'<p><b>التاريخ:</b> {html.escape(row["created_at"])}</p>'
-                f'<p><b>الحالة:</b> <strong>{html.escape(status_label(row["status"]))}</strong></p>')
-        if row["status"] == "cancelled":
-            body += f'<p class="bad">تنبيه: هذا السجل ملغى منذ {html.escape(row["cancelled_at"] or "")} ولا يجوز الاعتماد عليه.</p>'
-        elif row["status"] == "returned":
-            body += "<p>سُجّلت عودة التلميذ بموجب هذا التصريح.</p>"
-        else:
-            body += "<p>السجل سارٍ. طابق الاسم والقسم مع التلميذ الحاضر.</p>"
-    page = (f'<!doctype html><html lang="ar" dir="rtl"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
-            f'<title>{html.escape(title)}</title><style>body{{font-family:Tahoma,Arial,sans-serif;background:#f4f7fb;margin:0;padding:22px;color:#17243a}}'
-            f'main{{max-width:480px;margin:auto;background:#fff;border-radius:14px;padding:22px}}h2{{color:#174a77}}p{{padding:9px 0;border-bottom:1px solid #edf0f5}}'
-            f'.bad{{color:#b00020;font-weight:bold}}</style><main><h2>{school}</h2><h3>{html.escape(title)}</h3>{body}'
-            f'<p>صفحة تحقق محلية؛ لا تتضمن رقم بطاقة الهوية.</p></main></html>').encode("utf-8")
-    return (200 if row else 404), page, ({"qr_token": token} if row else None)
-
-
-def ensure_local_server(port: int | None = None) -> tuple[bool, str]:
-    global _SERVER, _SERVER_THREAD
-    if _SERVER is not None:
-        return True, get_local_ip()
-
-    class Handler(BaseHTTPRequestHandler):
-        server_version = "SchoolPass"
-        sys_version = ""
-
-        def log_message(self, *_args):
-            return
-
-        def _send(self, code: int, body: bytes, ctype: str):
-            self.send_response(code)
-            self.send_header("Content-Type", ctype)
-            self.send_header("Content-Length", str(len(body)))
-            self.send_header("Cache-Control", "no-store")
-            self.send_header("X-Content-Type-Options", "nosniff")
-            self.send_header("Referrer-Policy", "no-referrer")
-            self.send_header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'")
-            self.end_headers()
-            self.wfile.write(body)
-
-        def do_GET(self):
-            path = self.path.split("?", 1)[0]
-            if path == "/health":
-                return self._send(200, b"SchoolPass OK", "text/plain; charset=utf-8")
-            if not path.startswith("/v/"):
-                return self._send(404, b"Not found", "text/plain; charset=utf-8")
-            if _rate_limited(self.client_address[0]):
-                return self._send(429, b"Too many requests", "text/plain; charset=utf-8")
-            code, page, ev = verification_page(path[3:].strip("/"))
-            if ev:
-                try:
-                    EVENT_QUEUE.put_nowait(ev["qr_token"])
-                except queue.Full:
-                    pass
-            self._send(code, page, "text/html; charset=utf-8")
-
+# ----------------------------------------------------------------------------- static QR data
+def qr_payload(row) -> str:
+    """Return a self-contained, human-readable permit payload; no URL, server or network."""
+    issued_text = str(row["issued_at"] or row["created_at"] or "").strip()
     try:
-        _SERVER = ThreadingHTTPServer(("0.0.0.0", SERVER_PORT if port is None else port), Handler)
-        # Wait for request-handler threads during shutdown so tests and restore
-        # operations never race a handler that still has SQLite open.
-        _SERVER.daemon_threads = False
-        _SERVER.block_on_close = True
-        _SERVER_THREAD = threading.Thread(target=_SERVER.serve_forever, daemon=True)
-        _SERVER_THREAD.start()
-        return True, get_local_ip()
-    except OSError as exc:
-        _SERVER = _SERVER_THREAD = None
-        return False, str(exc)
-
-
-def stop_local_server() -> bool:
-    global _SERVER, _SERVER_THREAD
-    server, thread = _SERVER, _SERVER_THREAD
-    was = server is not None
-    # Detach globals first: a concurrent UI action cannot mistake a server
-    # being shut down for a healthy listener.
-    _SERVER = _SERVER_THREAD = None
-    if server is not None:
-        try:
-            server.shutdown()
-        except Exception:
-            pass
-        try:
-            server.server_close()  # waits for non-daemon request handlers
-        except Exception:
-            pass
-    if thread is not None and thread is not threading.current_thread():
-        thread.join(timeout=10)
-    return was
+        issued = datetime.fromisoformat(issued_text)
+        if issued.tzinfo is None:
+            issued = issued.astimezone()
+        else:
+            issued = issued.astimezone()
+    except (TypeError, ValueError):
+        raise ValueError("توقيت إصدار الرخصة غير صالح؛ لا يمكن إنشاء رمز تحقق موثوق.")
+    expires = issued + timedelta(hours=QR_VALIDITY_HOURS)
+    status = str(row["status"] or "active")
+    if status == "cancelled":
+        state = "ملغاة داخل البرنامج عند طباعة هذه النسخة"
+    elif status == "returned":
+        state = "تم تسجيل عودة التلميذ داخل البرنامج عند طباعة هذه النسخة"
+    else:
+        state = "تُعد صالحة حتى وقت الانتهاء أدناه؛ تحقق من ساعة الهاتف"
+    lines = [
+        "SchoolPass — بيانات رخصة",
+        f"رقم الرخصة: {row['record_no']}",
+        f"النوع: {kind_label(row['kind'])}",
+        f"التلميذ: {row['student_name']}",
+        f"القسم: {row['class_name']}",
+        f"وقت الإصدار: {issued.isoformat(timespec='seconds')}",
+        f"وقت الانتهاء: {expires.isoformat(timespec='seconds')}",
+        f"مدة الصلاحية: {QR_VALIDITY_HOURS} ساعة من الإصدار",
+        f"الحالة عند إنشاء الرمز: {state}",
+        "ملاحظة: هذا الرمز نص ثابت بلا اتصال أو تحديث مباشر. قارن وقت الهاتف بوقت الانتهاء.",
+    ]
+    return "\n".join(lines)
 
 
 # ----------------------------------------------------------------------------- A6 PDF
@@ -2250,7 +2097,7 @@ def _draw_entry_page(c, row, details: dict, reprint: bool, font: str, school: st
     qr_x, qr_y, qr_size = margin + 1.0 * mm, 8.0 * mm, 23.0 * mm
     import qrcode
     qr = qrcode.QRCode(version=None, error_correction=qrcode.constants.ERROR_CORRECT_M, box_size=6, border=2)
-    qr.add_data(qr_url(row["qr_token"]))
+    qr.add_data(qr_payload(row))
     qr.make(fit=True)
     img = qr.make_image(fill_color="black", back_color="white").convert("RGB")
     buf = io.BytesIO()
@@ -2710,21 +2557,6 @@ def automatic_backup_if_due(user_id, keep_days: int = 30) -> Path | None:
         except OSError:
             pass
     return today_path
-
-
-def qr_health_check() -> tuple[bool, str, str]:
-    """Check local QR HTTP endpoint and return (ok, local-IP URL, response text)."""
-    import urllib.request
-    ip = get_local_ip()
-    port = int(_SERVER.server_address[1]) if _SERVER is not None else SERVER_PORT
-    url = f"http://127.0.0.1:{port}/health"
-    try:
-        with urllib.request.urlopen(url, timeout=3) as response:
-            body = response.read(120).decode("utf-8", errors="replace")
-            return response.status == 200 and "SchoolPass OK" in body, f"http://{ip}:{port}/health", body
-    except Exception as exc:
-        return False, f"http://{ip}:{port}/health", str(exc)
-
 
 
 def create_daily_report_pdf(dest_path, report_date: date | str, user_id) -> Path:
