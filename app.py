@@ -10,6 +10,8 @@ import os
 import sys
 import time
 import re
+import threading
+import weakref
 import calendar as calendar_module
 import webbrowser
 from urllib.request import Request, urlopen
@@ -31,6 +33,30 @@ from schoolpass_core import (
 
 USER_ERRORS = (ValueError, RuntimeError, PermissionDenied, FileNotFoundError, OSError)
 _INSTANCE_LOCK = None
+
+
+def _ui_font_family() -> str:
+    if os.name == 'nt':
+        fonts = Path(os.environ.get('WINDIR', r'C:\Windows')) / 'Fonts'
+        for filename, family in (('tahoma.ttf', 'Tahoma'), ('segoeui.ttf', 'Segoe UI'), ('arial.ttf', 'Arial')):
+            if (fonts / filename).is_file():
+                return family
+    return 'DejaVu Sans'
+
+
+_UI_FONT_FAMILY = _ui_font_family()
+_SCROLLABLE_FRAMES = weakref.WeakSet()
+_SCROLLABLE_BINDINGS_INSTALLED = False
+
+
+def _dispatch_scroll(event):
+    for frame in tuple(_SCROLLABLE_FRAMES):
+        try:
+            if frame._contains_widget(event.widget):
+                return frame._on_mousewheel(event)
+        except Exception:
+            continue
+    return None
 
 
 # ---------------------------------------------------------------- UI helpers
@@ -187,51 +213,57 @@ def make_style(root: Tk, primary: str | None = None, secondary: str | None = Non
             'green': primary_color, 'green2': _shade(primary_color, 0.86), 'green_soft': '#E4F0EA',
             'gold': '#DAB65E', 'border': '#E1EAE5', 'sidebar_text': '#FFFFFF',
             'sidebar_muted': '#C6DAD2', 'alert_bg': '#FFF4E5', 'alert_fg': '#8A4B08',
-            'good_bg': '#E5F4EC', 'good_fg': '#176342', 'field': '#FFFFFF',
+            'good_bg': '#E5F4EC', 'good_fg': '#176342', 'field': '#F8FBF9',
             'heading': '#E8F0EC', 'selected': '#D9EAE1', 'canvas': '#FFFFFF'
         }
     bg, surface, ink, muted = palette['bg'], palette['surface'], palette['ink'], palette['muted']
     green, green2, gold, border = palette['green'], palette['green2'], palette['gold'], palette['border']
     root.configure(background=bg)
-    style.configure('.', font=('Segoe UI', 10), foreground=ink)
+    style.configure('.', font=(_UI_FONT_FAMILY, 10), foreground=ink)
     style.configure('TFrame', background=bg)
     style.configure('Surface.TFrame', background=surface, relief='flat')
     style.configure('Sidebar.TFrame', background=green)
-    style.configure('TLabel', background=bg, foreground=ink, font=('Segoe UI', 9), anchor='e')
-    style.configure('Title.TLabel', background=bg, foreground=green2 if dark else green, font=('Segoe UI', 18, 'bold'))
-    style.configure('Subtitle.TLabel', background=bg, foreground=muted, font=('Segoe UI', 10))
+    style.configure('TLabel', background=bg, foreground=ink, font=(_UI_FONT_FAMILY, 9), anchor='e')
+    style.configure('Title.TLabel', background=bg, foreground=green2 if dark else green, font=(_UI_FONT_FAMILY, 18, 'bold'))
+    style.configure('Subtitle.TLabel', background=bg, foreground=muted, font=(_UI_FONT_FAMILY, 10))
     style.configure('Badge.TLabel', background=palette['green_soft'], foreground=palette['sidebar_text'] if dark else green,
-                    padding=(9, 6), font=('Segoe UI', 9, 'bold'))
-    style.configure('Hint.TLabel', background=surface, foreground=muted, font=('Segoe UI', 9))
+                    padding=(9, 6), font=(_UI_FONT_FAMILY, 9, 'bold'))
+    style.configure('Hint.TLabel', background=surface, foreground=muted, font=(_UI_FONT_FAMILY, 9))
     style.configure('Status.TLabel', background=palette['green_soft'], foreground=ink, anchor='e', padding=(12, 6))
-    style.configure('Section.TLabel', background=surface, foreground=green2 if dark else green, font=('Segoe UI', 13, 'bold'))
-    style.configure('CardTitle.TLabel', background=surface, foreground=muted, font=('Segoe UI', 9, 'bold'))
-    style.configure('CardValue.TLabel', background=surface, foreground=palette['sidebar_muted'] if dark else green, font=('Segoe UI', 22, 'bold'))
-    style.configure('SidebarTitle.TLabel', background=green, foreground=palette['sidebar_text'], font=('Segoe UI', 18, 'bold'))
-    style.configure('SidebarSub.TLabel', background=green, foreground=palette['sidebar_muted'], font=('Segoe UI', 9))
+    style.configure('Section.TLabel', background=surface, foreground=green2 if dark else green, font=(_UI_FONT_FAMILY, 13, 'bold'))
+    style.configure('CardTitle.TLabel', background=surface, foreground=muted, font=(_UI_FONT_FAMILY, 9, 'bold'))
+    style.configure('CardValue.TLabel', background=surface, foreground=palette['sidebar_muted'] if dark else green, font=(_UI_FONT_FAMILY, 22, 'bold'))
+    style.configure('SidebarTitle.TLabel', background=green, foreground=palette['sidebar_text'], font=(_UI_FONT_FAMILY, 18, 'bold'))
+    style.configure('SidebarSub.TLabel', background=green, foreground=palette['sidebar_muted'], font=(_UI_FONT_FAMILY, 9))
     style.configure('Nav.TButton', background=green, foreground='#EAF3EF', borderwidth=0,
-                    focusthickness=0, padding=(10, 8), anchor='e', font=('Segoe UI', 9, 'bold'))
+                    focusthickness=0, padding=(10, 8), anchor='e', font=(_UI_FONT_FAMILY, 9, 'bold'))
     style.map('Nav.TButton', background=[('active', '#28624E' if dark else '#1B5B4A'), ('pressed', '#0B3028')],
               foreground=[('active', '#FFFFFF')])
     style.configure('TButton', background=palette['heading'], foreground=ink, borderwidth=0,
-                    focusthickness=0, padding=(9, 6), font=('Segoe UI', 9, 'bold'))
+                    focusthickness=0, padding=(9, 6), font=(_UI_FONT_FAMILY, 9, 'bold'))
     style.map('TButton', background=[('active', palette['selected']), ('pressed', palette['selected'])])
     style.configure('Accent.TButton', background=green2, foreground='#FFFFFF', borderwidth=0,
-                    focusthickness=0, padding=(11, 7), font=('Segoe UI', 9, 'bold'))
+                    focusthickness=0, padding=(11, 7), font=(_UI_FONT_FAMILY, 9, 'bold'))
     style.map('Accent.TButton', background=[('active', '#23775B'), ('pressed', '#14523E')],
               foreground=[('disabled', '#D6E2DD')])
     style.configure('Gold.TButton', background=gold, foreground='#27372F', borderwidth=0,
-                    padding=(10, 7), font=('Segoe UI', 9, 'bold'))
+                    padding=(10, 7), font=(_UI_FONT_FAMILY, 9, 'bold'))
     style.map('Gold.TButton', background=[('active', '#CDA849'), ('pressed', '#B99036')])
-    style.configure('Treeview', font=('Segoe UI', 10), rowheight=32, background=surface,
+    style.configure('Treeview', font=(_UI_FONT_FAMILY, 10), rowheight=32, background=surface,
                     fieldbackground=surface, foreground=ink, borderwidth=0, relief='flat')
-    style.configure('Treeview.Heading', font=('Segoe UI', 9, 'bold'), background=palette['heading'],
+    style.configure('Treeview.Heading', font=(_UI_FONT_FAMILY, 9, 'bold'), background=palette['heading'],
                     foreground=ink, padding=(8, 8), relief='flat')
     style.map('Treeview', background=[('selected', palette['selected'])], foreground=[('selected', ink)])
-    style.configure('TEntry', padding=6, fieldbackground=palette['field'], foreground=ink)
-    style.configure('TCombobox', padding=6, fieldbackground=palette['field'], foreground=ink)
+    style.configure('TEntry', padding=8, fieldbackground=palette['field'], foreground=ink,
+                    bordercolor=border, lightcolor=border, darkcolor=border, borderwidth=1,
+                    relief='solid', insertcolor=ink)
+    style.map('TEntry', bordercolor=[('focus', green2), ('!focus', border)])
+    style.configure('TCombobox', padding=8, fieldbackground=palette['field'], foreground=ink,
+                    bordercolor=border, lightcolor=border, darkcolor=border, borderwidth=1,
+                    relief='solid', arrowsize=14)
+    style.map('TCombobox', bordercolor=[('focus', green2), ('!focus', border)])
     style.configure('TNotebook', background=bg, borderwidth=0)
-    style.configure('TNotebook.Tab', padding=(15, 10), font=('Segoe UI', 9, 'bold'))
+    style.configure('TNotebook.Tab', padding=(15, 10), font=(_UI_FONT_FAMILY, 9, 'bold'))
     style.configure('Horizontal.TProgressbar', troughcolor=border, background=green2)
     style.configure('Vertical.TScrollbar', background=palette['heading'], troughcolor=bg,
                     bordercolor=bg, arrowcolor=muted, width=11)
@@ -241,8 +273,8 @@ def make_style(root: Tk, primary: str | None = None, secondary: str | None = Non
               foreground=[('readonly', ink)])
     style.map('TNotebook.Tab', background=[('selected', surface), ('active', palette['selected'])],
               foreground=[('selected', green if not dark else palette['sidebar_text'])])
-    style.configure('Alert.TLabel', background=palette['alert_bg'], foreground=palette['alert_fg'], padding=(9, 6), font=('Segoe UI', 9, 'bold'))
-    style.configure('Good.TLabel', background=palette['good_bg'], foreground=palette['good_fg'], padding=(9, 6), font=('Segoe UI', 9, 'bold'))
+    style.configure('Alert.TLabel', background=palette['alert_bg'], foreground=palette['alert_fg'], padding=(9, 6), font=(_UI_FONT_FAMILY, 9, 'bold'))
+    style.configure('Good.TLabel', background=palette['good_bg'], foreground=palette['good_fg'], padding=(9, 6), font=(_UI_FONT_FAMILY, 9, 'bold'))
 
 
 RTL_SHAPING_ENABLED = True
@@ -315,18 +347,63 @@ def _install_rtl_widget_adapters():
 
         class ArabicTextWidget(original):
             def __init__(self, master=None, **kwargs):
+                source_variable = kwargs.pop('textvariable', None)
                 if isinstance(kwargs.get('text'), str):
                     kwargs['text'] = rtl_display(kwargs['text'])
                 super().__init__(master, **kwargs)
+                if source_variable is not None:
+                    self._schoolpass_bind_textvariable(source_variable, original)
+
+            def _schoolpass_bind_textvariable(self, source, base_class):
+                if not (hasattr(source, 'get') and hasattr(source, 'trace_add')):
+                    base_class.configure(self, textvariable=source)
+                    return
+                if getattr(self, '_schoolpass_source_textvariable', None) is source:
+                    return
+                old_source = getattr(self, '_schoolpass_source_textvariable', None)
+                old_trace = getattr(self, '_schoolpass_source_trace', None)
+                if old_source is not None and old_trace:
+                    try:
+                        old_source.trace_remove('write', old_trace)
+                    except Exception:
+                        pass
+                display_variable = StringVar(master=self, value=rtl_display(source.get()))
+
+                def sync_display(*_args):
+                    try:
+                        display_variable.set(rtl_display(source.get()))
+                    except Exception:
+                        pass
+
+                self._schoolpass_source_textvariable = source
+                self._schoolpass_display_textvariable = display_variable
+                self._schoolpass_source_trace = source.trace_add('write', sync_display)
+                base_class.configure(self, textvariable=display_variable)
+
+                def cleanup(event):
+                    if event.widget is self:
+                        try:
+                            source.trace_remove('write', self._schoolpass_source_trace)
+                        except Exception:
+                            pass
+                self.bind('<Destroy>', cleanup, add='+')
 
             def configure(self, cnf=None, **kwargs):
+                source_variable = None
                 if isinstance(cnf, dict):
                     cnf = dict(cnf)
                     if isinstance(cnf.get('text'), str):
                         cnf['text'] = rtl_display(cnf['text'])
+                    if 'textvariable' in cnf:
+                        source_variable = cnf.pop('textvariable')
                 if isinstance(kwargs.get('text'), str):
                     kwargs['text'] = rtl_display(kwargs['text'])
-                return super().configure(cnf, **kwargs)
+                if 'textvariable' in kwargs:
+                    source_variable = kwargs.pop('textvariable')
+                result = super().configure(cnf, **kwargs)
+                if source_variable is not None:
+                    self._schoolpass_bind_textvariable(source_variable, original)
+                return result
 
             config = configure
 
@@ -408,9 +485,13 @@ class ScrollableFrame(ttk.Frame):
         self._window_id = self.canvas.create_window((0, 0), window=self.inner, anchor='nw')
         self.inner.bind('<Configure>', self._update_scroll_region)
         self.canvas.bind('<Configure>', self._fit_inner_width)
-        self.bind_all('<MouseWheel>', self._on_mousewheel, add='+')
-        self.bind_all('<Button-4>', self._on_mousewheel, add='+')
-        self.bind_all('<Button-5>', self._on_mousewheel, add='+')
+        global _SCROLLABLE_BINDINGS_INSTALLED
+        _SCROLLABLE_FRAMES.add(self)
+        if not _SCROLLABLE_BINDINGS_INSTALLED:
+            self.bind_all('<MouseWheel>', _dispatch_scroll, add='+')
+            self.bind_all('<Button-4>', _dispatch_scroll, add='+')
+            self.bind_all('<Button-5>', _dispatch_scroll, add='+')
+            _SCROLLABLE_BINDINGS_INSTALLED = True
 
     def _update_scroll_region(self, _event=None):
         try:
@@ -430,6 +511,14 @@ class ScrollableFrame(ttk.Frame):
             self.canvas.configure(background=color)
         except Exception:
             pass
+
+    def _contains_widget(self, widget) -> bool:
+        node = widget
+        while node is not None:
+            if node is self.inner or node is self.canvas:
+                return True
+            node = getattr(node, 'master', None)
+        return False
 
     def _on_mousewheel(self, event):
         # Only scroll the container under the pointer; leave tables, text boxes,
@@ -887,7 +976,7 @@ class RecordForm:
             add_row(form, 'reason', 'ملاحظة (اختياري)')
             rule_box = ttk.Frame(form, relief='groove', borderwidth=1)
             rule_box.pack(fill=X, pady=7)
-            ttk.Label(rule_box, text='قاعدة قبول تبرير الغياب', font=('Segoe UI', 9, 'bold')).pack(anchor=E, padx=8, pady=(4, 0))
+            ttk.Label(rule_box, text='قاعدة قبول تبرير الغياب', font=(_UI_FONT_FAMILY, 9, 'bold')).pack(anchor=E, padx=8, pady=(4, 0))
             self.rule_label = ttk.Label(rule_box, text='اختر تاريخ بداية الغياب لتحديد طريقة التبرير.', anchor=E, wraplength=560)
             self.rule_label.pack(fill=X, padx=10, pady=6)
             self.proof_choices = {
@@ -908,7 +997,7 @@ class RecordForm:
             ttk.Checkbutton(self.medical_frame, text='أؤكد استلام الشهادة الطبية والتحقق منها.',
                             variable=self.check_vars['certificate_present']).pack(anchor=E, padx=7, pady=6)
             self.guardian_frame = ttk.Frame(form, relief='groove', borderwidth=1)
-            ttk.Label(self.guardian_frame, text='بيانات ولي الأمر — يجب أن يكون حاضرًا فعليًا', font=('Segoe UI', 9, 'bold')).pack(anchor=E, padx=6, pady=4)
+            ttk.Label(self.guardian_frame, text='بيانات ولي الأمر — يجب أن يكون حاضرًا فعليًا', font=(_UI_FONT_FAMILY, 9, 'bold')).pack(anchor=E, padx=6, pady=4)
             add_row(self.guardian_frame, 'guardian_name', 'الاسم الكامل لولي الأمر')
             add_row(self.guardian_frame, 'relationship', 'صلة القرابة')
             add_row(self.guardian_frame, 'national_id', 'رقم بطاقة الهوية الوطنية')
@@ -916,7 +1005,7 @@ class RecordForm:
             ttk.Checkbutton(self.guardian_frame, text='أؤكد حضور ولي الأمر شخصيًا إلى الإدارة والتحقق من هويته.',
                             variable=self.check_vars['guardian_present']).pack(anchor=E, padx=7, pady=6)
             self.other_frame = ttk.Frame(form, relief='groove', borderwidth=1)
-            ttk.Label(self.other_frame, text='تفاصيل التبرير الآخر', font=('Segoe UI', 9, 'bold')).pack(anchor=E, padx=6, pady=4)
+            ttk.Label(self.other_frame, text='تفاصيل التبرير الآخر', font=(_UI_FONT_FAMILY, 9, 'bold')).pack(anchor=E, padx=6, pady=4)
             add_row(self.other_frame, 'other_reason', 'اكتب سبب التبرير')
             self.method_combo.bind('<<ComboboxSelected>>', lambda _e: self._refresh_absence_method())
             self._update_absence_rule()
@@ -929,7 +1018,7 @@ class RecordForm:
                                                values=tuple(self.special_options), justify='right')
             self.special_combo.pack(side=RIGHT, fill=X, expand=True)
             self.expulsion_frame = ttk.Frame(form, relief='groove', borderwidth=1)
-            ttk.Label(self.expulsion_frame, text='معلومات الطرد من الحصة', font=('Segoe UI', 9, 'bold')).pack(anchor=E, padx=6, pady=4)
+            ttk.Label(self.expulsion_frame, text='معلومات الطرد من الحصة', font=(_UI_FONT_FAMILY, 9, 'bold')).pack(anchor=E, padx=6, pady=4)
             add_row(self.expulsion_frame, 'teacher_name', 'اسم الأستاذ الذي طرد التلميذ')
             add_row(self.expulsion_frame, 'subject', 'المادة الدراسية')
             self.special_note = add_row(form, 'special_note', 'ملاحظة (اختياري)')
@@ -1157,9 +1246,11 @@ class SchoolPassApp:
         self.root = root
         self.current_user = user
         self._update_check_running = False
+        self._backup_running = False
+        self._close_requested = False
         self.last_activity = time.time()
         self._locked = False
-        configure_window(root, f"SchoolPass — {setting('school_name', SCHOOL_NAME)}", '1180x760')
+        configure_window(root, f"SchoolPass — {setting('school_name', SCHOOL_NAME)}", '1100x700')
         try:
             sw = int(root.winfo_screenwidth() or 1366)
             sh = int(root.winfo_screenheight() or 768)
@@ -1167,7 +1258,7 @@ class SchoolPassApp:
             sw, sh = 1366, 768
         root.minsize(min(900, max(680, sw - 80)), min(560, max(440, sh - 120)))
         root.resizable(True, True)
-        self._windowed_geometry = '1180x760'
+        self._windowed_geometry = '1100x700'
         self._fullscreen_mode = False
         make_style(root)
         self.build_ui()
@@ -1193,24 +1284,22 @@ class SchoolPassApp:
         self.root.protocol('WM_DELETE_WINDOW', self.close)
         self.root.after(5000, self.check_inactivity)
         self.root.after(60 * 60 * 1000, self.periodic_backup)
+        self.root.after(1500, self.startup_backup)
 
 
     def _maximize_on_start(self):
-        """Maximize the main window after Windows has mapped it."""
+        """Center the dashboard at a practical size; maximize only when requested."""
         try:
-            if os.name == 'nt':
-                self.root.state('zoomed')
-            else:
-                try:
-                    self.root.attributes('-zoomed', True)
-                except Exception:
-                    self.root.geometry(f"{self.root.winfo_screenwidth()}x{self.root.winfo_screenheight()}+0+0")
+            screen_w = int(self.root.winfo_screenwidth() or 1366)
+            screen_h = int(self.root.winfo_screenheight() or 768)
+            width = min(1100, max(820, screen_w - 80))
+            height = min(700, max(560, screen_h - 100))
+            x = max(0, (screen_w - width) // 2)
+            y = max(0, (screen_h - height) // 2)
+            self.root.geometry(f"{width}x{height}+{x}+{y}")
             self._sync_window_button()
-        except Exception as exc:
-            try:
-                self.status_text.set(f"تعذر تكبير النافذة تلقائيًا: {exc}")
-            except Exception:
-                pass
+        except Exception:
+            pass
 
     def _sync_window_button(self):
         if not hasattr(self, 'maximize_button') or not self.maximize_button.winfo_exists():
@@ -1484,22 +1573,60 @@ class SchoolPassApp:
         messagebox.showerror('فشل تنزيل التحديث أو التحقق منه',
             f'لم يتم تثبيت أي ملف.\n\nالتفاصيل: {detail}', parent=self.root)
 
+    def startup_backup(self):
+        """Create the first daily snapshot after the dashboard is visible."""
+        self._run_backup_async('startup')
+
     def periodic_backup(self):
-        """Refresh local and configured external backups hourly during a long session."""
+        """Refresh local and configured external backups without blocking the interface."""
         if not self.root.winfo_exists():
             return
-        try:
-            core.automatic_backup_if_due(self.current_user['id'])
-            error = core.setting('external_backup_last_error', '')
-            if error:
-                self.status_text.set(self.base_status + ' | تحذير: النسخة الخارجية لم تُحدّث؛ افحص USB/القرص.')
-        except Exception as exc:
-            try:
-                with LOG_PATH.open('a', encoding='utf-8') as log:
-                    log.write(f"\n[{now_iso()}] PERIODIC BACKUP ERROR: {exc}\n")
-            except OSError:
-                pass
+        self._run_backup_async('periodic')
         self.root.after(60 * 60 * 1000, self.periodic_backup)
+
+    def _run_backup_async(self, reason='periodic'):
+        if self._backup_running or not self.root.winfo_exists():
+            return
+        self._backup_running = True
+        user_id = self.current_user['id']
+
+        def worker():
+            error = ''
+            external_error = ''
+            try:
+                core.automatic_backup_if_due(user_id)
+                external_error = core.setting('external_backup_last_error', '')
+            except Exception as exc:
+                error = str(exc)
+                try:
+                    with LOG_PATH.open('a', encoding='utf-8') as log:
+                        log.write(f"\n[{now_iso()}] {reason.upper()} BACKUP ERROR: {error}\n")
+                except OSError:
+                    pass
+            try:
+                self.root.after(0, lambda: self._backup_finished(error, external_error))
+            except Exception:
+                pass
+
+        threading.Thread(target=worker, name='SchoolPassBackup', daemon=True).start()
+
+    def _backup_finished(self, error='', external_error=''):
+        self._backup_running = False
+        if self._close_requested:
+            if error:
+                messagebox.showwarning('تعذر تحديث النسخة الاحتياطية',
+                    f'سيُغلق البرنامج، لكن لم يكتمل آخر تحديث للنسخة الاحتياطية.\n{error}', parent=self.root)
+            elif external_error:
+                messagebox.showwarning('النسخ الخارجي غير متاح',
+                    f'تم الاحتفاظ بالنسخة المحلية، لكن تعذر تحديث النسخة على USB/القرص الخارجي:\n{external_error}', parent=self.root)
+            self.root.destroy()
+            return
+        if error:
+            self.status_text.set(self.base_status + ' | تعذر تحديث النسخة الاحتياطية؛ راجع سجل الأخطاء.')
+        elif external_error:
+            self.status_text.set(self.base_status + ' | تحذير: النسخة المحلية محفوظة، والنسخة الخارجية غير متاحة.')
+        else:
+            self.status_text.set(self.base_status + ' | النسخ الاحتياطي المحلي سليم.')
 
     def touch(self, _event=None):
         self.last_activity = time.time()
@@ -1815,7 +1942,7 @@ class SchoolPassApp:
             val = round(maximum*tick/3)
             yy = bottom - (bottom-top)*tick/3
             c.create_line(left, yy, right, yy, fill=grid)
-            c.create_text(left-7, yy, text=str(val), anchor='e', fill=label_color, font=('Segoe UI', 7))
+            c.create_text(left-7, yy, text=str(val), anchor='e', fill=label_color, font=(_UI_FONT_FAMILY, 7))
         for i, label in enumerate(data['labels']):
             base_x = left + i*group_w + group_w/2
             for j, (key, _title, color) in enumerate(names):
@@ -1825,11 +1952,11 @@ class SchoolPassApp:
                 if v:
                     c.create_rectangle(x, bottom-bh, x+bar_w-1, bottom, fill=color, outline='')
             if period == 'day' or n <= 7 or i % 5 == 0 or i == n-1:
-                c.create_text(base_x, bottom+12, text=label, fill=label_color, font=('Segoe UI', 7))
+                c.create_text(base_x, bottom+12, text=label, fill=label_color, font=(_UI_FONT_FAMILY, 7))
         legend_x = right-6
         for key, title, color in reversed(names):
             c.create_rectangle(legend_x-72, 2, legend_x-64, 10, fill=color, outline='')
-            c.create_text(legend_x-77, 6, text=title, anchor='e', fill=label_color, font=('Segoe UI', 7))
+            c.create_text(legend_x-77, 6, text=title, anchor='e', fill=label_color, font=(_UI_FONT_FAMILY, 7))
             legend_x -= 92
 
     def refresh_dashboard(self):
@@ -1932,7 +2059,7 @@ class SchoolPassApp:
         for r in rows:
             d=json.loads(r['details_json'] or '{}')
             tree.insert('',END,iid=str(r['id']),values=(r['record_no'],r['student_name'],r['class_name'],r['issued_at'] or r['created_at'],d.get('guardian_name','—'),r['supervisor'] or '—'))
-        ttk.Label(win,text=f"عدد التلاميذ الذين لم تُسجل عودتهم: {len(rows)}",font=('Segoe UI',10,'bold')).pack(pady=(0,8))
+        ttk.Label(win,text=f"عدد التلاميذ الذين لم تُسجل عودتهم: {len(rows)}",font=(_UI_FONT_FAMILY,10,'bold')).pack(pady=(0,8))
         ttk.Button(win,text='عرض الرخصة المحددة',command=lambda: self.show_record(int(tree.selection()[0])) if tree.selection() else messagebox.showinfo('اختيار', 'حدد رخصة أولًا.', parent=win)).pack(pady=(0,10))
 
     def clear_quick_search(self):
@@ -2615,19 +2742,19 @@ class SchoolPassApp:
                     ('special_entry','دخول خاص','#B85A45'),('exit_permit','خروج','#2D8062'),('exit_return','إثبات عودة','#8A78B7')]
             mx=max([1]+[n for arr in data['series'].values() for n in arr]); gw=(r-l)/max(1,len(data['labels'])); bw=max(2,min(10,gw/5))
             for tick in range(4):
-                y=b-(b-t)*tick/3; chart.create_line(l,y,r,y,fill='#EDF2EF'); chart.create_text(l-8,y,text=str(round(mx*tick/3)),anchor='e',font=('Segoe UI',8),fill='#667A73')
+                y=b-(b-t)*tick/3; chart.create_line(l,y,r,y,fill='#EDF2EF'); chart.create_text(l-8,y,text=str(round(mx*tick/3)),anchor='e',font=(_UI_FONT_FAMILY,8),fill='#667A73')
             for i,lab in enumerate(data['labels']):
                 cx=l+i*gw+gw/2
                 for j,(key,_name,color) in enumerate(series):
                     n=data['series'][key][i]; bh=(b-t)*n/mx
                     if n: chart.create_rectangle(cx+(j-1.5)*bw,b-bh,cx+(j-1.5)*bw+bw-1,b,fill=color,outline='')
-                if len(data['labels'])<=10 or i%5==0 or i==len(data['labels'])-1: chart.create_text(cx,b+13,text=lab,font=('Segoe UI',7),fill='#667A73')
+                if len(data['labels'])<=10 or i%5==0 or i==len(data['labels'])-1: chart.create_text(cx,b+13,text=lab,font=(_UI_FONT_FAMILY,7),fill='#667A73')
             x=r-5
             for _k,label,color in reversed(series):
-                chart.create_rectangle(x-88,3,x-80,11,fill=color,outline=''); chart.create_text(x-92,7,text=label,anchor='e',font=('Segoe UI',8),fill='#52665E'); x-=110
+                chart.create_rectangle(x-88,3,x-80,11,fill=color,outline=''); chart.create_text(x-92,7,text=label,anchor='e',font=(_UI_FONT_FAMILY,8),fill='#52665E'); x-=110
         combo.bind('<<ComboboxSelected>>',draw_chart)
         frame=ttk.Frame(win);frame.pack(fill=BOTH,expand=True,padx=18,pady=8)
-        text_widget=__import__('tkinter').Text(frame,wrap='word',font=('Segoe UI',10),height=18)
+        text_widget=__import__('tkinter').Text(frame,wrap='word',font=(_UI_FONT_FAMILY,10),height=18)
         sb=ttk.Scrollbar(frame,command=text_widget.yview);text_widget.configure(yscrollcommand=sb.set)
         text_widget.pack(side=LEFT,fill=BOTH,expand=True);sb.pack(side=RIGHT,fill=Y)
         def refresh_text():
@@ -2886,13 +3013,14 @@ class SchoolPassApp:
         self.root.after(5000, self.check_inactivity)
 
     def close(self):
+        if self._close_requested:
+            return
         if messagebox.askyesno('إغلاق التطبيق', 'هل تريد إغلاق SchoolPass؟', parent=self.root):
+            self._close_requested = True
             audit(self.current_user['id'], 'إغلاق التطبيق', 'app', '', '')
-            try:
-                core.automatic_backup_if_due(self.current_user['id'])
-            except Exception as exc:
-                messagebox.showwarning('تعذر تحديث النسخة الاحتياطية', f'سيُغلق البرنامج، لكن لم يكتمل آخر تحديث للنسخة الاحتياطية.\n{exc}', parent=self.root)
-            self.root.destroy()
+            self.status_text.set(self.base_status + ' | جارٍ حفظ نسخة احتياطية قبل الإغلاق…')
+            if not self._backup_running:
+                self._run_backup_async('close')
 
 
 def _log_exception(exc_type, exc, tb):
@@ -2989,21 +3117,9 @@ def main():
     if not login.user:
         root.destroy()
         return
-    try:
-        core.automatic_backup_if_due(login.user['id'])
-        external_error = core.setting('external_backup_last_error', '')
-        if external_error:
-            messagebox.showwarning('النسخ الخارجي غير متاح', f'تم الاحتفاظ بالنسخة المحلية، لكن تعذر تحديث النسخة على USB/القرص الخارجي:\n{external_error}', parent=root)
-    except Exception as backup_exc:
-        try:
-            with LOG_PATH.open('a', encoding='utf-8') as f:
-                f.write(f"\n[{now_iso()}] AUTO BACKUP ERROR: {backup_exc}\n")
-        except OSError:
-            pass
-        messagebox.showwarning('النسخ الاحتياطي التلقائي', f'تعذر إنشاء النسخة الاحتياطية اليومية تلقائيًا. استخدم النسخ اليدوي من داخل البرنامج.\n\n{backup_exc}', parent=root)
     startup_label.destroy()
     root.deiconify()
-    SchoolPassApp(root, login.user)
+    app = SchoolPassApp(root, login.user)
     root.mainloop()
 
 
