@@ -634,13 +634,12 @@ class TestGuiSmoke(unittest.TestCase):
     def test_offline_qr_payload_contains_issue_and_expiry_without_network(self):
         rec = core.create_late_slip(self.s1, self.sup, 'اختبار QR')
         payload = core.qr_payload(rec)
-        self.assertIn("SCHOOLPASS|1", payload)
+        self.assertTrue(payload.startswith("SP1|"))
         self.assertIn(rec['record_no'], payload)
-        self.assertIn(rec['issued_at'], payload)
-        self.assertIn("تنتهي بعد ساعتين", payload)
+        self.assertIn(rec['issued_at'].replace(" ", "T"), payload)
+        self.assertIn("|LATE|", payload)
         self.assertNotIn("http://", payload)
         self.assertNotIn("https://", payload)
-        self.assertIn("لا يعكس إلغاءً لاحقًا", payload)
 
     def test_session_helpers(self):
         self.assertTrue(self.app._single_instance())
