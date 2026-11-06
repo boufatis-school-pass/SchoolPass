@@ -1964,7 +1964,7 @@ class RecordForm:
         self.student_combo.pack(side=RIGHT, fill=X, expand=True)
         self.student_option_map = {}
         self.student_suggestions = SuggestionPopup(self.student_combo, self._choose_student_suggestion)
-        self.student_combo.bind('<KeyRelease>', self._refresh_student_suggestions)
+        self.student_combo.bind('<KeyRelease>', self._schedule_student_suggestions)
         self.student_combo.bind('<Return>', self._student_suggestion_selected)
         self.student_combo.bind('<Down>', lambda _e: self.student_suggestions.move_selection())
         self.student_combo.bind('<Escape>', lambda _e: self.student_suggestions.hide())
@@ -2082,7 +2082,7 @@ class RecordForm:
             self.teacher_combo = ttk.Entry(teacher_row, textvariable=self.teacher_var, justify='right')
             self.teacher_combo.pack(side=RIGHT, fill=X, expand=True)
             self.teacher_suggestions = SuggestionPopup(self.teacher_combo, self._choose_teacher_suggestion)
-            self.teacher_combo.bind('<KeyRelease>', self._refresh_teacher_suggestions)
+            self.teacher_combo.bind('<KeyRelease>', self._schedule_teacher_suggestions)
             self.teacher_combo.bind('<Return>', self._teacher_suggestion_selected)
             self.teacher_combo.bind('<Down>', lambda _e: self.teacher_suggestions.move_selection())
             self.teacher_combo.bind('<Escape>', lambda _e: self.teacher_suggestions.hide())
@@ -2165,7 +2165,19 @@ class RecordForm:
         else:
             self.expulsion_frame.pack_forget()
 
+    def _schedule_student_suggestions(self, event=None):
+        if event is not None and getattr(event, 'keysym', '') in ('Return', 'Escape', 'Up', 'Down', 'Tab', 'Shift_L', 'Shift_R'):
+            return
+        pending = getattr(self, '_student_search_after_id', None)
+        if pending:
+            try:
+                self.win.after_cancel(pending)
+            except Exception:
+                pass
+        self._student_search_after_id = self.win.after(100, self._refresh_student_suggestions)
+
     def _refresh_student_suggestions(self, event=None):
+        self._student_search_after_id = None
         if not hasattr(self, 'student_combo'):
             return
         if event is not None and getattr(event, 'keysym', '') in ('Return', 'Escape', 'Up', 'Down', 'Tab', 'Shift_L', 'Shift_R'):
@@ -2203,7 +2215,19 @@ class RecordForm:
             self.student_suggestions.select_first()
         return 'break'
 
+    def _schedule_teacher_suggestions(self, event=None):
+        if event is not None and getattr(event, 'keysym', '') in ('Return', 'Escape', 'Up', 'Down', 'Tab', 'Shift_L', 'Shift_R'):
+            return
+        pending = getattr(self, '_teacher_search_after_id', None)
+        if pending:
+            try:
+                self.win.after_cancel(pending)
+            except Exception:
+                pass
+        self._teacher_search_after_id = self.win.after(100, self._refresh_teacher_suggestions)
+
     def _refresh_teacher_suggestions(self, event=None):
+        self._teacher_search_after_id = None
         if not hasattr(self, 'teacher_combo'):
             return
         if event is not None and getattr(event, 'keysym', '') in ('Return', 'Escape', 'Up', 'Down', 'Tab', 'Shift_L', 'Shift_R'):
@@ -3764,8 +3788,11 @@ class SchoolPassApp:
             self.tree.delete(stale_id)
         for index, (iid, values, tags) in enumerate(wanted):
             if iid in existing_ids:
-                self.tree.item(iid, values=values, tags=tags)
-                self.tree.move(iid, '', index)
+                current = self.tree.item(iid, 'values')
+                if tuple(current) != tuple(values):
+                    self.tree.item(iid, values=values, tags=tags)
+                if self.tree.index(iid) != index:
+                    self.tree.move(iid, '', index)
             else:
                 self.tree.insert('', END, iid=iid, values=values, tags=tags)
 
