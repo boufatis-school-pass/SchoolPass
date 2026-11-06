@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-EXPECTED = "4.9.3"
+EXPECTED = "4.9.4"
 
 
 def main() -> int:
@@ -39,7 +39,7 @@ def main() -> int:
         errors.append("requirements_dev.txt must pin the reviewed PyInstaller 6.22.3 release")
     schema = re.search(r"^SCHEMA_VERSION\s*=\s*[\"\']?(\d+)[\"\']?", core, re.M)
     if not schema or schema.group(1) != "9":
-        errors.append("SchoolPass 4.9.3 must preserve database schema version 9; this visual release does not migrate user data")
+        errors.append("SchoolPass 4.9.4 must preserve database schema version 9; this local-performance release does not migrate user data")
     if not setup_version:
         errors.append("MyAppVersion is missing from SchoolPass_Setup.iss")
     elif setup_version.group(1) != EXPECTED:
@@ -49,8 +49,6 @@ def main() -> int:
         "app.py", "schoolpass_core.py", "requirements.txt", "requirements_dev.txt",
         "SchoolPass_Setup.iss", "build_windows.ps1", "build_installer_only.ps1",
         "release_preflight.py", ".github/workflows/release-windows.yml", "app.ico",
-        "cloud_bridge.py", "cloudflare/worker.js", "cloudflare/schema.sql",
-        "cloudflare/wrangler.toml", "cloudflare/migrations/0001_initial.sql",
     ]
     for name in required:
         if not (ROOT / name).is_file():
@@ -80,23 +78,10 @@ def main() -> int:
     if "schoolpass_setup.exe" not in (ROOT / "app.py").read_text(encoding="utf-8").lower():
         errors.append("In-app update checker does not verify the setup asset")
     core_source = (ROOT / "schoolpass_core.py").read_text(encoding="utf-8")
-    bridge_source = (ROOT / "cloud_bridge.py").read_text(encoding="utf-8")
-    if "def sync_local_permits(" not in bridge_source or "def pending_return_requests(" not in bridge_source:
-        errors.append("Cloud bridge client is missing synchronization or pending-request polling")
-    if "def generate_cloud_bridge_key_as(" not in core_source or "def cloud_bridge_config(" not in core_source:
-        errors.append("Cloudflare device key must be generated and encrypted with Windows DPAPI")
-    if "cloud_bridge_url()" not in core_source:
-        errors.append("Cloudflare public HTTPS QR URL selection is missing")
-    worker_source = (ROOT / "cloudflare/worker.js").read_text(encoding="utf-8")
-    for marker in ("/api/permits/batch", "/api/return-requests/pending", "/api/return-requests/", "طلب تسجيل عودة التلميذ"):
-        if marker not in worker_source:
-            errors.append(f"Cloudflare Worker feature missing: {marker}")
-    wrangler_source = (ROOT / "cloudflare/wrangler.toml").read_text(encoding="utf-8")
-    d1_match = re.search(r'(?m)^database_id\s*=\s*"([^"]+)"', wrangler_source)
-    if not d1_match:
-        errors.append("Cloudflare D1 database_id binding is missing")
-    elif d1_match.group(1) != "REPLACE_WITH_D1_DATABASE_UUID" and not re.fullmatch(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}", d1_match.group(1)):
-        errors.append("Cloudflare D1 database_id must be a valid UUID; use the exact UUID shown in the D1 database details")
+    if "def qr_payload(record)" not in core_source or "qr.add_data(qr_payload(row))" not in core_source:
+        errors.append("Offline QR must carry the permit issue timestamp and calculated expiry")
+    if any(marker in core_source for marker in ("ThreadingHTTPServer", "def ensure_local_server(", "def verification_page(")):
+        errors.append("Offline QR release must not start a local HTTP verification server")
     if "--icon" not in (ROOT / "build_windows.ps1").read_text(encoding="utf-8"):
         errors.append("Windows build does not embed app.ico in SchoolPass.exe")
     if "--add-data" not in (ROOT / "build_windows.ps1").read_text(encoding="utf-8"):
@@ -121,6 +106,14 @@ def main() -> int:
 
 
     app_source = (ROOT / "app.py").read_text(encoding="utf-8-sig")
+    if "cloud_bridge" in app_source or "Cloudflare" in app_source or "cloud_bridge" in core_source:
+        errors.append("SchoolPass 4.9.4 must not contain a cloud bridge integration")
+    if "def _schedule_record_filter(self):" not in app_source or "def _schedule_student_suggestions(self, event=None):" not in app_source:
+        errors.append("Fast debounced search handlers are missing")
+    if "winfo_reqwidth()" not in app_source or "winfo_reqheight()" not in app_source:
+        errors.append("Dialogs must fit their actual content size")
+    if app_source.count("self.root.after(500, self._tick_dashboard_clock)") != 1:
+        errors.append("Dashboard clock must have one scheduled startup callback only")
     test_ui_source = (ROOT / "test_ui_smoke.py").read_text(encoding="utf-8-sig")
     for marker, description in (
         ("def test_rounded_entry_layout_replacement_keeps_text_elements(self):", "rounded field rendering layout regression test"),
@@ -133,8 +126,6 @@ def main() -> int:
             errors.append(f"UI regression test missing: {description}")
 
     modern_ui_markers = (
-        ("def _install_rounded_button_surfaces(", "rounded state-aware button renderer"),
-        ("El('Button.label', side='left', expand=True)", "native button caption preserved above rounded image surfaces"),
         ("KPIAccentBlue.TFrame", "color-coded dashboard KPI cards"),
         ("MetricCardIconHover.TLabel", "interactive KPI hover feedback"),
         ("DialogHeader.TFrame", "modern permit dialog header"),
@@ -149,14 +140,12 @@ def main() -> int:
             errors.append(f"SchoolPass 4.9.3 visual feature missing: {description}")
 
     runtime_test = (ROOT / "test_ui_tk_runtime.py").read_text(encoding="utf-8-sig")
-    if "def test_windows_tk_installs_rounded_buttons_entries_and_dropdowns():" not in runtime_test:
-        errors.append("SchoolPass 4.9.2 Windows Tk runtime layout test is missing")
-    if "El('Button.label', side='left', expand=True)" not in app_source:
-        errors.append("Rounded buttons must retain the native Button.label child")
+    if "def test_windows_tk_uses_native_buttons_and_rounded_entries():" not in runtime_test:
+        errors.append("SchoolPass 4.9.4 Windows Tk native-control runtime test is missing")
 
     polish_test = (ROOT / "test_ui_polish_regressions.py").read_text(encoding="utf-8-sig")
     for marker, description in (
-        ("def test_buttons_have_rounded_stateful_image_layout_without_hiding_captions():", "rounded button/caption rendering regression test"),
+        ("def test_buttons_use_native_stateful_rendering_without_image_assets():", "fast native button rendering regression test"),
         ("def test_dashboard_uses_compact_hierarchy_and_color_coded_kpis():", "modern dashboard hierarchy regression test"),
         ("def test_entry_permits_dropdown_uses_clean_arabic_and_open_state():", "Arabic entry permits dropdown regression test"),
         ("def test_permit_form_has_rounded_section_cards_and_a_hierarchical_header():", "permit form visual hierarchy regression test"),
@@ -294,7 +283,7 @@ def main() -> int:
         for error in errors:
             print(f" - {error}")
         return 2
-    print(f"Release preflight passed: SchoolPass {EXPECTED}; source tree contains no local database or build cache.")
+    print(f"Release preflight passed: SchoolPass {EXPECTED}; offline QR, local data and performance checks are enabled.")
     return 0
 
 
