@@ -15,7 +15,6 @@ core.PBKDF2_ITERATIONS = 2000
 
 
 def fresh_db():
-    core.stop_local_server()
     for suffix in ('', '-wal', '-shm'):
         Path(str(core.DB_PATH) + suffix).unlink(missing_ok=True)
     core.init_db()
