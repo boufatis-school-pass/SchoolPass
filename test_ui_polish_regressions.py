@@ -32,7 +32,7 @@ def test_buttons_use_native_stateful_rendering_without_image_assets():
     assert "style.map('TButton'" in APP
     assert "style.configure('Accent.TButton'" in APP
     assert "style.configure('Success.TButton'" in APP and "style.configure('Danger.TButton'" in APP
-    assert "('NavGroupOpsOpen.TButton'" in APP and "('NavActive.TButton'" in APP
+    assert "'NavGroupOpsOpen.TButton':" in APP and "style.configure('NavActive.TButton'" in APP
 
 
 def test_permit_form_has_rounded_section_cards_and_a_hierarchical_header():
@@ -73,8 +73,8 @@ def test_dropdown_lists_follow_the_current_light_or_dark_palette():
 def test_semantic_buttons_keep_contrast_in_dark_mode():
     assert "palette['success_button'] = '#167B67' if dark else palette['good_fg']" in APP
     assert "palette['danger_button'] = '#A83C4C' if dark else palette['danger_fg']" in APP
-    assert "('Success.TButton', palette['success_button']" in APP
-    assert "('Danger.TButton', palette['danger_button']" in APP
+    assert "style.configure('Success.TButton', background=palette['success_button']" in APP
+    assert "style.configure('Danger.TButton', background=palette['danger_button']" in APP
 
 
 def test_student_notes_and_admin_history_share_the_live_theme():
