@@ -3792,15 +3792,24 @@ class SchoolPassApp:
             wanted.append((str(r['id']), values, tags))
         wanted_ids = {item[0] for item in wanted}
         existing_ids = set(self.tree.get_children())
+        cached_values = getattr(self, '_record_tree_values', None)
+        if not isinstance(cached_values, dict):
+            cached_values = {}
         for stale_id in existing_ids - wanted_ids:
             self.tree.delete(stale_id)
+            cached_values.pop(stale_id, None)
         for iid, values, tags in wanted:
+            logical_values = tuple(values)
             if iid in existing_ids:
-                current = self.tree.item(iid, 'values')
-                if tuple(current) != tuple(values):
-                    self.tree.item(iid, values=values, tags=tags)
+                if cached_values.get(iid) != logical_values:
+                    # Replace changed rows rather than asking ttk for its rendered
+                    # values; this also keeps the logical Arabic data cache stable.
+                    self.tree.delete(iid)
+                    self.tree.insert('', END, iid=iid, values=values, tags=tags)
             else:
                 self.tree.insert('', END, iid=iid, values=values, tags=tags)
+            cached_values[iid] = logical_values
+        self._record_tree_values = cached_values
         # One Tcl operation restores the canonical newest-first order after
         # clearing a filter, instead of issuing one expensive move per row.
         try:
