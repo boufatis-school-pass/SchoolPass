@@ -66,7 +66,6 @@ def _ascii_for_pdf_tests(value):
 def _fresh_database():
     from pathlib import Path
     import testenv
-    core.stop_local_server()
     for suffix in ("", "-wal", "-shm"):
         Path(str(core.DB_PATH) + suffix).unlink(missing_ok=True)
     core.init_db()
