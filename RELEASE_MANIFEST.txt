@@ -1,9 +1,9 @@
-SchoolPass Release 4.9.1
-Version: 4.9.1
-Base: 4.9.0
+SchoolPass Release 4.9.4
+Version: 4.9.4
+Base: 4.9.3
 Database schema: 9 (unchanged; no data migration)
 Platform: Windows 10/11 x64
 Installer: SchoolPass_Setup.exe
-Scope: comprehensive modern administrative UI; vivid light/dark palettes; rounded high-contrast inputs, combo boxes, login panels, dialog cards and multiline notes; rounded state-aware buttons with native Arabic captions; six color-coded interactive dashboard KPIs; compact KPI-first dashboard hierarchy; semantic record actions; modern permit form sections; clear Arabic entry-permits submenu with active navigation states; themed autocomplete, lists, grids, scrollbars and statistics charts; UI regression tests plus a Windows Tk runtime check of actual rounded layouts and visible captions.
-Data safety: no database schema change, no reset, and no deletion of existing pupils, guardians, teachers, users, permits, audit logs, or backups.
-Verification: release preflight, complete regression/UI test suite, Windows Tk control-layout test where the desktop is available, syntax and installer build, and GitHub Release publication must all pass. Final on-device visual review on the institution's Windows screen/DPI remains required.
+Scope: remove Cloudflare and local QR HTTP server; encode offline permit number/type/issue time/two-hour expiry in printed QR; retain local cancellation and exceptional-exit return records; remove recurring QR/cloud polling; fix duplicate dashboard clock scheduling; debounce student/teacher autocomplete and quick search; update record rows incrementally; use native ttk buttons for crisp fast response while retaining rounded inputs and form surfaces; fit dialogs to their content and screen.
+Data safety: no database schema change, no reset, and no deletion of existing pupils, guardians, teachers, users, permits, audit logs, or backups. Obsolete cloud credentials and old QR host settings are removed from application settings during startup.
+Verification: release preflight, complete regression/UI test suite, Windows Tk runtime test, QR PDF decode, installer build and GitHub Release publication must all pass. Final on-device visual and speed review on the institution's Windows computer remains required.
