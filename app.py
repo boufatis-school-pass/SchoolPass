@@ -1194,12 +1194,7 @@ class SchoolPassApp:
         self.root.protocol('WM_DELETE_WINDOW', self.close)
         self.root.after(5000, self.check_inactivity)
         self.root.after(60 * 60 * 1000, self.periodic_backup)
-        mismatch = core.qr_host_mismatch() if ok else None
-        if mismatch:
-            messagebox.showwarning('تغيّر عنوان الحاسوب',
-                                   f'رموز QR المطبوعة تشير إلى {mismatch[0]} لكن عنوان الحاسوب الآن {mismatch[1]}.\n'
-                                   'الرموز القديمة لن تفتح حتى تثبّت عنوان الحاسوب (يُنصح بحجز عنوان ثابت في الراوتر) '
-                                   'أو يعيد المدير العنوان القديم من «إعدادات المؤسسة».', parent=self.root)
+
 
     def _maximize_on_start(self):
         """Maximize the main window after Windows has mapped it."""
