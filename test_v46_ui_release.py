@@ -1,5 +1,5 @@
 ﻿# -*- coding: utf-8 -*-
-"""Regression guards for the SchoolPass 4.9.3 visual refresh and preserved administrative workflows."""
+"""Regression guards for the SchoolPass 4.9.4 offline/performance refresh and preserved administrative workflows."""
 from pathlib import Path
 import re
 
@@ -8,11 +8,11 @@ APP = (ROOT / "app.py").read_text(encoding="utf-8-sig")
 CORE = (ROOT / "schoolpass_core.py").read_text(encoding="utf-8")
 
 
-def test_release_version_is_492():
+def test_release_version_is_494():
     assert re.search(r'^APP_VERSION\s*=\s*["\']4\.9\.3["\']', CORE, re.M)
-    assert (ROOT / "VERSION.txt").read_text(encoding="ascii").strip() == "4.9.3"
+    assert (ROOT / "VERSION.txt").read_text(encoding="ascii").strip() == "4.9.4"
     setup = (ROOT / "SchoolPass_Setup.iss").read_text(encoding="utf-8-sig")
-    assert '#define MyAppVersion "4.9.3"' in setup
+    assert '#define MyAppVersion "4.9.4"' in setup
 
 
 def test_database_schema_is_additively_migrated():
@@ -41,8 +41,10 @@ def test_shared_visual_system_covers_main_controls():
     for marker in ("def make_style(", "PageHeader.TFrame", "MetricCard.TFrame",
                    "SidebarProfile.TFrame", "Treeview.Heading", "Accent.TButton",
                    "Status.TLabel", "UI_PALETTE",
-                   "def _install_rounded_button_surfaces(",
-                   "El('Button.label', side='left', expand=True)",
+                   "def _install_rounded_widget_surfaces(",
+                   "def _rounded_photo_image(",
+                   "style.configure('TButton'",
+                   "style.map('TButton'",
                    "FormSection.TFrame", "DialogHeader.TFrame",
                    "KPIAccentBlue.TFrame", "NavGroupOpsOpen.TButton"):
         assert marker in APP
