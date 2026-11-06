@@ -460,16 +460,18 @@ _SCROLL_WHEEL_INSTALLED = False
 
 
 def _dispatch_scroll_wheel(event):
+    frames = tuple(_SCROLLABLE_FRAMES)
     node = getattr(event, 'widget', None)
-    for frame in tuple(_SCROLLABLE_FRAMES):
-        current = node
-        while current is not None:
-            if current is frame.inner or current is frame.canvas:
+    # Walk from the pointer widget outward so nested scroll areas choose the
+    # nearest owner rather than an arbitrary outer container.
+    while node is not None:
+        for frame in frames:
+            if node is frame.inner or node is frame.canvas:
                 return frame._on_mousewheel(event)
-            try:
-                current = current.master
-            except Exception:
-                current = None
+        try:
+            node = node.master
+        except Exception:
+            node = None
     return None
 
 
