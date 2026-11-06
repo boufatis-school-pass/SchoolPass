@@ -137,7 +137,7 @@ def _rounded_photo_image(root, fill: str, border: str, fallback: str):
     """Create or reuse a cached scalable 9-slice image for crisp rounded ttk surfaces."""
     size, radius, border_width = 36, 14, 2
     cache = getattr(root, '_schoolpass_rounded_image_cache', None)
-    if cache is None:
+    if not isinstance(cache, dict):
         cache = {}
         root._schoolpass_rounded_image_cache = cache
     cache_key = (fill, border, fallback, size, radius, border_width)
