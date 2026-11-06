@@ -370,7 +370,7 @@ class TestRecords(Base):
         a, b = core.create_late_slip(self.s1, self.sup, "x"), core.create_late_slip(self.s1, self.sup, "x")
         self.assertNotEqual(a["qr_token"], b["qr_token"])
         self.assertRegex(a["qr_token"], r"^[0-9a-f]{48}$")
-        self.assertNotIn("T-001", core.qr_url(a["qr_token"]))
+        self.assertNotIn("T-001", core.qr_payload(a))
 
     def test_late_slip_requires_reason_and_records_supervisor(self):
         with self.assertRaises(ValueError):
@@ -501,8 +501,8 @@ class TestRecords(Base):
         self.assertNotIn(FULL_NID, p["details_json"], "full NID must not be stored in clear text")
         self.assertNotIn(FULL_NID, core.mask_national_id(d))
         self.assertTrue(core.mask_national_id(d).endswith(FULL_NID[-4:]))
-        self.assertNotIn(FULL_NID, core.qr_url(p["qr_token"]))
-        self.assertNotIn(FULL_NID[-4:], core.qr_url(p["qr_token"]))
+        self.assertNotIn(FULL_NID, core.qr_payload(p))
+        self.assertNotIn(FULL_NID[-4:], core.qr_payload(p))
         self.assertTrue(p["record_no"].startswith("SP-"))
         for bad in ("12ab56", "123", "1" * 25, ""):
             with self.assertRaises(ValueError):
@@ -721,78 +721,6 @@ class TestBackupRestore(Base):
         with self.assertRaises(Exception):
             core.backup_database(self.tmp / "no_such_dir" / "b.sqlite3", self.admin)
 
-
-class TestQrServer(Base):
-    def setUp(self):
-        super().setUp()
-        ok, msg = core.ensure_local_server(port=0)
-        self.assertTrue(ok, msg)
-        self.port = core._SERVER.server_address[1]
-        core._RATE.clear()
-        while not core.EVENT_QUEUE.empty():
-            core.EVENT_QUEUE.get_nowait()
-
-    def tearDown(self):
-        core.stop_local_server()
-
-    def get(self, path):
-        try:
-            with urllib.request.urlopen(f"http://127.0.0.1:{self.port}{urllib.parse.quote(path, safe='/')}", timeout=5) as r:
-                return r.status, r.read().decode("utf-8"), dict(r.headers)
-        except urllib.error.HTTPError as e:
-            return e.code, e.read().decode("utf-8", "replace"), dict(e.headers)
-
-    def test_valid_cancelled_and_unknown_tokens(self):
-        p = self.permit()
-        code, body, hdr = self.get("/v/" + p["qr_token"])
-        self.assertEqual(code, 200); self.assertIn(p["record_no"], body); self.assertIn("ساري", body)
-        self.assertEqual(hdr.get("Cache-Control"), "no-store"); self.assertEqual(hdr.get("X-Content-Type-Options"), "nosniff")
-        for secret in (FULL_NID, FULL_NID[-4:], "ولي تجريبي", "T-001", "موعد طبي"):
-            self.assertNotIn(secret, body, "verification page must not leak guardian/ID/student key/reason")
-        core.cancel_record(p["id"], self.sup, "تراجع")
-        code, body, _ = self.get("/v/" + p["qr_token"])
-        self.assertEqual(code, 200); self.assertIn("ملغى", body); self.assertIn("لا يجوز الاعتماد", body)
-        for bad in ("/v/" + "0" * 48, "/v/abc", "/v/../../etc/passwd", "/v/' OR 1=1 --", "/", "/students", "/v/"):
-            code, body, _ = self.get(bad)
-            self.assertIn(code, (404,), bad)
-            self.assertNotIn("تجريبي", body)
-
-    def test_returned_status_and_scan_event(self):
-        p = self.permit(); core.return_from_exit(p["id"], self.sup)
-        _, body, _ = self.get("/v/" + p["qr_token"])
-        self.assertIn("تمت العودة", body)
-        self.assertEqual(core.EVENT_QUEUE.get(timeout=2), p["qr_token"])
-
-    def test_qr_health_check_returns_lan_address_and_success(self):
-        ok, url, detail = core.qr_health_check()
-        self.assertTrue(ok)
-        self.assertIn(f":{core._SERVER.server_address[1]}/health", url)
-        self.assertEqual(detail, "SchoolPass OK")
-
-    def test_rate_limit_and_health(self):
-        self.assertEqual(self.get("/health")[0], 200)
-        codes = {self.get("/v/" + "f" * 48)[0] for _ in range(45)}
-        self.assertIn(429, codes)
-
-    def test_html_is_escaped(self):
-        s = {"student_key": "X-1", "class_name": "<b>x</b>", "last_name": "<script>alert(1)</script>", "first_name": "q"}
-        r = core.create_late_slip(s, self.sup, "x")
-        _, body, _ = self.get("/v/" + r["qr_token"])
-        self.assertNotIn("<script>alert", body); self.assertIn("&lt;script&gt;", body)
-
-
-class TestQrHost(Base):
-    def test_host_saved_validated_and_used_in_urls(self):
-        with mock.patch.object(core, "get_local_ip", return_value="192.168.1.20"):
-            self.assertEqual(core.ensure_qr_host_saved(), "192.168.1.20")
-        with mock.patch.object(core, "get_local_ip", return_value="192.168.1.99"):   # DHCP changed the address
-            self.assertEqual(core.qr_host_mismatch(), ("192.168.1.20", "192.168.1.99"))
-            self.assertTrue(core.qr_url("t").startswith("http://192.168.1.20:8765/v/"))
-        for bad in ("http://x", "1.2.3.4:80", "a b", "", "../x"):
-            with self.assertRaises(ValueError):
-                core.set_qr_host_as(self.admin, bad)
-        core.set_qr_host_as(self.admin, "192.168.1.99")
-        self.assertEqual(core.setting("qr_host"), "192.168.1.99")
 
 
 if __name__ == "__main__":
