@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""SchoolPass core logic (no GUI imports): database, security, import, records, PDF, QR server, backup.
+"""SchoolPass core logic (no GUI imports): database, security, import, records, offline QR, PDF and backup.
 
 Every function that changes data takes the acting ``user_id`` and checks the role/active flag
 in the database itself, so permissions do not depend on which buttons the GUI shows.
@@ -18,7 +18,6 @@ import os
 import re
 import secrets
 import sqlite3
-import threading
 import time
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -26,6 +25,7 @@ from typing import NamedTuple
 
 APP_NAME = "SchoolPass"
 APP_VERSION = "4.9.4"
+SERVER_PORT = 8765  # Reserved loopback port for the single-instance lock; no network listener is opened.
 SCHOOL_NAME = "ثانوية المجاهد بسجراري لخضر بوفاطيس"
 MINISTRY_NAME = "الجمهورية الجزائرية الديمقراطية الشعبية — وزارة التربية الوطنية"
 AUTO_LOCK_SECONDS = 600
@@ -74,27 +74,6 @@ _AR_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567
 
 def normalize_digits(text: str) -> str:
     return str(text or "").translate(_AR_DIGITS)
-
-
-def get_local_ip() -> str:
-    """Resolve the local interface address without requiring Internet access."""
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    try:
-        s.connect(("192.0.2.1", 80))  # UDP connect sends no data
-        ip = s.getsockname()[0]
-        if ip and not ip.startswith("127."):
-            return ip
-    except OSError:
-        pass
-    finally:
-        s.close()
-    try:
-        for ip in socket.gethostbyname_ex(socket.gethostname())[2]:
-            if not ip.startswith("127."):
-                return ip
-    except OSError:
-        pass
-    return "127.0.0.1"
 
 
 # ----------------------------------------------------------------------------- passwords
@@ -3315,7 +3294,7 @@ def _draw_page(c, row, details: dict, copy_type: str | None, reprint: bool, font
     # --- QR (random token URL only) — failure must stop printing, never print a permit without QR
     import qrcode
     qr = qrcode.QRCode(version=None, error_correction=qrcode.constants.ERROR_CORRECT_M, box_size=6, border=2)
-    qr.add_data(qr_url(row["qr_token"]))
+    qr.add_data(qr_payload(row))
     qr.make(fit=True)
     img = qr.make_image(fill_color="black", back_color="white").convert("RGB")
     buf = io.BytesIO()
