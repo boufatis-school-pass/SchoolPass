@@ -78,7 +78,7 @@ def configure_window(win, title: str, geometry: str = '900x620'):
         requested_w, requested_h = (int(match.group(1)), int(match.group(2))) if match else (900, 620)
         screen_w = int(win.winfo_screenwidth() or 1366)
         screen_h = int(win.winfo_screenheight() or 768)
-        if isinstance(win, Toplevel):
+        if getattr(win, 'master', None) is not None:
             win.minsize(min(360, max(320, screen_w - 48)), min(240, max(220, screen_h - 80)))
         else:
             min_w = min(requested_w, max(680, screen_w - 80))
