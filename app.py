@@ -7,7 +7,6 @@ import hashlib
 import tempfile
 import subprocess
 import os
-import queue
 import socket
 import sys
 import time
@@ -27,11 +26,10 @@ from tkinter import (
 from tkinter import ttk
 
 import schoolpass_core as core
-import cloud_bridge
 from schoolpass_core import (
     APP_VERSION, SCHOOL_NAME, SERVER_PORT, AUTO_LOCK_SECONDS, DATA_DIR, LOG_PATH,
     PermissionDenied, db_connect, setting, set_setting, audit, date_today, now_iso,
-    kind_label, status_label, student_name, record_by_id, record_by_token, get_user,
+    kind_label, status_label, student_name, record_by_id, get_user,
 )
 
 USER_ERRORS = (ValueError, RuntimeError, PermissionDenied, FileNotFoundError, OSError)
@@ -2576,7 +2574,6 @@ class RecordForm:
             self.teacher_suggestions.hide()
         self.win.destroy()
         self.app.refresh_records()
-        self.app.sync_cloud_after_issue()
         self.app.show_record(row['id'], offer_print=True)
 
 
@@ -2669,11 +2666,6 @@ class SchoolPassApp:
         self._update_check_running = False
         self.last_activity = time.time()
         self._locked = False
-        self._cloud_event_queue = queue.Queue()
-        self._cloud_poll_busy = False
-        self._cloud_pending_requests = {}
-        self._cloud_seen_requests = set()
-        self._cloud_retry_decisions = {}
         configure_window(root, f"SchoolPass {APP_VERSION}", '1320x860')
         try:
             sw = int(root.winfo_screenwidth() or 1366)
@@ -2699,34 +2691,20 @@ class SchoolPassApp:
         self.root.after(180, self._maximize_on_start)
         self.root.bind('<F11>', lambda _e: self.toggle_fullscreen())
         self.root.bind('<Escape>', lambda _e: self.leave_fullscreen())
-        ok, ip = core.ensure_local_server()
-        self.server_ok = ok
-        host = core.ensure_qr_host_saved() if ok else ''
         role = 'مدير النظام' if user['role'] == 'admin' else 'مشرف'
-        cloud_url = core.cloud_bridge_url()
-        if cloud_url:
-            qr_state = f"QR عبر الإنترنت: {cloud_url}"
-        else:
-            qr_state = f"QR محلي: {host}:{SERVER_PORT}" if ok else f"خدمة QR غير متاحة (قد يكون البرنامج مفتوحًا مرتين): {ip}"
-        self.base_status = f"المستخدم: {user['display_name']} ({role})  |  قاعدة البيانات محلية  |  {qr_state}"
+        self.base_status = (
+            f"المستخدم: {user['display_name']} ({role})  |  قاعدة البيانات محلية  |  "
+            "رمز QR مستقل: يعرض وقت الإصدار والانتهاء دون اتصال"
+        )
         self.status_text.set(self.base_status)
         self.refresh_records()
         self.root.bind_all('<Key>', self.touch)
         self.root.bind_all('<Button>', self.touch)
         self.root.bind('<Configure>', lambda _e: self._sync_window_button() if hasattr(self, 'maximize_button') else None)
         self.root.protocol('WM_DELETE_WINDOW', self.close)
-        self.root.after(1000, self.poll_qr_events)
-        self.root.after(3500, self.poll_cloud_bridge)
         self.root.after(500, self._tick_dashboard_clock)
         self.root.after(5000, self.check_inactivity)
         self.root.after(60 * 60 * 1000, self.periodic_backup)
-        mismatch = core.qr_host_mismatch() if ok and not cloud_url else None
-        if mismatch:
-            messagebox.showwarning('تغيّر عنوان الحاسوب',
-                                   f'رموز QR المطبوعة تشير إلى {mismatch[0]} لكن عنوان الحاسوب الآن {mismatch[1]}.\n'
-                                   'الرموز القديمة لن تفتح حتى تثبّت عنوان الحاسوب (يُنصح بحجز عنوان ثابت في الراوتر) '
-                                   'أو يعيد المدير العنوان القديم من «إعدادات المؤسسة».', parent=self.root)
-
     @staticmethod
     def _welcome_text() -> str:
         # Create a brief contextual greeting without relying on a network clock.
@@ -5100,8 +5078,6 @@ class SchoolPassApp:
         settings_scroll.pack(fill=BOTH, expand=True, padx=12, pady=4)
         form = settings_scroll.inner
         name = StringVar(value=setting('school_name', SCHOOL_NAME))
-        host = StringVar(value=core.qr_host())
-        cloud_url = StringVar(value=core.cloud_bridge_url())
         primary_saved, secondary_saved = core.get_theme_colors()
         primary = StringVar(value=primary_saved)
         secondary = StringVar(value=secondary_saved)
@@ -5110,29 +5086,8 @@ class SchoolPassApp:
         rtl_enabled = BooleanVar(value=True)
         ttk.Label(form, text='اسم المؤسسة على الوصول والتصاريح:').pack(anchor=E)
         ttk.Entry(form, textvariable=name, justify='right').pack(fill=X, pady=6)
-        ttk.Label(form, text='عنوان هذا الحاسوب داخل رموز QR (يُفضّل عنوان ثابت):').pack(anchor=E, pady=(8, 0))
-        ttk.Entry(form, textvariable=host, justify='center').pack(fill=X, pady=6)
-        ttk.Button(form, text=f'استعمال العنوان الحالي ({core.get_local_ip()})', command=lambda: host.set(core.get_local_ip())).pack(anchor=E)
-        ttk.Label(form, text='رابط خدمة Cloudflare Worker (HTTPS) لعمل QR عبر الإنترنت:', style='Title.TLabel').pack(anchor=E, pady=(12, 3))
-        ttk.Entry(form, textvariable=cloud_url, justify='left').pack(fill=X, pady=4)
-        ttk.Label(form, text='يُستخدم الرابط العام بدل عنوان الشبكة المحلية عند طباعة أي رخصة جديدة.', style='SubTitle.TLabel', wraplength=650).pack(anchor=E)
-        key_state = 'مفتاح الجهاز محفوظ ومشفّر على هذا الحاسوب.' if core.setting('cloud_bridge_api_key_enc', '') else 'لم يتم إنشاء مفتاح الجهاز بعد.'
-        ttk.Label(form, text=key_state, style='SubTitle.TLabel', wraplength=650).pack(anchor=E, pady=(5, 2))
-        def generate_cloud_key():
-            has_key = bool(core.setting('cloud_bridge_api_key_enc', ''))
-            if has_key and not messagebox.askyesno('تجديد مفتاح الربط', 'سيصبح المفتاح السابق غير صالح. يجب تحديث سر DEVICE_API_KEY في Cloudflare بالقيمة الجديدة. متابعة؟', parent=win):
-                return
-            try:
-                key = core.generate_cloud_bridge_key_as(self.current_user['id'])
-                win.clipboard_clear()
-                win.clipboard_append(key)
-                win.update_idletasks()
-            except USER_ERRORS as exc:
-                show_error(win, 'تعذر إنشاء مفتاح الربط', exc)
-                return
-            messagebox.showinfo('مفتاح Cloudflare الجديد', 'تم حفظ المفتاح مشفّرًا ونسخه إلى الحافظة.\n\nانسخه إلى Cloudflare Worker ضمن Settings → Variables and Secrets → Secret باسم DEVICE_API_KEY. لا ترسله لأي شخص ولا تضعه في GitHub.\n\nالمفتاح:\n' + key, parent=win)
-        ttk.Button(form, text='إنشاء / تجديد مفتاح الربط السري', command=generate_cloud_key, style='Accent.TButton').pack(anchor=E, pady=4)
-        ttk.Label(form, text='بعد نشر Worker وإضافة سر DEVICE_API_KEY، سيعمل الهاتف والحاسوب عبر الإنترنت دون الحاجة إلى شبكة Wi-Fi مشتركة.', style='SubTitle.TLabel', wraplength=650).pack(anchor=E, pady=(2, 8))
+        ttk.Label(form, text='رمز QR مستقل عن الإنترنت', style='Title.TLabel').pack(anchor=E, pady=(8, 3))
+        ttk.Label(form, text='يعرض الرمز رقم الرخصة ونوعها ووقت إصدارها وموعد انتهاء الساعتين. لا يمكنه إظهار إلغاء تم بعد الطباعة؛ تُراجع حالة الإلغاء من سجل المؤسسة المحلي.', style='Info.TLabel', wraplength=650, justify='right').pack(anchor=E, fill=X, pady=(3, 10))
         ttk.Label(form, text='طريقة الطباعة: فتح ملف PDF للمعاينة قبل الطباعة (A6 و100%).', style='SubTitle.TLabel').pack(anchor=E, pady=(10, 0))
         ttk.Label(form, text='ألوان الواجهة (يمكن تغييرها في أي وقت):', style='Title.TLabel').pack(anchor=E, pady=(14, 5))
         color_row = ttk.Frame(form)
@@ -5181,20 +5136,9 @@ class SchoolPassApp:
             selected = filedialog.askdirectory(parent=win, title='اختيار مجلد النسخ الاحتياطي الخارجي')
             if selected: backup_path.set(selected)
         ttk.Button(backup_row, text='اختيار مجلد', command=pick_backup_dir).pack(side=RIGHT)
-        def test_qr():
-            ok, url, detail = core.qr_health_check()
-            if ok:
-                messagebox.showinfo('اختبار QR ناجح', f'خادم التحقق يعمل على هذا الحاسوب.\nالعنوان الذي يمكن اختباره من الهاتف: {url}\nالنتيجة: {detail}', parent=win)
-            else:
-                messagebox.showerror('فشل اختبار QR', f'تعذر الوصول إلى خادم QR.\n{url}\n{detail}', parent=win)
-        ttk.Button(form, text='اختبار رابط QR الآن', command=test_qr).pack(anchor=E, pady=5)
-        ttk.Label(win, wraplength=650, justify='right',
-                  text='يعمل الربط السحابي عبر HTTPS، ولا يشترط وجود الهاتف والحاسوب على الشبكة نفسها. النسخة الخارجية تُفحص بعد نسخها، ويُفضّل تشفير USB بـ BitLocker. تأكد من تفعيل ضبط الوقت والمنطقة الزمنية تلقائيًا في Windows؛ يمنع البرنامج إصدار رخصة إذا كانت الساعة أقدم من توقيت سجل محفوظ.').pack(pady=8)
-
         def save():
             try:
-                core.save_preferences_as(self.current_user['id'], name.get(), host.get(), primary.get(), secondary.get(), late_threshold.get(), backup_path.get(), rtl_enabled.get())
-                core.save_cloud_bridge_url_as(self.current_user['id'], cloud_url.get())
+                core.save_preferences_as(self.current_user['id'], name.get(), core.setting('qr_host', ''), primary.get(), secondary.get(), late_threshold.get(), backup_path.get(), rtl_enabled.get())
             except USER_ERRORS as exc:
                 show_error(win, 'تعذر الحفظ', exc)
                 return
@@ -5202,7 +5146,7 @@ class SchoolPassApp:
             RTL_SHAPING_ENABLED = True
             make_style(self.root, primary.get(), secondary.get())
             win.destroy()
-            messagebox.showinfo('تم', 'حُفظت إعدادات المؤسسة وألوان الواجهة ورابط الخدمة السحابية. ستعمل مزامنة الرخص عند توفر رابط Cloudflare ومفتاح الجهاز الصحيح.', parent=self.root)
+            messagebox.showinfo('تم', 'حُفظت إعدادات المؤسسة وألوان الواجهة والنسخ الاحتياطي.', parent=self.root)
 
         def new_code():
             if messagebox.askyesno('رمز استرداد جديد', 'سيصبح الرمز القديم غير صالح. متابعة؟', parent=win):
@@ -5236,171 +5180,6 @@ class SchoolPassApp:
             tree.insert('', END, values=(r['happened_at'], r['username'] or '—', r['action'], r['target_type'], r['target_id'], r['description']))
 
     # ------------------------------------------------------------ session
-    def poll_qr_events(self):
-        try:
-            while True:
-                token = core.EVENT_QUEUE.get_nowait()
-                if self._locked:
-                    continue  # no data is shown while the session is locked
-                row = record_by_token(token)
-                if row:
-                    audit(None, 'تحقق بواسطة QR (الشبكة المحلية)', 'record', row['id'], row['record_no'])
-                    self.status_text.set(f"تم التحقق من QR للسجل {row['record_no']} ({status_label(row['status'])}) — {now_iso()}؛ راجع سجل العمليات عند الحاجة.")
-        except queue.Empty:
-            pass
-        self._drain_cloud_bridge_events()
-        if self.root.winfo_exists():
-            self.root.after(1000, self.poll_qr_events)
-        self.root.after(500, self._tick_dashboard_clock)
-
-    def sync_cloud_after_issue(self):
-        """Publish a just-issued permit immediately so an instant gate scan won't see 404."""
-        try:
-            config = core.cloud_bridge_config()
-        except Exception:
-            # A DPAPI/configuration issue must never interrupt receipt creation or printing.
-            return
-        if not config.get("url") or not config.get("api_key"):
-            return
-
-        def work():
-            try:
-                cloud_bridge.sync_local_permits()
-            except Exception:
-                # The regular polling cycle retries automatically; never block receipt creation.
-                pass
-
-        threading.Thread(target=work, name="SchoolPassImmediateCloudSync", daemon=True).start()
-
-    def poll_cloud_bridge(self):
-        """Background HTTPS synchronization; all Tk interaction remains on the UI thread."""
-        try:
-            if not self.root.winfo_exists():
-                return
-            config = core.cloud_bridge_config()
-            if config.get("url") and config.get("api_key") and not self._cloud_poll_busy:
-                self._cloud_poll_busy = True
-
-                def work():
-                    try:
-                        # Retry decisions first. This is important after an approved local
-                        # return: the cloud request must be acknowledged before the next
-                        # synchronization cycle updates the permit snapshot.
-                        for request_id, decision_info in list(self._cloud_retry_decisions.items()):
-                            try:
-                                cloud_bridge.decide_return_request(
-                                    request_id, decision_info["decision"], decision_info["recorded_by"]
-                                )
-                                self._cloud_retry_decisions.pop(request_id, None)
-                            except Exception:
-                                pass
-                        cloud_bridge.sync_local_permits()
-                        requests = cloud_bridge.pending_return_requests()
-                        self._cloud_event_queue.put(("requests", requests))
-                    except Exception as exc:
-                        self._cloud_event_queue.put(("error", str(exc)))
-                    finally:
-                        self._cloud_poll_busy = False
-
-                threading.Thread(target=work, name="SchoolPassCloudSync", daemon=True).start()
-        except Exception:
-            self._cloud_poll_busy = False
-        if self.root.winfo_exists():
-            self.root.after(15000, self.poll_cloud_bridge)
-
-    def _handle_cloud_return_requests(self):
-        if self._locked:
-            return
-        for request_id, request in list(self._cloud_pending_requests.items()):
-            if request_id in self._cloud_seen_requests:
-                continue
-            row = record_by_token(str(request.get("token") or ""))
-            if not row:
-                # A request without a matching local record must never be approved.
-                self._cloud_seen_requests.add(request_id)
-                self._cloud_retry_decisions[request_id] = {
-                    "decision": "rejected", "recorded_by": self.current_user["display_name"]
-                }
-                audit(self.current_user["id"], "رفض طلب عودة غير مرتبط بسجل محلي", "cloud_return_request", request_id,
-                      "لم يتم العثور على رمز الرخصة في قاعدة بيانات هذا الحاسوب.")
-                continue
-            self._cloud_seen_requests.add(request_id)
-            if row["status"] == "returned":
-                actor = core.get_user(row["returned_by"]) if row["returned_by"] else None
-                recorded_by = actor["display_name"] if actor else "تم تسجيل العودة محليًا"
-                self._cloud_retry_decisions[request_id] = {"decision": "approved", "recorded_by": recorded_by}
-                continue
-            if row["status"] != "valid":
-                self._cloud_retry_decisions[request_id] = {
-                    "decision": "rejected", "recorded_by": self.current_user["display_name"]
-                }
-                continue
-            try:
-                details = json.loads(row["details_json"] or "{}")
-            except (TypeError, ValueError):
-                details = {}
-            guardian = str(details.get("guardian_name") or "غير مسجل")
-            relationship = str(details.get("relationship") or "")
-            requested_at = str(request.get("requested_at") or "غير معروف")
-            prompt = (
-                "وصل طلب من الحاجب لتسجيل عودة تلميذ يحمل رخصة خروج استثنائي.\n\n"
-                f"التلميذ: {row['student_name']}\n"
-                f"القسم: {row['class_name']}\n"
-                f"وقت الخروج: {row['issued_at'] or row['created_at']}\n"
-                f"ولي الأمر: {guardian}" + (f" ({relationship})" if relationship else "") + "\n"
-                f"وقت طلب العودة: {requested_at}\n"
-                f"وقت وصول الطلب إلى الحاسوب: {now_iso()}\n\n"
-                "لا تسجل العودة إلا بعد التأكد من حضور التلميذ فعليًا.\n\nهل تؤكد تسجيل عودته الآن؟"
-            )
-            approved = messagebox.askyesno("طلب تسجيل عودة من الحاجب", prompt, icon="question", parent=self.root)
-            if approved:
-                try:
-                    slip = core.return_from_exit(int(row["id"]), self.current_user["id"])
-                    self.status_text.set(f"تم تسجيل عودة {row['student_name']} وإصدار رخصة دخول رقم {slip['record_no']}.")
-                    self._cloud_retry_decisions[request_id] = {
-                        "decision": "approved", "recorded_by": self.current_user["display_name"]
-                    }
-                    self.refresh_records()
-                except Exception as exc:
-                    refreshed = record_by_token(row["qr_token"])
-                    if refreshed and refreshed["status"] == "returned":
-                        self._cloud_retry_decisions[request_id] = {
-                            "decision": "approved", "recorded_by": self.current_user["display_name"]
-                        }
-                    else:
-                        messagebox.showerror("تعذر تسجيل العودة", str(exc), parent=self.root)
-                        self._cloud_seen_requests.discard(request_id)
-            else:
-                audit(self.current_user["id"], "رفض طلب تسجيل عودة عبر QR", "cloud_return_request", request_id,
-                      f"الرخصة: {row['record_no']}؛ التلميذ: {row['student_name']}")
-                self._cloud_retry_decisions[request_id] = {
-                    "decision": "rejected", "recorded_by": self.current_user["display_name"]
-                }
-
-    def _drain_cloud_bridge_events(self):
-        try:
-            while True:
-                kind, payload = self._cloud_event_queue.get_nowait()
-                if kind == "requests":
-                    current = {}
-                    for request in payload or []:
-                        request_id = str(request.get("id") or "")
-                        if request_id:
-                            current[request_id] = request
-                    completed_ids = set(self._cloud_pending_requests) - set(current)
-                    for request_id in completed_ids:
-                        self._cloud_seen_requests.discard(request_id)
-                        self._cloud_retry_decisions.pop(request_id, None)
-                    self._cloud_pending_requests = current
-                    if self.status_text.get() != self.base_status:
-                        self.status_text.set(self.base_status)
-                elif kind == "error" and self.status_text.get() == self.base_status:
-                    # Avoid repeated dialogs while the Internet is unavailable.
-                    self.status_text.set(self.base_status + "  |  مزامنة Cloudflare تنتظر الاتصال")
-        except queue.Empty:
-            pass
-        self._handle_cloud_return_requests()
-
     def check_inactivity(self):
         if not self.root.winfo_exists():
             return
@@ -5427,7 +5206,6 @@ class SchoolPassApp:
                 core.automatic_backup_if_due(self.current_user['id'])
             except Exception as exc:
                 messagebox.showwarning('تعذر تحديث النسخة الاحتياطية', f'سيُغلق البرنامج، لكن لم يكتمل آخر تحديث للنسخة الاحتياطية.\n{exc}', parent=self.root)
-            core.stop_local_server()
             self.root.destroy()
 
 
