@@ -16,7 +16,6 @@ import schoolpass_core as core
 
 class TestV47Features:
     def setup_method(self):
-        core.stop_local_server()
         for suffix in ("", "-wal", "-shm"):
             Path(str(core.DB_PATH) + suffix).unlink(missing_ok=True)
         core.init_db()
