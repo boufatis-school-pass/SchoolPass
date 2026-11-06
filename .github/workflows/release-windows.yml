@@ -14,8 +14,8 @@ permissions:
   contents: write
 
 concurrency:
-  group: schoolpass-${{ github.head_ref || github.ref }}
-  cancel-in-progress: true
+  group: schoolpass-${{ github.ref }}-${{ github.run_id }}
+  cancel-in-progress: false
 
 jobs:
   build-windows:
