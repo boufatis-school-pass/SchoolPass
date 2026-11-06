@@ -10,6 +10,7 @@ import os
 import sys
 import time
 import re
+import weakref
 import calendar as calendar_module
 import webbrowser
 from urllib.request import Request, urlopen
@@ -371,27 +372,93 @@ def _install_rtl_widget_adapters():
     original_tree = ttk.Treeview
 
     class ArabicAwareTreeview(original_tree):
+        def __init__(self, *args, **kwargs):
+            self._schoolpass_logical_values = {}
+            super().__init__(*args, **kwargs)
+
         def heading(self, column, option=None, **kwargs):
-            if isinstance(kwargs.get('text'), str):
-                kwargs['text'] = rtl_display(kwargs['text'])
-            base_method = getattr(super(), 'heading', None)
-            return base_method(column, option, **kwargs) if base_method else None
+            text = kwargs.get('text')
+            if isinstance(text, str):
+                kwargs['text'] = rtl_display(text)
+                if any(0x0600 <= ord(ch) <= 0x06FF for ch in text):
+                    kwargs.setdefault('anchor', E)
+            return super().heading(column, option, **kwargs)
 
         def insert(self, parent, index, iid=None, **kwargs):
+            logical = tuple(kwargs.get('values', ()))
             if 'values' in kwargs:
-                kwargs['values'] = tuple(rtl_display(v) if isinstance(v, str) else v for v in kwargs['values'])
-            return super().insert(parent, index, iid=iid, **kwargs)
+                kwargs['values'] = tuple(rtl_display(v) if isinstance(v, str) else v for v in logical)
+            result = super().insert(parent, index, iid=iid, **kwargs)
+            self._schoolpass_logical_values[result] = logical
+            return result
 
         def item(self, item, option=None, **kwargs):
             if 'values' in kwargs:
-                kwargs['values'] = tuple(rtl_display(v) if isinstance(v, str) else v for v in kwargs['values'])
-            return super().item(item, option, **kwargs)
+                logical = tuple(kwargs['values'])
+                self._schoolpass_logical_values[item] = logical
+                kwargs['values'] = tuple(rtl_display(v) if isinstance(v, str) else v for v in logical)
+            result = super().item(item, option, **kwargs)
+            if option == 'values':
+                return self._schoolpass_logical_values.get(item, result)
+            if option is None and isinstance(result, dict) and 'values' in result:
+                result['values'] = self._schoolpass_logical_values.get(item, result['values'])
+            return result
 
-    ttk.Treeview = ArabicAwareTreeview
+        def set(self, item, column=None, value=None):
+            columns = tuple(self.cget('columns'))
+            logical = list(self._schoolpass_logical_values.get(item, ()))
+            if value is not None:
+                display = rtl_display(value) if isinstance(value, str) else value
+                result = super().set(item, column, display)
+                try:
+                    index = columns.index(column) if isinstance(column, str) else int(column)
+                    while len(logical) <= index:
+                        logical.append('')
+                    logical[index] = value
+                    self._schoolpass_logical_values[item] = tuple(logical)
+                except (ValueError, TypeError):
+                    pass
+                return result
+            if column is None:
+                visual = super().set(item)
+                return {name: self.set(item, name) for name in visual}
+            try:
+                index = columns.index(column) if isinstance(column, str) else int(column)
+                if index < len(logical):
+                    return logical[index]
+            except (ValueError, TypeError):
+                pass
+            return super().set(item, column)
+
+        def delete(self, *items):
+            for item in items:
+                self._schoolpass_logical_values.pop(item, None)
+            return super().delete(*items)
+
     ttk._schoolpass_rtl_installed = True
 
 
 _install_rtl_widget_adapters()
+
+
+# One global wheel dispatcher prevents every scrollable dialog from installing
+# another three all-widget bindings. Closed windows are released automatically.
+_SCROLLABLE_FRAMES = weakref.WeakSet()
+_SCROLL_WHEEL_INSTALLED = False
+
+
+def _dispatch_scroll_wheel(event):
+    node = getattr(event, 'widget', None)
+    for frame in tuple(_SCROLLABLE_FRAMES):
+        current = node
+        while current is not None:
+            if current is frame.inner or current is frame.canvas:
+                return frame._on_mousewheel(event)
+            try:
+                current = current.master
+            except Exception:
+                current = None
+    return None
 
 
 class ScrollableFrame(ttk.Frame):
@@ -408,9 +475,13 @@ class ScrollableFrame(ttk.Frame):
         self._window_id = self.canvas.create_window((0, 0), window=self.inner, anchor='nw')
         self.inner.bind('<Configure>', self._update_scroll_region)
         self.canvas.bind('<Configure>', self._fit_inner_width)
-        self.bind_all('<MouseWheel>', self._on_mousewheel, add='+')
-        self.bind_all('<Button-4>', self._on_mousewheel, add='+')
-        self.bind_all('<Button-5>', self._on_mousewheel, add='+')
+        global _SCROLL_WHEEL_INSTALLED
+        _SCROLLABLE_FRAMES.add(self)
+        if not _SCROLL_WHEEL_INSTALLED:
+            self.bind_all('<MouseWheel>', _dispatch_scroll_wheel, add='+')
+            self.bind_all('<Button-4>', _dispatch_scroll_wheel, add='+')
+            self.bind_all('<Button-5>', _dispatch_scroll_wheel, add='+')
+            _SCROLL_WHEEL_INSTALLED = True
 
     def _update_scroll_region(self, _event=None):
         try:
