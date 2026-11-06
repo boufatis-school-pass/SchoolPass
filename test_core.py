@@ -739,7 +739,7 @@ class TestStaticQr(Base):
         self.assertIn("ملغاة داخل البرنامج", core.qr_payload(core.record_by_id(permit["id"])))
         exit_permit = self.permit(self.s2)
         core.return_from_exit(exit_permit["id"], self.sup)
-        self.assertIn("تم تسجيل عودة التلميذ", core.qr_payload(core.record_by_id(exit_permit["id"])))
+        self.assertIn("العودة مسجلة داخل البرنامج", core.qr_payload(core.record_by_id(exit_permit["id"])))
 
     def test_qr_expiry_is_two_hours_from_issue_time(self):
         permit = self.permit()
