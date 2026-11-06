@@ -3139,7 +3139,7 @@ def _draw_entry_page(c, row, details: dict, reprint: bool, font: str, school: st
                 preserveAspectRatio=True, mask="auto")
     c.setFillColorRGB(*dark_muted)
     c.setFont(font, 5.1)
-    c.drawCentredString(qr_x + qr_size / 2, qr_y - 2.0 * mm, _arabic_visual("امسح للتحقق"))
+    c.drawCentredString(qr_x + qr_size / 2, qr_y - 2.0 * mm, _arabic_visual("امسح لعرض وقت الإصدار والانتهاء"))
 
     signature_w, signature_h = 48.0 * mm, 32.0 * mm
     sx, sy = right - signature_w, 3.5 * mm
