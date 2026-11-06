@@ -80,7 +80,7 @@ try {
         throw 'لم أجد dist\SchoolPass\SchoolPass.exe صالحًا. أنشئ النسخة المحمولة أولًا بواسطة build_windows.ps1.'
     }
     if (-not (Test-Path $iss)) { throw 'ملف SchoolPass_Setup.iss غير موجود.' }
-    foreach ($asset in @('app.ico','VERSION.txt','قالب_قائمة_التلاميذ.csv','دليل_الاستخدام.txt','فتح_المنفذ_لرموز_QR_(كمدير).bat')) {
+    foreach ($asset in @('app.ico','VERSION.txt','قالب_قائمة_التلاميذ.csv','دليل_الاستخدام.txt')) {
         if (-not (Test-Path (Join-Path $Root $asset))) { throw "ملف التثبيت المطلوب مفقود: $asset" }
     }
 
