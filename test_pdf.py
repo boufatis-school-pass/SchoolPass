@@ -234,8 +234,8 @@ class TestPdf(unittest.TestCase):
             payloads.append(data)
         self.assertEqual(payloads[0], payloads[1], "both copies carry the same QR")
         self.assertEqual(payloads[0], core.qr_payload(p))
-        self.assertIn(p["issued_at"], payloads[0])
-        self.assertIn("تنتهي بعد ساعتين", payloads[0])
+        self.assertIn("|EXIT|", payloads[0])
+        self.assertTrue(payloads[0].endswith("|OPEN"))
         self.assertNotIn(NID, payloads[0]); self.assertNotIn("P-1", payloads[0])
         self.assertNotIn("http://", payloads[0]); self.assertNotIn("https://", payloads[0])
 
