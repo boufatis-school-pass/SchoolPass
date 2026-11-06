@@ -325,6 +325,7 @@ def init_db() -> None:
         conn.execute("INSERT OR IGNORE INTO settings(setting_key,setting_value) VALUES('late_alert_threshold','3')")
         conn.execute("INSERT OR IGNORE INTO settings(setting_key,setting_value) VALUES('rtl_shaping','1')")
         conn.execute("INSERT OR IGNORE INTO settings(setting_key,setting_value) VALUES('external_backup_path','')")
+        conn.execute("DELETE FROM settings WHERE setting_key='qr_host'")
         # Older experimental silent printing could ignore A6; force safe PDF preview after upgrade.
         conn.execute("UPDATE settings SET setting_value='open' WHERE setting_key='print_mode' AND setting_value='direct'")
         # A rollback to this application version must never lower a newer database
@@ -1741,7 +1742,6 @@ def save_preferences_as(actor, school_name: str, primary: str, secondary: str,
     }
     labels = {
         "school_name": ("تغيير اسم المؤسسة", "اسم المؤسسة"),
-        "qr_host": ("تغيير عنوان رمز QR", "عنوان QR"),
         "theme_primary": ("تغيير ألوان الواجهة", "اللون الرئيسي"),
         "theme_secondary": ("تغيير ألوان الواجهة", "اللون الثانوي"),
         "print_mode": ("تثبيت الطباعة عبر معاينة PDF", "طريقة الطباعة"),
