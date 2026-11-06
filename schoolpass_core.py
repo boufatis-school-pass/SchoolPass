@@ -356,8 +356,15 @@ def init_db() -> None:
         conn.execute("INSERT OR IGNORE INTO settings(setting_key,setting_value) VALUES('external_backup_path','')")
         # Older experimental silent printing could ignore A6; force safe PDF preview after upgrade.
         conn.execute("UPDATE settings SET setting_value='open' WHERE setting_key='print_mode' AND setting_value='direct'")
+        # A rollback to this application version must never lower a newer database
+        # schema marker. Newer tables/columns are intentionally left untouched.
+        try:
+            effective_schema_version = str(max(int(prior_version or "0"), int(SCHEMA_VERSION)))
+        except (TypeError, ValueError):
+            effective_schema_version = SCHEMA_VERSION
         conn.execute("INSERT INTO settings(setting_key,setting_value) VALUES('schema_version',?) "
-                     "ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value", (SCHEMA_VERSION,))
+                     "ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value",
+                     (effective_schema_version,))
 
 
 def check_database_integrity() -> None:
