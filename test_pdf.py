@@ -50,7 +50,6 @@ class TestPdf(unittest.TestCase):
         self.admin, _ = core.bootstrap_admin("director", "المدير", "TestPassword123!")
         self.sup = core.create_user_as(self.admin, "sup1", "مشرف أول", "TestPassword123!")
         self.student = {"student_key": "P-1", "last_name": "بوفاطيس", "first_name": "لخضر عبد الرحمن", "class_name": "ثالثة علوم تجريبية 2"}
-        core.set_setting("qr_host", "192.168.50.7")
 
     def permit(self, **kw):
         args = dict(reason="موعد طبي عاجل عند الطبيب المختص", guardian_name="ولي الأمر التجريبي", relationship="الأب", national_id=NID)
