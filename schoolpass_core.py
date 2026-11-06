@@ -3303,7 +3303,7 @@ def _draw_page(c, row, details: dict, copy_type: str | None, reprint: bool, font
         y -= gap * MM
     c.setFillColorRGB(0, 0, 0)
 
-    # --- QR (random token URL only) — failure must stop printing, never print a permit without QR
+    # --- Compact offline QR with issue/expiry data only — never print a permit without QR
     import qrcode
     qr = qrcode.QRCode(version=None, error_correction=qrcode.constants.ERROR_CORRECT_M, box_size=6, border=2)
     qr.add_data(qr_payload(row))
