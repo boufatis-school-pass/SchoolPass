@@ -736,7 +736,7 @@ class TestStaticQr(Base):
     def test_qr_marks_cancelled_or_returned_status_at_print_time(self):
         permit = self.permit()
         core.cancel_record(permit["id"], self.sup, "تصحيح")
-        self.assertIn("ملغاة داخل البرنامج", core.qr_payload(core.record_by_id(permit["id"])))
+        self.assertIn("الحالة: ملغاة", core.qr_payload(core.record_by_id(permit["id"])))
         exit_permit = self.permit(self.s2)
         core.return_from_exit(exit_permit["id"], self.sup)
         self.assertIn("عودة مسجلة", core.qr_payload(core.record_by_id(exit_permit["id"])))
