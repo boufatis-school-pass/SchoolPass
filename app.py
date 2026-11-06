@@ -285,9 +285,7 @@ def _install_rounded_widget_surfaces(root, style, palette: dict[str, str]):
             suffixes=('.border', '.background'),
         )
 
-    # Buttons receive their stateful rounded backgrounds in
-    # _install_rounded_button_surfaces(), using a parent image element with
-    # Button.label as its child so Arabic text can never be painted over.
+    # Buttons use native ttk rendering for crisp text and responsive state changes.
 
 
 
@@ -765,7 +763,7 @@ def make_style(root: Tk, primary: str | None = None, secondary: str | None = Non
     # Forms and data grids
     style.configure('TLabel', background=bg, foreground=ink, font=('Segoe UI', 10), anchor='e')
     style.configure(
-        'TEntry', padding=(13, 10), fieldbackground=palette['field'], foreground=ink,
+        'TEntry', padding=(10, 7), fieldbackground=palette['field'], foreground=ink,
         borderwidth=2, relief='solid', bordercolor=palette['border'],
         lightcolor=palette['border'], darkcolor=palette['border'],
         insertwidth=2,
@@ -776,7 +774,7 @@ def make_style(root: Tk, primary: str | None = None, secondary: str | None = Non
               lightcolor=[('focus', primary_color), ('!focus', palette['border'])],
               darkcolor=[('focus', primary_color), ('!focus', palette['border'])])
     style.configure(
-        'TCombobox', padding=(12, 9), fieldbackground=palette['field'], foreground=ink,
+        'TCombobox', padding=(10, 7), fieldbackground=palette['field'], foreground=ink,
         arrowsize=16, borderwidth=2, relief='solid', bordercolor=palette['border'],
         lightcolor=palette['border'], darkcolor=palette['border'],
     )
@@ -3525,7 +3523,6 @@ class SchoolPassApp:
         label_color = UI_PALETTE.get('muted', '#64758B')
         c.configure(background=surface)
         c.delete('all')
-        c.update_idletasks()
         width = max(440, c.winfo_width())
         height = max(130, c.winfo_height())
         left, right, top, bottom = 34, width-12, 10, height-25
@@ -4855,7 +4852,7 @@ class SchoolPassApp:
         chart.pack(fill=X,padx=18,pady=8)
         def draw_chart(_e=None):
             data=core.dashboard_series({'اليوم':'day','الأسبوع':'week','الشهر':'month'}.get(period.get(),'week'))
-            chart.delete('all'); chart.update_idletasks(); w=max(600,chart.winfo_width()); h=max(180,chart.winfo_height())
+            chart.delete('all'); w=max(600,chart.winfo_width()); h=max(180,chart.winfo_height())
             l,r,t,b=45,w-16,14,h-34; chart.create_line(l,b,r,b,fill=UI_PALETTE.get('border', '#C5D2E2'))
             series=[('late','تأخر','#D7A33B'),('absence_return','عودة بعد غياب','#4A89B8'),
                     ('special_entry','دخول خاص','#B85A45'),('exit_permit','خروج','#2D8062'),('exit_return','إثبات عودة','#8A78B7')]
