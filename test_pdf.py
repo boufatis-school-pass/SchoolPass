@@ -31,7 +31,6 @@ NID = "987654321098765432"
 
 
 def tearDownModule():
-    core.stop_local_server()
 
 
 @unittest.skipUnless(HAVE_LIBS, "PDF libraries not installed")
@@ -46,7 +45,6 @@ class TestPdf(unittest.TestCase):
     def setUp(self):
         # QR tests may have started the local HTTP server in a prior test.
         # Stop it fully before resetting the synthetic database.
-        core.stop_local_server()
         for suffix in ("", "-wal", "-shm"):
             Path(str(core.DB_PATH) + suffix).unlink(missing_ok=True)
         core.init_db()
