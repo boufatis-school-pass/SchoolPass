@@ -1,5 +1,5 @@
 ﻿# -*- coding: utf-8 -*-
-"""SchoolPass 4.9.3 — modern administrative interface and unified visual system."""
+"""SchoolPass 4.9.4 — fast offline desktop interface and unified visual system."""
 from __future__ import annotations
 
 import json
@@ -78,9 +78,12 @@ def configure_window(win, title: str, geometry: str = '900x620'):
         requested_w, requested_h = (int(match.group(1)), int(match.group(2))) if match else (900, 620)
         screen_w = int(win.winfo_screenwidth() or 1366)
         screen_h = int(win.winfo_screenheight() or 768)
-        min_w = min(requested_w, max(440, screen_w - 100))
-        min_h = min(requested_h, max(260, screen_h - 120))
-        win.minsize(min_w, min_h)
+        if isinstance(win, Toplevel):
+            win.minsize(min(360, max(320, screen_w - 48)), min(240, max(220, screen_h - 80)))
+        else:
+            min_w = min(requested_w, max(680, screen_w - 80))
+            min_h = min(requested_h, max(440, screen_h - 120))
+            win.minsize(min_w, min_h)
         win.resizable(True, True)
     except Exception:
         try:
@@ -288,105 +291,25 @@ def _install_rounded_widget_surfaces(root, style, palette: dict[str, str]):
 
 
 
-def _install_rounded_button_surfaces(root, style, palette: dict[str, str]) -> int:
-    """Create true rounded button backgrounds while keeping native text labels visible."""
-    try:
-        from ttkbootstrap import Assets, El, image_element, layout
-        assets = Assets(style)
-    except Exception as exc:
-        root._schoolpass_button_skin_import_error = f"{type(exc).__name__}: {exc}"
-        return 0
-
-    specs = (
-        ('TButton', palette['button_bg'], palette['button_hover'], palette['button_pressed'], palette['surface_alt'], palette['ink'], 12, 'center'),
-        ('Accent.TButton', palette['primary'], palette['primary_hover'], _shade(palette['primary'], 0.78), _shade(palette['primary'], 0.55), palette['primary_text'], 14, 'center'),
-        ('Gold.TButton', palette['gold'], _shade(palette['gold'], 0.94), _shade(palette['gold'], 0.82), '#C8CBD0', '#26364B', 12, 'center'),
-        ('Success.TButton', palette['success_button'], _shade(palette['success_button'], 0.92), _shade(palette['success_button'], 0.78), '#A9B6B2', '#FFFFFF', 12, 'center'),
-        ('Danger.TButton', palette['danger_button'], _shade(palette['danger_button'], 0.92), _shade(palette['danger_button'], 0.78), '#B9A9AC', '#FFFFFF', 12, 'center'),
-        ('Info.TButton', palette['primary_soft'], palette['selected'], _shade(palette['primary_soft'], 0.94), palette['surface_alt'], palette['primary'], 12, 'center'),
-        ('NavGroupOps.TButton', '#245B86', '#3475A5', '#1D4A70', '#52687E', '#FFFFFF', 13, 'e'),
-        ('NavGroupData.TButton', '#286B62', '#34877A', '#20564F', '#526C67', '#FFFFFF', 13, 'e'),
-        ('NavGroupReports.TButton', '#66518A', '#7A65A1', '#554274', '#6C6478', '#FFFFFF', 13, 'e'),
-        ('NavGroupAdmin.TButton', '#8A6435', '#A47A45', '#704F29', '#777064', '#FFFFFF', 13, 'e'),
-        ('NavGroupOpsOpen.TButton', '#3475A5', '#3F83B8', '#245B86', '#52687E', '#FFFFFF', 13, 'e'),
-        ('NavGroupDataOpen.TButton', '#34877A', '#419A8C', '#286B62', '#526C67', '#FFFFFF', 13, 'e'),
-        ('NavGroupReportsOpen.TButton', '#7A65A1', '#8A76B0', '#66518A', '#6C6478', '#FFFFFF', 13, 'e'),
-        ('NavGroupAdminOpen.TButton', '#A47A45', '#B78D55', '#8A6435', '#777064', '#FFFFFF', 13, 'e'),
-        ('Nav.TButton', palette['sidebar'], palette['sidebar_hover'], _shade(palette['sidebar'], 0.86), palette['sidebar'], palette['sidebar_muted'], 12, 'e'),
-        ('NavHover.TButton', palette['sidebar_hover'], palette['primary'], _shade(palette['sidebar_hover'], 0.88), palette['sidebar'], '#FFFFFF', 12, 'e'),
-        ('NavActive.TButton', palette['sidebar_hover'], palette['primary'], _shade(palette['sidebar_hover'], 0.88), palette['sidebar'], '#FFFFFF', 12, 'e'),
-        ('SubNav.TButton', palette['surface_alt'], palette['primary_soft'], _shade(palette['surface_alt'], 0.96), palette['surface_alt'], palette['ink'], 10, 'e'),
-        ('SubNavHover.TButton', palette['primary_soft'], palette['selected'], _shade(palette['primary_soft'], 0.94), palette['surface_alt'], palette['primary'], 10, 'e'),
-        ('Link.TButton', palette['surface'], palette['primary_soft'], palette['surface_alt'], palette['surface_alt'], palette['primary'], 10, 'e'),
-    )
-    installed = getattr(root, '_schoolpass_button_skin_keys', set())
-    retained = list(getattr(root, '_schoolpass_button_images', ()))
-    try:
-        theme_name = str(style.theme_use())
-    except Exception:
-        theme_name = 'default'
-
-    count = 0
-    errors = {}
-    for style_name, fill, hover, pressed, disabled, foreground, radius, anchor in specs:
-        fingerprint = ''.join(ch if ch.isalnum() else '_' for ch in
-                              f'{theme_name}_{style_name}_{fill}_{hover}_{pressed}_{disabled}_{foreground}_{radius}')
-        key = (theme_name, style_name, fingerprint)
-        if key in installed:
-            count += 1
-            continue
-        element_name = f'{style_name}.SchoolPassRounded_{fingerprint}'
-        try:
-            normal_img = assets.rounded_rect(fill, size=(150, 44), radius=radius)
-            hover_img = assets.rounded_rect(hover, size=(150, 44), radius=radius)
-            pressed_img = assets.rounded_rect(pressed, size=(150, 44), radius=radius)
-            disabled_img = assets.rounded_rect(disabled, size=(150, 44), radius=radius)
-            image_element(
-                style, element_name, default=normal_img,
-                states={'disabled': disabled_img, 'pressed': pressed_img, 'active': hover_img},
-                border=radius + 2, sticky='nsew',
-            )
-            layout(
-                style, style_name,
-                El(element_name, sticky='nsew', children=[
-                    El('Button.label', side='left', expand=True)
-                ]),
-            )
-            style.configure(
-                style_name, background=fill, foreground=foreground, borderwidth=0,
-                focusthickness=1, focuscolor=palette['accent'], relief='flat',
-                padding=(15, 10), anchor=anchor,
-            )
-            style.map(
-                style_name,
-                foreground=[('disabled', palette['muted']), ('pressed', foreground),
-                            ('active', foreground), ('!disabled', foreground)],
-            )
-            retained.extend((normal_img, hover_img, pressed_img, disabled_img))
-            installed.add(key)
-            count += 1
-        except Exception as exc:
-            # Keep the native label readable, but preserve diagnostics so the
-            # Windows runtime test can identify a failed rounded-surface install.
-            errors[style_name] = f"{type(exc).__name__}: {exc}"
-            continue
-    root._schoolpass_button_skin_keys = installed
-    root._schoolpass_button_images = retained
-    root._schoolpass_button_skin_errors = errors
-    root._schoolpass_button_skin_count = count
-    return count
-
-
 def _center_toplevel_window(win):
     """Center a mapped dialog over its owner, or over the desktop as a fallback."""
     try:
         if win.overrideredirect():
             return
         win.update_idletasks()
-        width = max(1, int(win.winfo_width()))
-        height = max(1, int(win.winfo_height()))
         screen_w = int(win.winfo_screenwidth() or 1366)
         screen_h = int(win.winfo_screenheight() or 768)
+        # Fit every dialog to its actual widget request after its children have
+        # been created; explicit geometry strings are treated as upper bounds,
+        # not as empty space to reserve around short forms.
+        requested_w = max(1, int(win.winfo_reqwidth()))
+        requested_h = max(1, int(win.winfo_reqheight()))
+        width = min(max(320, requested_w + 24), max(320, screen_w - 48))
+        height = min(max(220, requested_h + 24), max(220, screen_h - 80))
+        try:
+            win.minsize(width, height)
+        except Exception:
+            pass
         owner = getattr(win, 'master', None)
         x = y = None
         if owner is not None and owner is not win:
@@ -442,8 +365,8 @@ def _install_toplevel_background():
                     screen_h = int(self.winfo_screenheight() or 768)
                     requested_w, requested_h = int(match.group(1)), int(match.group(2))
                     # Preserve designed dimensions; arbitrary shrinking clipped buttons.
-                    width = min(max(360, requested_w), max(360, screen_w - 70))
-                    height = min(max(280, requested_h), max(280, screen_h - 90))
+                    width = min(max(320, requested_w), max(320, screen_w - 48))
+                    height = min(max(220, requested_h), max(220, screen_h - 80))
                     args = (f'{width}x{height}{match.group(3)}',) + args[1:]
                 except Exception:
                     pass
@@ -456,9 +379,9 @@ def _install_toplevel_background():
             screen_w = int(self.winfo_screenwidth() or 1366)
             screen_h = int(self.winfo_screenheight() or 768)
             if width is not None:
-                width = min(max(360, int(width)), max(360, screen_w - 70))
+                width = min(max(320, int(width)), max(320, screen_w - 48))
             if height is not None:
-                height = min(max(280, int(height)), max(280, screen_h - 90))
+                height = min(max(220, int(height)), max(220, screen_h - 80))
         except Exception:
             pass
         if callable(original_minsize):
@@ -522,19 +445,19 @@ def make_style(root: Tk, primary: str | None = None, secondary: str | None = Non
         # Preserve custom primary/secondary colors set by the administrator while
         # giving the rest of the interface a coherent navy/blue institutional skin.
         palette = {
-            'bg': secondary_color if secondary_color not in ('#F2F5F9', '#F2F6F4') else '#EEF3FA',
-            'surface': '#FFFFFF', 'surface_alt': '#F6F9FE',
-            'ink': '#17263D', 'muted': '#687A91',
+            'bg': secondary_color if secondary_color not in ('#F2F5F9', '#F2F6F4') else '#E7EDF5',
+            'surface': '#FFFFFF', 'surface_alt': '#F0F4F9',
+            'ink': '#14243A', 'muted': '#53677F',
             'primary': primary_color, 'primary_text': core.text_color_for(primary_color),
             'primary_hover': '#3B82F6' if primary_color == '#185A8D' else _shade(primary_color, 0.88),
-            'primary_soft': '#E8F0FF', 'sidebar': '#11243D',
+            'primary_soft': '#DCE9F8', 'sidebar': '#10243D',
             'sidebar_hover': '#1E4167', 'sidebar_text': '#F8FBFF',
             'sidebar_muted': '#C5D3E5', 'accent': '#0FA99A',
-            'gold': '#E8B34D', 'border': '#AEBFD4', 'field': '#EAF1FA',
+            'gold': '#E5AC38', 'border': '#8499B2', 'field': '#F1F5FA',
             'heading': '#EAF0F8', 'selected': '#DFEAFF',
-            'alert_bg': '#FFF4E3', 'alert_fg': '#87500D',
-            'good_bg': '#E7F6F1', 'good_fg': '#126B59',
-            'danger_bg': '#FCEBED', 'danger_fg': '#A73543',
+            'alert_bg': '#FBEBCB', 'alert_fg': '#744308',
+            'good_bg': '#D9F0E7', 'good_fg': '#075D4D',
+            'danger_bg': '#F8DEE2', 'danger_fg': '#922B3A',
             'canvas': '#FFFFFF', 'white': '#FFFFFF',
         }
     palette['sidebar_ops_bg'] = '#183652' if dark else '#E7F0FF'
@@ -545,9 +468,9 @@ def make_style(root: Tk, primary: str | None = None, secondary: str | None = Non
     palette['sidebar_data_fg'] = '#B9EBDD' if dark else '#206A58'
     palette['sidebar_reports_fg'] = '#E2D0FF' if dark else '#63468B'
     palette['sidebar_admin_fg'] = '#F1D9A8' if dark else '#875A20'
-    palette['button_bg'] = '#243A56' if dark else '#E8EEF7'
-    palette['button_hover'] = '#314C6D' if dark else '#DDE8F7'
-    palette['button_pressed'] = '#1B2D45' if dark else '#CEDCF0'
+    palette['button_bg'] = '#243A56' if dark else '#DCE5F0'
+    palette['button_hover'] = '#314C6D' if dark else '#C9D8E9'
+    palette['button_pressed'] = '#1B2D45' if dark else '#B7C9DE'
     palette['field_focus'] = palette['primary']
     palette['success_button'] = '#167B67' if dark else palette['good_fg']
     palette['danger_button'] = '#A83C4C' if dark else palette['danger_fg']
@@ -769,13 +692,13 @@ def make_style(root: Tk, primary: str | None = None, secondary: str | None = Non
 
     # Command buttons: compact and consistent with visible focus and hover states.
     style.configure('TButton', background=palette['button_bg'], foreground=ink, borderwidth=0,
-                    focusthickness=2, focuscolor=palette['primary'], padding=(15, 10),
+                    focusthickness=2, focuscolor=palette['primary'], padding=(12, 7),
                     font=('Segoe UI', 9, 'bold'), relief='flat', anchor='center')
     style.map('TButton', background=[('disabled', palette['button_bg']), ('pressed', palette['button_pressed']),
                                     ('active', palette['button_hover'])],
               foreground=[('disabled', muted), ('active', ink)])
     style.configure('Accent.TButton', background=primary_color, foreground=palette['primary_text'], borderwidth=0,
-                    focusthickness=2, focuscolor=palette['accent'], padding=(18, 11),
+                    focusthickness=2, focuscolor=palette['accent'], padding=(14, 8),
                     font=('Segoe UI', 10, 'bold'), relief='flat', anchor='center')
     style.configure('Success.TButton', background=palette['success_button'], foreground='#FFFFFF', borderwidth=0,
                     padding=(15, 10), font=('Segoe UI', 9, 'bold'), relief='flat')
@@ -792,7 +715,7 @@ def make_style(root: Tk, primary: str | None = None, secondary: str | None = Non
                                          ('pressed', _shade(palette['gold'], 0.82))])
     # Large, high-contrast category headers remain prominent while their contents are folded.
     style.configure('NavGroupOps.TButton', background='#245B86', foreground='#FFFFFF',
-                    borderwidth=0, padding=(16, 14), anchor='e', font=('Segoe UI', 13, 'bold'), relief='flat')
+                    borderwidth=0, padding=(14, 10), anchor='e', font=('Segoe UI', 13, 'bold'), relief='flat')
     style.configure('NavGroupData.TButton', background='#286B62', foreground='#FFFFFF',
                     borderwidth=0, padding=(16, 14), anchor='e', font=('Segoe UI', 13, 'bold'), relief='flat')
     style.configure('NavGroupReports.TButton', background='#66518A', foreground='#FFFFFF',
@@ -815,7 +738,7 @@ def make_style(root: Tk, primary: str | None = None, secondary: str | None = Non
         style.map(_group_style, background=[('active', _group_color), ('pressed', _group_color)],
                   foreground=[('active', '#FFFFFF'), ('pressed', '#FFFFFF')])
     style.configure('Nav.TButton', background=palette['sidebar'], foreground=palette['sidebar_muted'],
-                    borderwidth=0, focusthickness=1, focuscolor=palette['accent'], padding=(17, 12), anchor='e',
+                    borderwidth=0, focusthickness=1, focuscolor=palette['accent'], padding=(14, 9), anchor='e',
                     font=('Segoe UI', 10, 'bold'), relief='flat')
     style.map('Nav.TButton', background=[('active', palette['sidebar_hover']),
                                          ('pressed', palette['sidebar_hover'])],
@@ -827,7 +750,7 @@ def make_style(root: Tk, primary: str | None = None, secondary: str | None = Non
                     borderwidth=1, focusthickness=1, focuscolor=palette['accent'],
                     padding=(17, 12), anchor='e', font=('Segoe UI', 10, 'bold'), relief='flat')
     style.configure('SubNav.TButton', background=palette['surface_alt'], foreground=palette['ink'],
-                    borderwidth=0, padding=(13, 9), anchor='e',
+                    borderwidth=0, padding=(11, 7), anchor='e',
                     font=('Segoe UI', 9, 'bold'), relief='flat')
     style.map('SubNav.TButton', background=[('active', palette['primary_soft']),
                                             ('pressed', palette['primary_soft'])],
@@ -872,10 +795,10 @@ def make_style(root: Tk, primary: str | None = None, secondary: str | None = Non
     style.configure('TNotebook.Tab', borderwidth=0, relief='flat')
     style.map('TNotebook.Tab', background=[('selected', surface), ('active', palette['selected'])],
               foreground=[('selected', primary_color), ('active', ink)])
-    style.configure('Treeview', font=('Segoe UI', 10), rowheight=43, background=surface,
+    style.configure('Treeview', font=('Segoe UI', 10), rowheight=36, background=surface,
                     fieldbackground=surface, foreground=ink, borderwidth=0, relief='flat')
     style.configure('Treeview.Heading', font=('Segoe UI', 10, 'bold'), background=palette['heading'],
-                    foreground=ink, padding=(14, 13), relief='flat', anchor='e')
+                    foreground=ink, padding=(10, 8), relief='flat', anchor='e')
     style.map('Treeview', background=[('selected', palette['selected'])],
               foreground=[('selected', ink)])
     style.configure('Horizontal.TProgressbar', troughcolor=palette['border'], background=palette['accent'])
@@ -909,7 +832,6 @@ def make_style(root: Tk, primary: str | None = None, secondary: str | None = Non
     # The outer image elements give all entry boxes, combo boxes and main cards
     # genuinely rounded corners. Entry focus and disabled states remain distinct.
     _install_rounded_widget_surfaces(root, style, palette)
-    root._schoolpass_button_skin_count = _install_rounded_button_surfaces(root, style, palette)
 
 
 RTL_SHAPING_ENABLED = True
@@ -3422,7 +3344,7 @@ class SchoolPassApp:
         self.quick_search_var = StringVar(value='')
         self.quick_search_entry = ttk.Entry(search_row, textvariable=self.quick_search_var, justify='right')
         self.quick_search_entry.pack(side=RIGHT, fill=X, expand=True, padx=5)
-        self.quick_search_entry.bind('<KeyRelease>', lambda _e: self._apply_record_filter())
+        self.quick_search_entry.bind('<KeyRelease>', lambda _e: self._schedule_record_filter())
         ttk.Button(search_row, text='مسح', command=self.clear_quick_search, style='Link.TButton').pack(side=LEFT, padx=3)
         table_wrap = ttk.Frame(panel, style='Surface.TFrame')
         table_wrap.pack(fill=BOTH, expand=True)
@@ -3815,12 +3737,22 @@ class SchoolPassApp:
             self.quick_search_var.set('')
         self._apply_record_filter()
 
+    def _schedule_record_filter(self):
+        """Debounce quick-search updates so typing never rebuilds the grid per keystroke."""
+        pending = getattr(self, "_record_filter_after_id", None)
+        if pending:
+            try:
+                self.root.after_cancel(pending)
+            except Exception:
+                pass
+        self._record_filter_after_id = self.root.after(110, self._apply_record_filter)
+
     def _apply_record_filter(self):
         if not hasattr(self, 'tree'):
             return
+        self._record_filter_after_id = None
         query = self.quick_search_var.get().strip().casefold() if hasattr(self, 'quick_search_var') else ''
-        for item in self.tree.get_children():
-            self.tree.delete(item)
+        wanted = []
         for r in getattr(self, '_records_cache', []):
             values = (r['record_no'], kind_label(r['kind']), r['student_name'], r['class_name'],
                       (r['issued_at'] or r['created_at']), r['supervisor'] or '—', status_label(r['status']))
@@ -3828,7 +3760,17 @@ class SchoolPassApp:
                 continue
             tag = 'late' if r['kind'] == 'late' else ('absence' if r['kind'] == 'absence_return' else ('special' if r['kind'] == 'special_entry' else 'exit'))
             tags = ('cancelled',) if r['status'] == 'cancelled' else (tag,)
-            self.tree.insert('', END, iid=str(r['id']), values=values, tags=tags)
+            wanted.append((str(r['id']), values, tags))
+        wanted_ids = {item[0] for item in wanted}
+        existing_ids = set(self.tree.get_children())
+        for stale_id in existing_ids - wanted_ids:
+            self.tree.delete(stale_id)
+        for index, (iid, values, tags) in enumerate(wanted):
+            if iid in existing_ids:
+                self.tree.item(iid, values=values, tags=tags)
+                self.tree.move(iid, '', index)
+            else:
+                self.tree.insert('', END, iid=iid, values=values, tags=tags)
 
     def refresh_records(self):
         with db_connect() as conn:
