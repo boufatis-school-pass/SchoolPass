@@ -390,6 +390,8 @@ def init_db() -> None:
                              reason, details_json, related_record_id ON records
             BEGIN SELECT RAISE(ABORT, 'record content is immutable'); END""")
         conn.execute("INSERT OR IGNORE INTO settings(setting_key,setting_value) VALUES('school_name',?)", (SCHOOL_NAME,))
+        # Remove obsolete cloud credentials and LAN QR host settings from older installs.
+        conn.execute("DELETE FROM settings WHERE setting_key IN ('cloud_bridge_url','cloud_bridge_api_key_enc','qr_host')")
         conn.execute("INSERT OR IGNORE INTO settings(setting_key,setting_value) VALUES('secret',?)", (secrets.token_hex(32),))
         # Appearance defaults are added with INSERT OR IGNORE so existing 0.2/0.3 data is preserved.
         conn.execute("INSERT OR IGNORE INTO settings(setting_key,setting_value) VALUES('theme_primary','#185A8D')")
@@ -2688,11 +2690,8 @@ def save_preferences_as(actor, school_name: str, host: str, primary: str, second
     """Validate and save all administrator preferences atomically, with one audit event per setting."""
     admin = require_admin(actor)
     school_name = str(school_name or "").strip()
-    host = str(host or "").strip()
     if not school_name:
         raise ValueError("أدخل اسم المؤسسة.")
-    if not re.fullmatch(r"[A-Za-z0-9]([A-Za-z0-9.\-]{0,60}[A-Za-z0-9])?", host):
-        raise ValueError("أدخل عنوان IP أو اسم حاسوب صالحًا دون http:// أو منفذ.")
     primary = _validate_hex_color(primary, "اللون الرئيسي")
     secondary = _validate_hex_color(secondary, "اللون الثانوي")
     if primary == secondary:
