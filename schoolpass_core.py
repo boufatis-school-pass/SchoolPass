@@ -1706,8 +1706,6 @@ def save_preferences_as(actor, school_name: str, primary: str, secondary: str,
     school_name = str(school_name or "").strip()
     if not school_name:
         raise ValueError("أدخل اسم المؤسسة.")
-    if not re.fullmatch(r"[A-Za-z0-9]([A-Za-z0-9.\-]{0,60}[A-Za-z0-9])?", host):
-        raise ValueError("أدخل عنوان IP أو اسم حاسوب صالحًا دون http:// أو منفذ.")
     primary = _validate_hex_color(primary, "اللون الرئيسي")
     secondary = _validate_hex_color(secondary, "اللون الثانوي")
     if primary == secondary:
