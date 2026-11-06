@@ -1771,11 +1771,11 @@ def qr_payload(row) -> str:
     expires = issued + timedelta(hours=QR_VALIDITY_HOURS)
     status = str(row["status"] or "active")
     if status == "cancelled":
-        state = "ملغاة داخل البرنامج عند الطباعة"
+        state = "ملغاة"
     elif status == "returned":
-        state = "العودة مسجلة داخل البرنامج عند الطباعة"
+        state = "عودة مسجلة"
     else:
-        state = "سارية عند الإصدار"
+        state = "سارية عند الطباعة"
     lines = [
         "SchoolPass",
         f"رقم: {row['record_no']}",
@@ -1784,10 +1784,9 @@ def qr_payload(row) -> str:
         f"القسم: {row['class_name']}",
         f"إصدار: {issued.isoformat(timespec='seconds')}",
         f"انتهاء: {expires.isoformat(timespec='seconds')}",
-        "مدة الصلاحية: ساعتان",
-        f"الحالة عند الطباعة: {state}",
-        "تحقق بالهاتف: قبل الإصدار غير صالحة؛ بين الإصدار والانتهاء صالحة؛ بعد الانتهاء منتهية.",
-        "رمز ثابت بلا اتصال؛ لا يكشف إلغاءً لاحقًا.",
+        "صلاحية: ساعتان",
+        f"الحالة: {state}",
+        "التحقق: الرخصة صالحة فقط بين وقت الإصدار والانتهاء.",
     ]
     return "\n".join(lines)
 
@@ -2093,7 +2092,7 @@ def _draw_entry_page(c, row, details: dict, reprint: bool, font: str, school: st
             c.drawRightString(left_cell_right - 18.0 * mm, baseline, _arabic_visual(value_b))
 
     # QR and signature/stamp area intentionally matches the approved exit slip.
-    qr_x, qr_y, qr_size = margin + 1.0 * mm, 8.0 * mm, 25.5 * mm
+    qr_x, qr_y, qr_size = margin + 1.0 * mm, 8.0 * mm, 27.0 * mm
     import qrcode
     qr = qrcode.QRCode(version=None, error_correction=qrcode.constants.ERROR_CORRECT_M, box_size=6, border=2)
     qr.add_data(qr_payload(row))
@@ -2215,7 +2214,7 @@ def _draw_page(c, row, details: dict, copy_type: str | None, reprint: bool, font
         items.append((f"النسخة: {copy_type}", 6.6, 3.8, False))
 
     # --- bottom zones
-    qr_x, qr_y, qr_size = margin, 8 * MM, 26.5 * MM
+    qr_x, qr_y, qr_size = margin, 8 * MM, 27.0 * MM
     box_bottom = 36 * MM  # warning box (permits) sits above QR/stamp
     warn_lines: list[str] = []
     warn_gap = 3.15 * MM
