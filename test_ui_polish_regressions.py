@@ -5,11 +5,11 @@ APP = (ROOT / "app.py").read_text(encoding="utf-8")
 
 
 def test_input_fields_have_visible_tinted_surface_and_stronger_border():
-    assert "'border': '#AEBFD4', 'field': '#EAF1FA'" in APP
+    assert "'gold': '#E5AC38', 'border': '#8499B2', 'field': '#F1F5FA'" in APP
     assert "'field': '#152A45'" in APP
     assert "focus_border=primary" in APP
     assert "size, radius, border_width = 36, 14, 2" in APP
-    assert "style.configure(\n        'TEntry', padding=(13, 10), fieldbackground=palette['field']" in APP
+    assert "style.configure(\n        'TEntry', padding=(10, 7), fieldbackground=palette['field']" in APP
     assert "('LoginBrand.TFrame', palette.get('sidebar'" in APP
     assert "('LoginSurface.TFrame', surface, border)" in APP
 
@@ -25,13 +25,13 @@ def test_dashboard_uses_compact_hierarchy_and_color_coded_kpis():
     assert "MetricCardIconHover.TLabel" in APP
 
 
-def test_buttons_have_rounded_stateful_image_layout_without_hiding_captions():
-    assert "def _install_rounded_button_surfaces(" in APP
-    assert "from ttkbootstrap import Assets, El, image_element, layout" in APP
-    assert "assets.rounded_rect(fill, size=(150, 44), radius=radius)" in APP
-    assert "El('Button.label', side='left', expand=True)" in APP
-    assert "_install_rounded_button_surfaces(root, style, palette)" in APP
-    assert "('Success.TButton'" in APP and "('Danger.TButton'" in APP
+def test_buttons_use_native_stateful_rendering_without_image_assets():
+    assert "def _install_rounded_button_surfaces(" not in APP
+    assert "from ttkbootstrap import Assets, El, image_element, layout" not in APP
+    assert "style.configure('TButton'" in APP
+    assert "style.map('TButton'" in APP
+    assert "style.configure('Accent.TButton'" in APP
+    assert "style.configure('Success.TButton'" in APP and "style.configure('Danger.TButton'" in APP
     assert "('NavGroupOpsOpen.TButton'" in APP and "('NavActive.TButton'" in APP
 
 
@@ -96,7 +96,18 @@ def test_ttkbootstrap_style_uses_the_existing_default_root_and_exposes_scaling()
     assert "style = ttkb.Style(theme=target_theme)" in APP
     assert "ttkb.Style(root, theme=target_theme)" not in APP
     assert "root._schoolpass_theme_init_error" in APP
-    assert "root._schoolpass_button_skin_count = _install_rounded_button_surfaces(root, style, palette)" in APP
+    assert "root._schoolpass_button_skin_count = _install_rounded_button_surfaces(root, style, palette)" not in APP
+
+
+def test_dialogs_fit_their_contents_and_search_is_debounced():
+    assert "requested_w = max(1, int(win.winfo_reqwidth()))" in APP
+    assert "requested_h = max(1, int(win.winfo_reqheight()))" in APP
+    assert "def _schedule_record_filter(self):" in APP
+    assert "self.root.after(110, self._apply_record_filter)" in APP
+    assert "def _schedule_student_suggestions(self, event=None):" in APP
+    assert "def _schedule_teacher_suggestions(self, event=None):" in APP
+    assert APP.count("self.root.after(500, self._tick_dashboard_clock)") == 1
+    assert "self.root.after(1000, self.poll_qr_events)" not in APP
 
 
 def test_windows_build_banner_uses_the_version_file_not_a_stale_literal():
