@@ -2731,8 +2731,8 @@ class SchoolPassApp:
                 ('أكثر أسباب العمليات',[f"{kind_label(r['kind'])} — {r['reason']}: {r['n']}" for r in st['by_reason']]),
                 ('فترات الغياب المدخلة يدويًا',[f"{r['student_name']} — {r['class_name']}: {r['n']} فترة، {r['days']} يومًا" for r in st['absence_totals']])]
             for title,lines in sections:
-                text_widget.insert(END,rtl_display(title+'\n'+'—'*40+'\n'))
-                text_widget.insert(END,rtl_display(('\n'.join(lines) if lines else 'لا توجد بيانات.')+'\n\n'))
+                text_widget.insert(END,rtl_display(title+'\n'+'—'*40+'\n'),'rtl')
+                text_widget.insert(END,rtl_display(('\n'.join(lines) if lines else 'لا توجد بيانات.')+'\n\n'),'rtl')
             text_widget.configure(state='disabled')
         bar=ttk.Frame(win);bar.pack(fill=X,padx=18,pady=(0,12))
         ttk.Button(bar,text='تحديث الإحصائيات',command=refresh_text).pack(side=RIGHT,padx=4)
