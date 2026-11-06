@@ -497,7 +497,7 @@ class TestRecords(Base):
         self.assertNotIn(FULL_NID, core.mask_national_id(d))
         self.assertTrue(core.mask_national_id(d).endswith(FULL_NID[-4:]))
         self.assertNotIn(FULL_NID, core.qr_payload(p))
-        self.assertNotIn(FULL_NID[-4:], core.qr_url(p["qr_token"]))
+        self.assertNotIn(FULL_NID[-4:], core.qr_payload(p))
         self.assertTrue(p["record_no"].startswith("SP-"))
         for bad in ("12ab56", "123", "1" * 25, ""):
             with self.assertRaises(ValueError):
@@ -737,7 +737,7 @@ class TestStaticQr(Base):
         permit = self.permit()
         core.cancel_record(permit["id"], self.sup, "تصحيح")
         self.assertIn("ملغاة داخل البرنامج", core.qr_payload(core.record_by_id(permit["id"])))
-        exit_permit = self.exit_permit()
+        exit_permit = self.permit(self.s2)
         core.return_from_exit(exit_permit["id"], self.sup)
         self.assertIn("تم تسجيل عودة التلميذ", core.qr_payload(core.record_by_id(exit_permit["id"])))
 
