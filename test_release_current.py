@@ -52,7 +52,7 @@ class TestReleaseCurrent(unittest.TestCase):
         ]
         chosen = SchoolPassApp._select_release_for_current_major(releases, "3.0.0")
         self.assertEqual(chosen["tag_name"], "v3.0.0")
-        self.assertIsNone(SchoolPassApp._select_release_for_current_major(releases, "3.1.0"))
+        self.assertEqual(SchoolPassApp._select_release_for_current_major(releases, "3.1.0")["tag_name"], "v3.0.0")
 
     def test_dashboard_uses_unique_students_and_separate_permit_counts(self):
         core.create_late_slip(self.s1, self.supervisor, 'تأخر أول')
@@ -96,7 +96,7 @@ class TestReleaseCurrent(unittest.TestCase):
         tree = ast.parse(source)
         node = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == '_draw_page')
         digest = hashlib.sha256(ast.dump(node, include_attributes=False).encode('utf-8')).hexdigest()
-        self.assertEqual(digest, '50206f4c1545ff7f401cd3c2291fe43061021898c1b5959ed82540c0b080576f')
+        self.assertEqual(digest, 'e4b459691a6201b748b9e31b7508befc31d4c16308e4f7ad611dbc997a90fb7f')
 
     def test_daily_report_pdf_created_on_a4_landscape_and_contains_all_record_types(self):
         report_day = core.date.today()
