@@ -15,23 +15,19 @@ import html
 import io
 import json
 import os
-import queue
 import re
 import secrets
-import socket
 import sqlite3
 import threading
 import time
 from datetime import date, datetime, timedelta
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import NamedTuple
 
 APP_NAME = "SchoolPass"
-APP_VERSION = "4.9.3"
+APP_VERSION = "4.9.4"
 SCHOOL_NAME = "ثانوية المجاهد بسجراري لخضر بوفاطيس"
 MINISTRY_NAME = "الجمهورية الجزائرية الديمقراطية الشعبية — وزارة التربية الوطنية"
-SERVER_PORT = 8765
 AUTO_LOCK_SECONDS = 600
 RECORD_KINDS = ("late", "absence_return", "special_entry", "exit_permit", "exit_return")
 ABSENCE_CERTIFICATE_MAX_DURATION_DAYS = 2
@@ -62,9 +58,6 @@ def app_data_dir() -> Path:
 DATA_DIR = app_data_dir()
 DB_PATH = DATA_DIR / "schoolpass.sqlite3"
 LOG_PATH = DATA_DIR / "logs" / "schoolpass.log"
-EVENT_QUEUE: "queue.Queue[str]" = queue.Queue(maxsize=200)
-_SERVER: ThreadingHTTPServer | None = None
-_SERVER_THREAD: threading.Thread | None = None
 
 
 def now_iso() -> str:
@@ -453,57 +446,6 @@ def set_setting(key: str, value: str) -> None:
     with db_connect() as conn:
         conn.execute("INSERT INTO settings(setting_key,setting_value) VALUES(?,?) "
                      "ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value", (key, value))
-
-
-def cloud_bridge_url() -> str:
-    """Return the configured HTTPS Cloudflare Worker base URL, without a trailing slash."""
-    return setting("cloud_bridge_url", "").strip().rstrip("/")
-
-
-def cloud_bridge_config() -> dict[str, str]:
-    """Read the Worker URL and decrypt its device key with the current Windows profile."""
-    encrypted = setting("cloud_bridge_api_key_enc", "").strip()
-    api_key = reveal_sensitive_text(encrypted) if encrypted else ""
-    return {"url": cloud_bridge_url(), "api_key": api_key}
-
-
-def save_cloud_bridge_url_as(actor, url: str) -> str:
-    """Admin-only configuration of a public HTTPS Worker URL; local IPs are rejected."""
-    admin = require_admin(actor)
-    value = str(url or "").strip().rstrip("/")
-    if value:
-        if not re.fullmatch(r"https://[A-Za-z0-9.-]+(?::443)?", value, re.I):
-            raise ValueError("أدخل رابط Cloudflare Worker كاملًا ويبدأ بـ https://، دون مسار أو رمز سري.")
-        host = value.split("://", 1)[1].split(":", 1)[0]
-        if "." not in host or host.lower() in {"localhost", "127.0.0.1"}:
-            raise ValueError("يجب أن يكون عنوان الخدمة عنوانًا عامًا على الإنترنت.")
-    previous = cloud_bridge_url()
-    set_setting("cloud_bridge_url", value)
-    audit(admin["id"], "تغيير رابط Cloudflare", "settings", "cloud_bridge_url", value or "تعطيل الربط")
-    return value
-
-
-def save_cloud_bridge_api_key_as(actor, api_key: str) -> None:
-    """Encrypt the shared device key at rest using Windows DPAPI before saving it."""
-    admin = require_admin(actor)
-    value = str(api_key or "").strip()
-    if not value:
-        set_setting("cloud_bridge_api_key_enc", "")
-        audit(admin["id"], "مسح مفتاح Cloudflare", "settings", "cloud_bridge_api_key_enc", "تم مسح المفتاح")
-        return
-    if len(value) < 32 or len(value) > 256 or not re.fullmatch(r"[A-Za-z0-9._~-]+", value):
-        raise ValueError("مفتاح الربط يجب أن يكون بين 32 و256 محرفًا لاتينيًا آمنًا.")
-    encrypted = protect_sensitive_text(value)
-    set_setting("cloud_bridge_api_key_enc", encrypted)
-    audit(admin["id"], "تحديث مفتاح Cloudflare", "settings", "cloud_bridge_api_key_enc", "تم حفظ المفتاح مشفرًا بواسطة Windows DPAPI")
-
-
-def generate_cloud_bridge_key_as(actor) -> str:
-    """Create a high-entropy device key, store it encrypted, and return it once for Worker setup."""
-    key = secrets.token_urlsafe(48)
-    save_cloud_bridge_api_key_as(actor, key)
-    return key
-
 
 
 def audit(user_id: int | None, action: str, target_type: str = "", target_id="", description: str = "") -> None:
@@ -2797,7 +2739,6 @@ def save_preferences_as(actor, school_name: str, host: str, primary: str, second
         external_backup_path = str(resolved_backup)
     changes = {
         "school_name": school_name,
-        "qr_host": host,
         "theme_primary": primary,
         "theme_secondary": secondary,
         "print_mode": "open",
@@ -2807,7 +2748,6 @@ def save_preferences_as(actor, school_name: str, host: str, primary: str, second
     }
     labels = {
         "school_name": ("تغيير اسم المؤسسة", "اسم المؤسسة"),
-        "qr_host": ("تغيير عنوان رمز QR", "عنوان QR"),
         "theme_primary": ("تغيير ألوان الواجهة", "اللون الرئيسي"),
         "theme_secondary": ("تغيير ألوان الواجهة", "اللون الثانوي"),
         "print_mode": ("تثبيت الطباعة عبر معاينة PDF", "طريقة الطباعة"),
@@ -2824,172 +2764,28 @@ def save_preferences_as(actor, school_name: str, host: str, primary: str, second
                          (now_iso(), admin["id"], action, "settings", key, f"{desc}: {value}"))
 
 
-# ----------------------------------------------------------------------------- QR host / local verification server
-def qr_host() -> str:
-    """Address written into printed QR codes. Saved once so old printouts keep working."""
-    return setting("qr_host", "").strip() or get_local_ip()
+def qr_payload(record) -> str:
+    """Create an offline, human-readable QR payload based only on the printed issue time.
 
-
-def ensure_qr_host_saved() -> str:
-    host = setting("qr_host", "").strip()
-    if not host:
-        ip = get_local_ip()
-        if not ip.startswith("127."):
-            set_setting("qr_host", ip)
-            host = ip
-    return host or get_local_ip()
-
-
-def qr_host_mismatch() -> tuple[str, str] | None:
-    """(configured, current) when the saved IP is no longer this computer's IP; old QR codes would break."""
-    configured, current = setting("qr_host", "").strip(), get_local_ip()
-    if configured and re.fullmatch(r"\d{1,3}(\.\d{1,3}){3}", configured) and current != configured and not current.startswith("127."):
-        return configured, current
-    return None
-
-
-def set_qr_host_as(actor, host: str) -> None:
-    admin = require_admin(actor)
-    host = host.strip()
-    if not re.fullmatch(r"[A-Za-z0-9]([A-Za-z0-9.\-]{0,60}[A-Za-z0-9])?", host):
-        raise ValueError("أدخل عنوان IP (مثل 192.168.1.20) أو اسم حاسوب صالحًا دون http:// أو منفذ.")
-    set_setting("qr_host", host)
-    audit(admin["id"], "تغيير عنوان رمز QR", "settings", "qr_host", host)
-
-
-def qr_url(token: str) -> str:
-    """Prefer the public Cloudflare bridge for new printouts; retain LAN fallback for legacy setup."""
-    cloud = cloud_bridge_url()
-    if cloud:
-        return f"{cloud}/v/{token}"
-    return f"http://{qr_host()}:{SERVER_PORT}/v/{token}"
-
-
-_TOKEN_RE = re.compile(r"^[0-9a-f]{48}$")
-_RATE: dict[str, list[float]] = {}
-_RATE_LOCK = threading.Lock()
-
-
-def _rate_limited(ip: str, limit: int = 20, window: float = 60.0) -> bool:
-    now = time.time()
-    with _RATE_LOCK:
-        hits = [t for t in _RATE.get(ip, []) if now - t < window]
-        hits.append(now)
-        _RATE[ip] = hits
-        if len(_RATE) > 500:
-            _RATE.clear()
-        return len(hits) > limit
-
-
-def verification_page(token: str) -> tuple[int, bytes, dict | None]:
-    """Build the phone verification page. Never includes national ID or guardian data."""
-    row = None
-    if _TOKEN_RE.match(token or ""):
-        with db_connect() as conn:
-            row = conn.execute("SELECT record_no,kind,student_name,class_name,status,created_at,issued_at,cancelled_at,returned_at FROM records WHERE qr_token=?",
-                               (token,)).fetchone()
-    school = html.escape(setting("school_name", SCHOOL_NAME))
-    if not row:
-        title, body = "رمز غير معروف", "<p>لم يتم العثور على هذا السجل في قاعدة بيانات SchoolPass.</p>"
+    The payload intentionally does not claim to reflect later cancellations or returns:
+    a printed QR cannot read the workstation database without a network service.
+    """
+    issued = str(record["issued_at"] or record["created_at"] or "غير معروف").strip()
+    lines = [
+        "SCHOOLPASS|1",
+        f"رقم الرخصة: {record['record_no']}",
+        f"النوع: {kind_label(record['kind'])}",
+        f"وقت الإصدار: {issued}",
+    ]
+    expires = record_expiry_at(record)
+    if expires is not None:
+        lines.append(f"تنتهي بعد ساعتين: {expires.strftime('%Y-%m-%d %H:%M:%S')}")
+        lines.append("قارن ساعة الهاتف بوقت الانتهاء؛ لا تعتمد على الرخصة بعده.")
     else:
-        title = "التحقق من الرخصة"
-        body = (f'<p><b>الرقم:</b> {html.escape(row["record_no"])}</p><p><b>النوع:</b> {html.escape(kind_label(row["kind"]))}</p>'
-                f'<p><b>التلميذ:</b> {html.escape(row["student_name"])}</p><p><b>القسم:</b> {html.escape(row["class_name"])}</p>'
-                f'<p><b>التاريخ:</b> {html.escape(row["created_at"])}</p>'
-                f'<p><b>الحالة:</b> <strong>{html.escape(status_label(row["status"]))}</strong></p>')
-        if row["status"] == "cancelled":
-            body += f'<p class="bad">تنبيه: هذا السجل ملغى منذ {html.escape(row["cancelled_at"] or "")} ولا يجوز الاعتماد عليه.</p>'
-        elif row["status"] == "returned":
-            body += f'<p>سُجّلت عودة التلميذ بموجب هذا التصريح في {html.escape(row["returned_at"] or "")}.</p>'
-        elif record_is_expired(row):
-            expires = record_expiry_at(row)
-            body += f'<p class="bad">انتهت صلاحية هذه الرخصة بعد ساعتين من إصدارها ({html.escape(expires.strftime("%Y-%m-%d %H:%M:%S") if expires else "")}). لا يجوز استعمالها.</p>'
-        else:
-            expires = record_expiry_at(row)
-            if expires:
-                body += f'<p>السجل سارٍ حتى {html.escape(expires.strftime("%Y-%m-%d %H:%M:%S"))}. طابق الاسم والقسم مع التلميذ الحاضر.</p>'
-            else:
-                body += "<p>رخصة الخروج الاستثنائي تبقى سارية إلى حين تسجيل عودة التلميذ.</p>"
-    page = (f'<!doctype html><html lang="ar" dir="rtl"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
-            f'<title>{html.escape(title)}</title><style>body{{font-family:Tahoma,Arial,sans-serif;background:#f4f7fb;margin:0;padding:22px;color:#17243a}}'
-            f'main{{max-width:480px;margin:auto;background:#fff;border-radius:14px;padding:22px}}h2{{color:#174a77}}p{{padding:9px 0;border-bottom:1px solid #edf0f5}}'
-            f'.bad{{color:#b00020;font-weight:bold}}</style><main><h2>{school}</h2><h3>{html.escape(title)}</h3>{body}'
-            f'<p>صفحة تحقق محلية؛ لا تتضمن رقم بطاقة الهوية.</p></main></html>').encode("utf-8")
-    return (200 if row else 404), page, ({"qr_token": token} if row else None)
-
-
-def ensure_local_server(port: int | None = None) -> tuple[bool, str]:
-    global _SERVER, _SERVER_THREAD
-    if _SERVER is not None:
-        return True, get_local_ip()
-
-    class Handler(BaseHTTPRequestHandler):
-        server_version = "SchoolPass"
-        sys_version = ""
-
-        def log_message(self, *_args):
-            return
-
-        def _send(self, code: int, body: bytes, ctype: str):
-            self.send_response(code)
-            self.send_header("Content-Type", ctype)
-            self.send_header("Content-Length", str(len(body)))
-            self.send_header("Cache-Control", "no-store")
-            self.send_header("X-Content-Type-Options", "nosniff")
-            self.send_header("Referrer-Policy", "no-referrer")
-            self.send_header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'")
-            self.end_headers()
-            self.wfile.write(body)
-
-        def do_GET(self):
-            path = self.path.split("?", 1)[0]
-            if path == "/health":
-                return self._send(200, b"SchoolPass OK", "text/plain; charset=utf-8")
-            if not path.startswith("/v/"):
-                return self._send(404, b"Not found", "text/plain; charset=utf-8")
-            if _rate_limited(self.client_address[0]):
-                return self._send(429, b"Too many requests", "text/plain; charset=utf-8")
-            code, page, ev = verification_page(path[3:].strip("/"))
-            if ev:
-                try:
-                    EVENT_QUEUE.put_nowait(ev["qr_token"])
-                except queue.Full:
-                    pass
-            self._send(code, page, "text/html; charset=utf-8")
-
-    try:
-        _SERVER = ThreadingHTTPServer(("0.0.0.0", SERVER_PORT if port is None else port), Handler)
-        # Wait for request-handler threads during shutdown so tests and restore
-        # operations never race a handler that still has SQLite open.
-        _SERVER.daemon_threads = False
-        _SERVER.block_on_close = True
-        _SERVER_THREAD = threading.Thread(target=_SERVER.serve_forever, daemon=True)
-        _SERVER_THREAD.start()
-        return True, get_local_ip()
-    except OSError as exc:
-        _SERVER = _SERVER_THREAD = None
-        return False, str(exc)
-
-
-def stop_local_server() -> bool:
-    global _SERVER, _SERVER_THREAD
-    server, thread = _SERVER, _SERVER_THREAD
-    was = server is not None
-    # Detach globals first: a concurrent UI action cannot mistake a server
-    # being shut down for a healthy listener.
-    _SERVER = _SERVER_THREAD = None
-    if server is not None:
-        try:
-            server.shutdown()
-        except Exception:
-            pass
-        try:
-            server.server_close()  # waits for non-daemon request handlers
-        except Exception:
-            pass
-    if thread is not None and thread is not threading.current_thread():
-        thread.join(timeout=10)
-    return was
+        lines.append("رخصة خروج استثنائي: لا يوجد انتهاء زمني تلقائي.")
+        lines.append("تأكيد العودة أو الإلغاء يتطلب مراجعة سجل المؤسسة.")
+    lines.append("الرمز يعرض بيانات الإصدار الزمنية فقط ولا يعكس إلغاءً لاحقًا.")
+    return "\\n".join(lines)
 
 
 # ----------------------------------------------------------------------------- A6 PDF
@@ -3355,7 +3151,7 @@ def _draw_entry_page(c, row, details: dict, reprint: bool, font: str, school: st
     qr_x, qr_y, qr_size = margin + 1.0 * mm, 8.0 * mm, 23.0 * mm
     import qrcode
     qr = qrcode.QRCode(version=None, error_correction=qrcode.constants.ERROR_CORRECT_M, box_size=6, border=2)
-    qr.add_data(qr_url(row["qr_token"]))
+    qr.add_data(qr_payload(row))
     qr.make(fit=True)
     img = qr.make_image(fill_color="black", back_color="white").convert("RGB")
     buf = io.BytesIO()
@@ -3817,21 +3613,6 @@ def automatic_backup_if_due(user_id, keep_days: int = 30) -> Path | None:
     return today_path
 
 
-def qr_health_check() -> tuple[bool, str, str]:
-    """Check local QR HTTP endpoint and return (ok, local-IP URL, response text)."""
-    import urllib.request
-    ip = get_local_ip()
-    port = int(_SERVER.server_address[1]) if _SERVER is not None else SERVER_PORT
-    url = f"http://127.0.0.1:{port}/health"
-    try:
-        with urllib.request.urlopen(url, timeout=3) as response:
-            body = response.read(120).decode("utf-8", errors="replace")
-            return response.status == 200 and "SchoolPass OK" in body, f"http://{ip}:{port}/health", body
-    except Exception as exc:
-        return False, f"http://{ip}:{port}/health", str(exc)
-
-
-
 def create_daily_report_pdf(dest_path, report_date: date | str, user_id) -> Path:
     """Create an A4-landscape daily handover report listing every permit issued that day.
 
@@ -4267,13 +4048,12 @@ def restore_database(source_path, user_id) -> Path:
     previous = DATA_DIR / "backups" / f"before_restore_{stamp}.sqlite3"
     # Never validate legacy schemas against the newest columns before migrating them.
     _copy_db(source, stage)
-    server_was_running, replaced = False, False
+    replaced = False
     try:
         _migrate_staged_database(stage)
         validate_database(stage)
         _copy_db(DB_PATH, previous)  # safety copy of current data
         validate_database(previous)
-        server_was_running = stop_local_server()
         for suffix in ("-wal", "-shm"):
             Path(str(DB_PATH) + suffix).unlink(missing_ok=True)
         os.replace(stage, DB_PATH)
@@ -4285,15 +4065,12 @@ def restore_database(source_path, user_id) -> Path:
     except Exception as exc:
         if replaced and previous.exists():
             try:
-                stop_local_server()
                 for suffix in ("-wal", "-shm"):
                     Path(str(DB_PATH) + suffix).unlink(missing_ok=True)
                 os.replace(previous, DB_PATH)
                 init_db()
             except Exception as rb:  # pragma: no cover
                 raise RuntimeError(f"{exc}\nوفشل التراجع التلقائي أيضًا: {rb}. احتفظ بالملف: {previous}") from exc
-        if server_was_running:
-            ensure_local_server()
         raise
     finally:
         try:
