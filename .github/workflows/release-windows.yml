@@ -6,6 +6,9 @@ on:
       - 'recovery/**'
     tags:
       - 'v*'
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: write
@@ -37,7 +40,7 @@ jobs:
 
       - name: Build and test installer
         shell: powershell
-        run: .\\build_windows.ps1
+        run: .\build_windows.ps1
 
       - name: Publish release installer
         if: startsWith(github.ref, 'refs/tags/')
