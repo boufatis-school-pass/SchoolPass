@@ -1786,7 +1786,7 @@ def qr_payload(row) -> str:
         f"القسم: {row['class_name']}",
         f"وقت الإصدار: {issued.isoformat(timespec='seconds')}",
         f"وقت الانتهاء: {expires.isoformat(timespec='seconds')}",
-        f"مدة الصلاحية: {QR_VALIDITY_HOURS} ساعة من الإصدار",
+        f"مدة الصلاحية: ساعتان من الإصدار",
         f"الحالة عند إنشاء الرمز: {state}",
         "ملاحظة: هذا الرمز نص ثابت بلا اتصال أو تحديث مباشر. قارن وقت الهاتف بوقت الانتهاء.",
     ]
