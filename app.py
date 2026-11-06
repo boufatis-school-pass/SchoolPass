@@ -1315,7 +1315,7 @@ class SchoolPassApp:
             result = None
             error = None
             try:
-                api = f'https://api.github.com/repos/{repo}/releases/latest'
+                api = f'https://api.github.com/repos/{repo}/releases?per_page=100'
                 request = Request(api, headers={
                     'Accept': 'application/vnd.github+json',
                     'User-Agent': f'SchoolPass/{APP_VERSION}',
@@ -1324,8 +1324,9 @@ class SchoolPassApp:
                 with urlopen(request, timeout=12) as response:
                     raw = response.read(2_000_000)
                 result = json.loads(raw.decode('utf-8'))
-                if not isinstance(result, dict):
+                if not isinstance(result, list):
                     raise ValueError('استجابة GitHub غير مفهومة.')
+                result = self._select_release_for_current_major(result, APP_VERSION)
             except Exception as exc:  # forwarded to the UI thread
                 error = exc
             try:
@@ -1342,6 +1343,22 @@ class SchoolPassApp:
         if not re.fullmatch(r'\d+(?:\.\d+){1,3}', text):
             raise ValueError('صيغة رقم الإصدار المنشور غير صحيحة.')
         return tuple(int(part) for part in text.split('.'))
+
+    @classmethod
+    def _select_release_for_current_major(cls, releases, current_version):
+        """Ignore archived releases from other major lines (e.g. old 4.x releases)."""
+        current_major = cls._version_parts(current_version)[0]
+        candidates = []
+        for item in releases or []:
+            if not isinstance(item, dict) or item.get('draft') or item.get('prerelease'):
+                continue
+            try:
+                parts = cls._version_parts(item.get('tag_name', ''))
+            except ValueError:
+                continue
+            if parts[0] == current_major:
+                candidates.append((parts, item))
+        return max(candidates, key=lambda pair: pair[0])[1] if candidates else None
 
     def _finish_update_check(self, repo: str, release, error):
         """Render the result of the background release lookup on the Tk main thread."""
@@ -1362,6 +1379,11 @@ class SchoolPassApp:
             self.status_text.set(self.base_status)
             return
         try:
+            if not release:
+                messagebox.showinfo('البحث عن التحديثات',
+                    f'نسختك الحالية: {APP_VERSION}\\nلا يوجد إصدار مستقر من سلسلة 3.x منشور بعد.',
+                    parent=self.root)
+                return
             tag = str(release.get('tag_name', '')).strip()
             latest_parts = self._version_parts(tag)
             current_parts = self._version_parts(APP_VERSION)
