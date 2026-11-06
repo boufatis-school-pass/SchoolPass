@@ -7,7 +7,6 @@ import hashlib
 import tempfile
 import subprocess
 import os
-import socket
 import sys
 import time
 import re
@@ -31,7 +30,7 @@ from schoolpass_core import (
 )
 
 USER_ERRORS = (ValueError, RuntimeError, PermissionDenied, FileNotFoundError, OSError)
-_INSTANCE_LOCK: socket.socket | None = None
+_INSTANCE_LOCK = None
 
 
 # ---------------------------------------------------------------- UI helpers
@@ -1185,7 +1184,7 @@ class SchoolPassApp:
         self.root.bind('<F11>', lambda _e: self.toggle_fullscreen())
         self.root.bind('<Escape>', lambda _e: self.leave_fullscreen())
         role = 'مدير النظام' if user['role'] == 'admin' else 'مشرف'
-        self.base_status = f"المستخدم: {user['display_name']} ({role})  |  قاعدة البيانات محلية  |  رمز QR ثابت؛ لا توجد خدمة خلفية أو اتصال خارجي"
+        self.base_status = f"المستخدم: {user['display_name']} ({role})  |  قاعدة البيانات محلية  |  رمز QR ثابت؛ لا توجد خدمة QR خلفية"
         self.status_text.set(self.base_status)
         self.refresh_records()
         self.root.bind_all('<Key>', self.touch)
@@ -2912,14 +2911,22 @@ def _log_exception(exc_type, exc, tb):
 
 
 def _single_instance() -> bool:
+    """Prevent duplicate app windows with an OS file lock, not a listening network socket."""
     global _INSTANCE_LOCK
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    lock_path = DATA_DIR / "schoolpass.instance.lock"
+    handle = open(lock_path, "a+b")
     try:
-        s.bind(('127.0.0.1', 38765))
-    except OSError:
-        s.close()
+        handle.seek(0)
+        if os.name == "nt":
+            import msvcrt
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except (OSError, ImportError):
+        handle.close()
         return False
-    _INSTANCE_LOCK = s
+    _INSTANCE_LOCK = handle
     return True
 
 
