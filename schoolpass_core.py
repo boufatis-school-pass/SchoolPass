@@ -2743,27 +2743,40 @@ def save_preferences_as(actor, school_name: str, host: str, primary: str, second
 
 
 def qr_payload(record) -> str:
-    """Create an offline, human-readable QR payload based only on the printed issue time.
+    """Compact offline QR data: reference, kind, issue time and expiry only.
 
-    The payload intentionally does not claim to reflect later cancellations or returns:
-    a printed QR cannot read the workstation database without a network service.
+    No network address, guardian data, reason, cancellation state or live status is
+    encoded. A phone can compare the issue/expiry times without contacting a server.
     """
-    issued = str(record["issued_at"] or record["created_at"] or "غير معروف").strip()
-    lines = [
-        "SCHOOLPASS|1",
-        f"رقم الرخصة: {record['record_no']}",
-        f"النوع: {kind_label(record['kind'])}",
-        f"وقت الإصدار: {issued}",
-    ]
+    issued_raw = str(record["issued_at"] or record["created_at"] or "").strip()
+    try:
+        issued_dt = datetime.strptime(issued_raw, "%Y-%m-%d %H:%M:%S")
+        issued = issued_dt.strftime("%Y-%m-%dT%H:%M:%S")
+    except ValueError:
+        try:
+            issued_dt = datetime.fromisoformat(issued_raw)
+            issued = issued_dt.strftime("%Y-%m-%dT%H:%M:%S")
+        except ValueError:
+            issued = "UNKNOWN"
+
+    kind_codes = {
+        "late": "LATE",
+        "absence_return": "ABSENCE-RETURN",
+        "special_entry": "SPECIAL",
+        "exit_permit": "EXIT",
+        "exit_return": "EXIT-RETURN",
+    }
     expires = record_expiry_at(record)
-    if expires is not None:
-        lines.append(f"تنتهي بعد ساعتين: {expires.strftime('%Y-%m-%d %H:%M:%S')}")
-        lines.append("قارن ساعة الهاتف بوقت الانتهاء؛ لا تعتمد على الرخصة بعده.")
-    else:
-        lines.append("رخصة خروج استثنائي: لا يوجد انتهاء زمني تلقائي.")
-        lines.append("تأكيد العودة أو الإلغاء يتطلب مراجعة سجل المؤسسة.")
-    lines.append("الرمز يعرض بيانات الإصدار الزمنية فقط ولا يعكس إلغاءً لاحقًا.")
-    return "\n".join(lines)
+    expiry_text = expires.strftime("%Y-%m-%dT%H:%M:%S") if expires else (
+        "OPEN" if record["kind"] == "exit_permit" else "UNKNOWN"
+    )
+    return "|".join((
+        "SP1",
+        str(record["record_no"]),
+        kind_codes.get(record["kind"], "OTHER"),
+        issued,
+        expiry_text,
+    ))
 
 
 # ----------------------------------------------------------------------------- A6 PDF
@@ -3139,7 +3152,7 @@ def _draw_entry_page(c, row, details: dict, reprint: bool, font: str, school: st
                 preserveAspectRatio=True, mask="auto")
     c.setFillColorRGB(*dark_muted)
     c.setFont(font, 5.1)
-    c.drawCentredString(qr_x + qr_size / 2, qr_y - 2.0 * mm, _arabic_visual("QR للتوقيت فقط"))
+    c.drawCentredString(qr_x + qr_size / 2, qr_y - 2.0 * mm, _arabic_visual("رمز وقت الإصدار والانتهاء فقط"))
 
     signature_w, signature_h = 48.0 * mm, 32.0 * mm
     sx, sy = right - signature_w, 3.5 * mm
