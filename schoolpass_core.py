@@ -2260,7 +2260,7 @@ def _draw_page(c, row, details: dict, copy_type: str | None, reprint: bool, font
     # --- QR (random token URL only) — failure must stop printing, never print a permit without QR
     import qrcode
     qr = qrcode.QRCode(version=None, error_correction=qrcode.constants.ERROR_CORRECT_M, box_size=6, border=2)
-    qr.add_data(qr_url(row["qr_token"]))
+    qr.add_data(qr_payload(row))
     qr.make(fit=True)
     img = qr.make_image(fill_color="black", back_color="white").convert("RGB")
     buf = io.BytesIO()
@@ -2994,13 +2994,12 @@ def restore_database(source_path, user_id) -> Path:
     previous = DATA_DIR / "backups" / f"before_restore_{stamp}.sqlite3"
     # Never validate legacy schemas against the newest columns before migrating them.
     _copy_db(source, stage)
-    server_was_running, replaced = False, False
+    replaced = False
     try:
         _migrate_staged_database(stage)
         validate_database(stage)
         _copy_db(DB_PATH, previous)  # safety copy of current data
         validate_database(previous)
-        server_was_running = stop_local_server()
         for suffix in ("-wal", "-shm"):
             Path(str(DB_PATH) + suffix).unlink(missing_ok=True)
         os.replace(stage, DB_PATH)
@@ -3012,15 +3011,12 @@ def restore_database(source_path, user_id) -> Path:
     except Exception as exc:
         if replaced and previous.exists():
             try:
-                stop_local_server()
                 for suffix in ("-wal", "-shm"):
                     Path(str(DB_PATH) + suffix).unlink(missing_ok=True)
                 os.replace(previous, DB_PATH)
                 init_db()
             except Exception as rb:  # pragma: no cover
                 raise RuntimeError(f"{exc}\nوفشل التراجع التلقائي أيضًا: {rb}. احتفظ بالملف: {previous}") from exc
-        if server_was_running:
-            ensure_local_server()
         raise
     finally:
         try:
