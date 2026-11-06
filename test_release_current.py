@@ -42,6 +42,18 @@ class TestReleaseCurrent(unittest.TestCase):
         with self.assertRaises(ValueError):
             SchoolPassApp._version_parts('latest-release')
 
+    def test_update_checker_ignores_archived_other_major_releases(self):
+        from app import SchoolPassApp
+        releases = [
+            {"tag_name": "v4.9.4-local-fast-ui", "draft": False, "prerelease": False},
+            {"tag_name": "v3.0.0", "draft": False, "prerelease": False},
+            {"tag_name": "v3.1.0-beta", "draft": False, "prerelease": True},
+            {"tag_name": "v2.5.3", "draft": False, "prerelease": False},
+        ]
+        chosen = SchoolPassApp._select_release_for_current_major(releases, "3.0.0")
+        self.assertEqual(chosen["tag_name"], "v3.0.0")
+        self.assertIsNone(SchoolPassApp._select_release_for_current_major(releases, "3.1.0"))
+
     def test_dashboard_uses_unique_students_and_separate_permit_counts(self):
         core.create_late_slip(self.s1, self.supervisor, 'تأخر أول')
         core.create_late_slip(self.s1, self.supervisor, 'تأخر ثان')
