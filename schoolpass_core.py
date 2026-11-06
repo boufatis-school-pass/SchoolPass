@@ -1771,23 +1771,23 @@ def qr_payload(row) -> str:
     expires = issued + timedelta(hours=QR_VALIDITY_HOURS)
     status = str(row["status"] or "active")
     if status == "cancelled":
-        state = "ملغاة داخل البرنامج عند طباعة هذه النسخة"
+        state = "ملغاة داخل البرنامج عند الطباعة"
     elif status == "returned":
-        state = "تم تسجيل عودة التلميذ داخل البرنامج عند طباعة هذه النسخة"
+        state = "العودة مسجلة داخل البرنامج عند الطباعة"
     else:
-        state = "تُعد صالحة حتى وقت الانتهاء أدناه؛ تحقق من ساعة الهاتف"
+        state = "سارية عند الإصدار"
     lines = [
-        "SchoolPass — بيانات رخصة",
-        f"رقم الرخصة: {row['record_no']}",
+        "SchoolPass",
+        f"رقم: {row['record_no']}",
         f"النوع: {kind_label(row['kind'])}",
         f"التلميذ: {row['student_name']}",
         f"القسم: {row['class_name']}",
-        f"وقت الإصدار: {issued.isoformat(timespec='seconds')}",
-        f"وقت الانتهاء: {expires.isoformat(timespec='seconds')}",
-        f"مدة الصلاحية: ساعتان من الإصدار",
-        f"الحالة عند إنشاء الرمز: {state}",
-        "طريقة التحقق: قبل وقت الإصدار = غير صالحة؛ بين الإصدار والانتهاء = صالحة؛ بعد الانتهاء = منتهية.",
-        "هذا الرمز نص ثابت بلا اتصال أو تحديث مباشر؛ لا يكشف إلغاءً لاحقًا.",
+        f"إصدار: {issued.isoformat(timespec='seconds')}",
+        f"انتهاء: {expires.isoformat(timespec='seconds')}",
+        "مدة الصلاحية: ساعتان",
+        f"الحالة عند الطباعة: {state}",
+        "تحقق بالهاتف: قبل الإصدار غير صالحة؛ بين الإصدار والانتهاء صالحة؛ بعد الانتهاء منتهية.",
+        "رمز ثابت بلا اتصال؛ لا يكشف إلغاءً لاحقًا.",
     ]
     return "\n".join(lines)
 
@@ -2093,7 +2093,7 @@ def _draw_entry_page(c, row, details: dict, reprint: bool, font: str, school: st
             c.drawRightString(left_cell_right - 18.0 * mm, baseline, _arabic_visual(value_b))
 
     # QR and signature/stamp area intentionally matches the approved exit slip.
-    qr_x, qr_y, qr_size = margin + 1.0 * mm, 8.0 * mm, 23.0 * mm
+    qr_x, qr_y, qr_size = margin + 1.0 * mm, 8.0 * mm, 25.5 * mm
     import qrcode
     qr = qrcode.QRCode(version=None, error_correction=qrcode.constants.ERROR_CORRECT_M, box_size=6, border=2)
     qr.add_data(qr_payload(row))
@@ -2215,7 +2215,7 @@ def _draw_page(c, row, details: dict, copy_type: str | None, reprint: bool, font
         items.append((f"النسخة: {copy_type}", 6.6, 3.8, False))
 
     # --- bottom zones
-    qr_x, qr_y, qr_size = margin, 8 * MM, 24 * MM
+    qr_x, qr_y, qr_size = margin, 8 * MM, 26.5 * MM
     box_bottom = 36 * MM  # warning box (permits) sits above QR/stamp
     warn_lines: list[str] = []
     warn_gap = 3.15 * MM
