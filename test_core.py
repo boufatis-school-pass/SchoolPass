@@ -123,7 +123,7 @@ class TestSecurityAndPermissions(Base):
                  lambda: core.set_user_active_as(sup, self.admin, False), lambda: core.import_students(str(self.csv), sup),
                  lambda: core.set_school_name_as(sup, "اسم"), lambda: core.backup_database(self.tmp / "b.sqlite3", sup),
                  lambda: core.restore_database(self.tmp / "b.sqlite3", sup), lambda: core.export_students_csv(str(self.tmp / "s.csv"), sup),
-                 lambda: core.issue_recovery_code_as(sup), lambda: core.set_qr_host_as(sup, "192.168.1.5"),
+                 lambda: core.issue_recovery_code_as(sup),
                  lambda: core.set_theme_as(sup, "#112233", "#FFFFFF"), lambda: core.set_print_mode_as(sup, "open"),
                  lambda: core.reveal_national_id(1, sup)]
         for i, fn in enumerate(calls):
@@ -161,15 +161,14 @@ class TestSecurityAndPermissions(Base):
         self.assertIn("#143B63", row["description"])
 
     def test_preferences_save_atomically_and_only_admin_can_change_them(self):
-        original = (core.setting("school_name"), core.qr_host(), core.get_theme_colors())
+        original = (core.setting("school_name"), core.get_theme_colors())
         with self.assertRaises(ValueError):
-            core.save_preferences_as(self.admin, "اسم جديد", "bad host", "#123456", "#ABCDEF")
-        self.assertEqual((core.setting("school_name"), core.qr_host(), core.get_theme_colors()), original)
+            core.save_preferences_as(self.admin, "", "", "#123456", "#ABCDEF")
+        self.assertEqual((core.setting("school_name"), core.get_theme_colors()), original)
         with self.assertRaises(core.PermissionDenied):
-            core.save_preferences_as(self.sup, "اسم جديد", "192.168.1.10", "#123456", "#ABCDEF")
-        core.save_preferences_as(self.admin, "ثانوية اختبار", "school-pc.local", "#123456", "#ABCDEF")
+            core.save_preferences_as(self.sup, "اسم جديد", "", "#123456", "#ABCDEF")
+        core.save_preferences_as(self.admin, "ثانوية اختبار", "", "#123456", "#ABCDEF")
         self.assertEqual(core.setting("school_name"), "ثانوية اختبار")
-        self.assertEqual(core.qr_host(), "school-pc.local")
         self.assertEqual(core.get_theme_colors(), ("#123456", "#ABCDEF"))
         self.assertEqual(core.setting("print_mode"), "open")
 
