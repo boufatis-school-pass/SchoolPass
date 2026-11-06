@@ -134,8 +134,15 @@ def _text_on(hex_color: str) -> str:
 
 
 def _rounded_photo_image(root, fill: str, border: str, fallback: str):
-    """Create a scalable 9-slice rounded rectangle image for ttk surfaces."""
+    """Create or reuse a cached scalable 9-slice image for crisp rounded ttk surfaces."""
     size, radius, border_width = 36, 14, 2
+    cache = getattr(root, '_schoolpass_rounded_image_cache', None)
+    if cache is None:
+        cache = {}
+        root._schoolpass_rounded_image_cache = cache
+    cache_key = (fill, border, fallback, size, radius, border_width)
+    if cache_key in cache:
+        return cache[cache_key]
     try:
         image = tk.PhotoImage(master=root, width=size, height=size)
     except Exception:
@@ -160,6 +167,7 @@ def _rounded_photo_image(root, fill: str, border: str, fallback: str):
                 radius - border_width,
             )
             image.put(fill if is_inner else border, (x, y))
+    cache[cache_key] = image
     return image
 
 
