@@ -20,7 +20,6 @@ core.PBKDF2_ITERATIONS = 2000
 
 class TestSchoolPass253(unittest.TestCase):
     def setUp(self):
-        core.stop_local_server()
         for suffix in ("", "-wal", "-shm"):
             Path(str(core.DB_PATH) + suffix).unlink(missing_ok=True)
         core.init_db()
