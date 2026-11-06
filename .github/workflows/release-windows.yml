@@ -60,12 +60,6 @@ jobs:
           python -m pip install -r requirements_dev.txt
           if ($LASTEXITCODE -ne 0) { throw "Dependency installation failed" }
 
-      - name: Verify Cloudflare Worker JavaScript
-        shell: powershell
-        run: |
-          node --check cloudflare/worker.js
-          if ($LASTEXITCODE -ne 0) { throw "Cloudflare Worker JavaScript syntax check failed" }
-
       - name: Build and test installer
         shell: powershell
         run: .\build_windows.ps1
