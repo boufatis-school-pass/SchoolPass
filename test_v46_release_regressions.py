@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Focused regressions for the 4.6 receipt safeguards and 4.9.3 release metadata."""
+"""Focused regressions for the 4.6 receipt safeguards and 4.9.4 release metadata."""
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -43,11 +43,11 @@ def test_keyboard_help_lists_only_bound_shortcuts_and_has_f1_entry_point():
 
 def test_database_schema_and_version_metadata_are_consistent():
     core_source = (ROOT / "schoolpass_core.py").read_text(encoding="utf-8")
-    assert 'APP_VERSION = "4.9.3"' in core_source
+    assert 'APP_VERSION = "4.9.4"' in core_source
     assert 'SCHEMA_VERSION = "9"' in core_source
-    assert (ROOT / "VERSION.txt").read_text(encoding="ascii").strip() == "4.9.3"
+    assert (ROOT / "VERSION.txt").read_text(encoding="ascii").strip() == "4.9.4"
     setup = (ROOT / "SchoolPass_Setup.iss").read_text(encoding="utf-8-sig")
-    assert '#define MyAppVersion "4.9.3"' in setup
+    assert '#define MyAppVersion "4.9.4"' in setup
 
 
 def _ascii_for_pdf_tests(value):
@@ -71,7 +71,6 @@ def _fresh_database():
     core.init_db()
     admin, _ = core.bootstrap_admin("director", "المدير", "TestPassword123!")
     supervisor = core.create_user_as(admin, "supervisor46", "مشرف الاختبار", "TestPassword123!")
-    core.set_setting("qr_host", "127.0.0.1")
     student = {"student_key": "S-460", "last_name": "تجريبي", "first_name": "أحمد", "class_name": "أولى علوم 1"}
     return admin, supervisor, student
 
