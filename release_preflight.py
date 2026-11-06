@@ -80,6 +80,8 @@ def main() -> int:
     core_source = (ROOT / "schoolpass_core.py").read_text(encoding="utf-8")
     if "def qr_payload(record)" not in core_source or "qr.add_data(qr_payload(row))" not in core_source:
         errors.append("Offline QR must carry the permit issue timestamp and calculated expiry")
+    if not (ROOT / "test_offline_qr_4_9_4.py").is_file():
+        errors.append("Offline QR timestamp and expiry regression tests are missing")
     if any(marker in core_source for marker in ("ThreadingHTTPServer", "def ensure_local_server(", "def verification_page(")):
         errors.append("Offline QR release must not start a local HTTP verification server")
     if "--icon" not in (ROOT / "build_windows.ps1").read_text(encoding="utf-8"):
