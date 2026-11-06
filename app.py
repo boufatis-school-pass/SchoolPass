@@ -315,18 +315,30 @@ def _install_rtl_widget_adapters():
         original = getattr(ttk, class_name)
 
         class ArabicTextWidget(original):
-            def __init__(self, master=None, **kwargs):
-                if isinstance(kwargs.get('text'), str):
-                    kwargs['text'] = rtl_display(kwargs['text'])
+            def __init__(self, master=None, _is_label=(class_name == 'Label'), **kwargs):
+                text = kwargs.get('text')
+                if isinstance(text, str):
+                    kwargs['text'] = rtl_display(text)
+                    if _is_label and any(0x0600 <= ord(ch) <= 0x06FF for ch in text):
+                        kwargs.setdefault('anchor', E)
+                        kwargs.setdefault('justify', 'right')
                 super().__init__(master, **kwargs)
 
-            def configure(self, cnf=None, **kwargs):
+            def configure(self, cnf=None, _is_label=(class_name == 'Label'), **kwargs):
                 if isinstance(cnf, dict):
                     cnf = dict(cnf)
-                    if isinstance(cnf.get('text'), str):
-                        cnf['text'] = rtl_display(cnf['text'])
-                if isinstance(kwargs.get('text'), str):
-                    kwargs['text'] = rtl_display(kwargs['text'])
+                    text = cnf.get('text')
+                    if isinstance(text, str):
+                        cnf['text'] = rtl_display(text)
+                        if _is_label and any(0x0600 <= ord(ch) <= 0x06FF for ch in text):
+                            cnf.setdefault('anchor', E)
+                            cnf.setdefault('justify', 'right')
+                text = kwargs.get('text')
+                if isinstance(text, str):
+                    kwargs['text'] = rtl_display(text)
+                    if _is_label and any(0x0600 <= ord(ch) <= 0x06FF for ch in text):
+                        kwargs.setdefault('anchor', E)
+                        kwargs.setdefault('justify', 'right')
                 return super().configure(cnf, **kwargs)
 
             config = configure
@@ -2698,7 +2710,13 @@ class SchoolPassApp:
                 chart.create_rectangle(x-88,3,x-80,11,fill=color,outline=''); chart.create_text(x-92,7,text=label,anchor='e',font=('Segoe UI',8),fill='#52665E'); x-=110
         combo.bind('<<ComboboxSelected>>',draw_chart)
         frame=ttk.Frame(win);frame.pack(fill=BOTH,expand=True,padx=18,pady=8)
-        text_widget=__import__('tkinter').Text(frame,wrap='word',font=('Segoe UI',10),height=18)
+        text_widget=__import__('tkinter').Text(
+            frame, wrap='word', font=('Segoe UI',10), height=14,
+            background=('#293B34' if core.setting('theme','light') == 'dark' else '#F8FBF9'),
+            foreground=('#E8F0EB' if core.setting('theme','light') == 'dark' else '#24352E'),
+            insertbackground=('#E8F0EB' if core.setting('theme','light') == 'dark' else '#24352E'),
+            relief='flat', bd=0, padx=12, pady=10, spacing1=2, spacing3=4)
+        text_widget.tag_configure('rtl', justify='right', lmargin1=8, lmargin2=8, rmargin=8)
         sb=ttk.Scrollbar(frame,command=text_widget.yview);text_widget.configure(yscrollcommand=sb.set)
         text_widget.pack(side=LEFT,fill=BOTH,expand=True);sb.pack(side=RIGHT,fill=Y)
         def refresh_text():
