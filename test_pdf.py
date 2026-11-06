@@ -44,8 +44,6 @@ class TestPdf(unittest.TestCase):
                 self.skipTest(f"optional test dependency missing: {m}")
 
     def setUp(self):
-        # QR tests may have started the local HTTP server in a prior test.
-        # Stop it fully before resetting the synthetic database.
         for suffix in ("", "-wal", "-shm"):
             Path(str(core.DB_PATH) + suffix).unlink(missing_ok=True)
         core.init_db()
@@ -213,7 +211,7 @@ class TestPdf(unittest.TestCase):
                     gaps = [b - a for a, b in zip(tops, tops[1:]) if b - a > 0.5]
                     self.assertTrue(all(g >= 2.0 for g in gaps), gaps)
 
-    def test_qr_decodes_to_random_token_url_without_personal_data(self):
+    def test_qr_decodes_to_offline_issue_time_payload_without_personal_data(self):
         self.req('cv2', 'numpy')
         pdftoppm = shutil.which('pdftoppm')
         if not pdftoppm:
@@ -229,15 +227,18 @@ class TestPdf(unittest.TestCase):
                        check=True, capture_output=True, text=True)
         pngs = sorted(TEST_ROOT.glob(f"qr-render-{p['id']}-*.png"))
         self.assertEqual(len(pngs), 2)
-        urls = []
+        payloads = []
         for png in pngs:
             img = cv2.imread(str(png)); h, w = img.shape[:2]
             crop = img[int(h * 0.70):, : int(w * 0.50)]                     # bottom-left corner = QR zone
             data, _, _ = cv2.QRCodeDetector().detectAndDecode(crop)
-            urls.append(data)
-        self.assertEqual(urls[0], urls[1], "both copies carry the same QR")
-        self.assertEqual(urls[0], f"http://192.168.50.7:{core.SERVER_PORT}/v/{p['qr_token']}")
-        self.assertNotIn(NID, urls[0]); self.assertNotIn("P-1", urls[0])
+            payloads.append(data)
+        self.assertEqual(payloads[0], payloads[1], "both copies carry the same QR")
+        self.assertEqual(payloads[0], core.qr_payload(p))
+        self.assertIn(p["issued_at"], payloads[0])
+        self.assertIn("تنتهي بعد ساعتين", payloads[0])
+        self.assertNotIn(NID, payloads[0]); self.assertNotIn("P-1", payloads[0])
+        self.assertNotIn("http://", payloads[0]); self.assertNotIn("https://", payloads[0])
 
     def test_cancelled_and_reprint_are_marked(self):
         self.req('pdfplumber')
