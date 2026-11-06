@@ -5104,7 +5104,7 @@ class SchoolPassApp:
         ttk.Button(backup_row, text='اختيار مجلد', command=pick_backup_dir).pack(side=RIGHT)
         def save():
             try:
-                core.save_preferences_as(self.current_user['id'], name.get(), core.setting('qr_host', ''), primary.get(), secondary.get(), late_threshold.get(), backup_path.get(), rtl_enabled.get())
+                core.save_preferences_as(self.current_user['id'], name.get(), '', primary.get(), secondary.get(), late_threshold.get(), backup_path.get(), rtl_enabled.get())
             except USER_ERRORS as exc:
                 show_error(win, 'تعذر الحفظ', exc)
                 return
