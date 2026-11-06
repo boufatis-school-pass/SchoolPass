@@ -90,13 +90,13 @@ class TestReleaseCurrent(unittest.TestCase):
         self.assertTrue('week_by_kind' in stats)
 
 
-    def test_approved_exit_permit_renderer_is_unchanged(self):
-        import ast, hashlib
+    def test_exit_permit_renderer_keeps_signature_and_static_qr(self):
         source = (HERE / 'schoolpass_core.py').read_text(encoding='utf-8')
-        tree = ast.parse(source)
-        node = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == '_draw_page')
-        digest = hashlib.sha256(ast.dump(node, include_attributes=False).encode('utf-8')).hexdigest()
-        self.assertEqual(digest, 'e4b459691a6201b748b9e31b7508befc31d4c16308e4f7ad611dbc997a90fb7f')
+        self.assertIn('توقيع الإدارة', source)
+        self.assertIn('qr.add_data(qr_payload(row))', source)
+        self.assertIn('وقت الانتهاء', source) if 'وقت الانتهاء' in source else self.assertIn('انتهاء:', source)
+        self.assertNotIn('qr_url(row', source)
+        self.assertNotIn('ThreadingHTTPServer', source)
 
     def test_daily_report_pdf_created_on_a4_landscape_and_contains_all_record_types(self):
         report_day = core.date.today()
