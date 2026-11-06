@@ -192,7 +192,6 @@ def load_app():
 
 
 def tearDownModule():
-    core.stop_local_server()
     pass
 
 
@@ -209,7 +208,6 @@ class TestGuiSmoke(unittest.TestCase):
             else: sys.modules[k] = v
 
     def setUp(self):
-        core.stop_local_server()
         for s in ("", "-wal", "-shm"): Path(str(core.DB_PATH) + s).unlink(missing_ok=True)
         core.init_db()
         self.admin, _ = core.bootstrap_admin("director", "المدير", "TestPassword123!")
@@ -223,8 +221,7 @@ class TestGuiSmoke(unittest.TestCase):
 
     def make_app(self, uid):
         user = core.get_user(uid)
-        with mock.patch.object(self.app.core, "ensure_local_server", return_value=(True, "192.168.1.10")):
-            return self.app.SchoolPassApp(self.app._tk.Tk(), user)
+        return self.app.SchoolPassApp(self.app._tk.Tk(), user)
 
     def press_all(self, label):
         """Invoke every button command created so far; none may raise."""
@@ -240,7 +237,7 @@ class TestGuiSmoke(unittest.TestCase):
             a = self.make_app(uid)
             with mock.patch.object(self.app, "ask_text", return_value="سبب تجريبي"), mock.patch.object(self.app, "ask_password", return_value="NewPassword456!"):
                 self.press_all(f"main uid={uid}")
-            a.refresh_records(); a.poll_qr_events(); a.check_inactivity()
+            a.refresh_records(); a.check_inactivity()
 
     def test_custom_arabic_dialog_preserves_messagebox_default_results(self):
         owner = self.app._tk.Tk()
@@ -634,17 +631,16 @@ class TestGuiSmoke(unittest.TestCase):
         self.assertEqual(app.maximize_button.kw.get('text'), self.app.rtl_display('□ استعادة / تكبير'))
         self.assertEqual(app.update_button.kw.get('text'), self.app.rtl_display('بحث عن تحديثات'))
 
-    def test_qr_phone_scan_is_logged_anonymously_without_opening_windows(self):
-        a = self.make_app(self.sup)
+    def test_offline_qr_payload_contains_issue_and_expiry_without_network(self):
         rec = core.create_late_slip(self.s1, self.sup, 'اختبار QR')
-        with mock.patch.object(a, 'show_record') as show:
-            core.EVENT_QUEUE.put(rec['qr_token'])
-            a.poll_qr_events()
-            show.assert_not_called()
-        self.assertIn(rec['record_no'], a.status_text.get())
-        with core.db_connect() as c:
-            event = c.execute("SELECT user_id FROM audit_logs WHERE action='تحقق بواسطة QR (الشبكة المحلية)' ORDER BY id DESC LIMIT 1").fetchone()
-        self.assertIsNone(event['user_id'])
+        payload = core.qr_payload(rec)
+        self.assertIn("SCHOOLPASS|1", payload)
+        self.assertIn(rec['record_no'], payload)
+        self.assertIn(rec['issued_at'], payload)
+        self.assertIn("تنتهي بعد ساعتين", payload)
+        self.assertNotIn("http://", payload)
+        self.assertNotIn("https://", payload)
+        self.assertIn("لا يعكس إلغاءً لاحقًا", payload)
 
     def test_session_helpers(self):
         self.assertTrue(self.app._single_instance())
