@@ -51,8 +51,17 @@ def main() -> int:
     workflow = (ROOT / ".github/workflows/release-windows.yml").read_text(encoding="utf-8") if (ROOT / ".github/workflows/release-windows.yml").exists() else ""
     if "dist/SchoolPass_Setup.exe" not in workflow:
         errors.append("GitHub release workflow does not publish SchoolPass_Setup.exe")
-    if "schoolpass_setup.exe" not in (ROOT / "app.py").read_text(encoding="utf-8").lower():
+    app_source = (ROOT / "app.py").read_text(encoding="utf-8")
+    if "schoolpass_setup.exe" not in app_source.lower():
         errors.append("In-app update checker does not verify the setup asset")
+    if "qr_payload" not in core or "qr.add_data(qr_payload(row))" not in core:
+        errors.append("Printed permits do not embed the static offline QR payload")
+    forbidden = ("ThreadingHTTPServer", "ensure_local_server", "stop_local_server", "qr_health_check", "qr_host_mismatch", "SERVER_PORT")
+    for token in forbidden:
+        if token in core or token in app_source:
+            errors.append(f"QR/network background service reference remains: {token}")
+    if (ROOT / "فتح_المنفذ_لرموز_QR_(كمدير).bat").exists():
+        errors.append("Obsolete QR firewall script must be removed")
     if "--icon" not in (ROOT / "build_windows.ps1").read_text(encoding="utf-8"):
         errors.append("Windows build does not embed app.ico in SchoolPass.exe")
     if "--add-data" not in (ROOT / "build_windows.ps1").read_text(encoding="utf-8"):
