@@ -70,7 +70,10 @@ jobs:
         shell: powershell
         run: |
           $tag = "${{ github.ref_name }}"
-          if ($tag.StartsWith('release/')) { $tag = $tag.Substring(8) }
+          if ($tag.StartsWith('release/')) {
+            $version = (Get-Content -LiteralPath (Join-Path $PWD 'VERSION.txt') -Raw).Trim()
+            $tag = "v$version"
+          }
           if (-not $tag.StartsWith('v')) { $tag = "v$tag" }
           "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
