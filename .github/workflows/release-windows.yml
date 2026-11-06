@@ -1,15 +1,11 @@
-name: Build and publish SchoolPass Windows installer
+name: Build and test SchoolPass Windows installer
 
 on:
   push:
     branches:
-      - 'fix/**'
-      - 'release/**'
+      - 'recovery/**'
     tags:
       - 'v*'
-  pull_request:
-    branches:
-      - main
 
 permissions:
   contents: write
@@ -17,35 +13,15 @@ permissions:
 jobs:
   build-windows:
     runs-on: windows-latest
-    env:
-      SCHOOLPASS_REQUIRE_QR_DECODE: '1'
-
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
 
-      - name: Install Poppler PDF utilities
-        shell: powershell
-        run: |
-          choco install poppler --yes --no-progress
-          if ($LASTEXITCODE -ne 0) { throw "Poppler installation failed" }
-          $pdftoppm = Get-Command pdftoppm -ErrorAction Stop
-          Write-Host "Poppler pdftoppm: $($pdftoppm.Source)"
-          & $pdftoppm.Source -v
-          if ($LASTEXITCODE -ne 0) { throw "pdftoppm verification failed" }
-
-      - name: Set up Python 3.14 x64
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.14'
+          python-version: '3.13'
           architecture: 'x64'
-
-      - name: Verify Python version
-        shell: powershell
-        run: |
-          python --version
-          python -c "import sys; assert sys.version_info[:2] == (3, 14), f'Expected Python 3.14, got {sys.version}'"
-          if ($LASTEXITCODE -ne 0) { throw "Python 3.14 verification failed" }
 
       - name: Install Inno Setup
         shell: powershell
@@ -56,47 +32,18 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           if ($LASTEXITCODE -ne 0) { throw "pip upgrade failed" }
-
           python -m pip install -r requirements_dev.txt
           if ($LASTEXITCODE -ne 0) { throw "Dependency installation failed" }
 
-      - name: Verify Cloudflare Worker JavaScript
-        shell: powershell
-        run: |
-          node --check cloudflare/worker.js
-          if ($LASTEXITCODE -ne 0) { throw "Cloudflare Worker JavaScript syntax check failed" }
-
       - name: Build and test installer
         shell: powershell
-        run: .\build_windows.ps1
-
-      - name: Resolve release tag
-        if: startsWith(github.ref, 'refs/tags/') || startsWith(github.ref, 'refs/heads/release/')
-        id: release_tag
-        shell: powershell
-        run: |
-          $tag = "${{ github.ref_name }}"
-          if ($tag.StartsWith('release/')) { $tag = $tag.Substring(8) }
-          if (-not $tag.StartsWith('v')) { $tag = "v$tag" }
-          "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-
-      - name: Move release tag to verified release commit
-        if: startsWith(github.ref, 'refs/heads/release/')
-        shell: powershell
-        run: |
-          $tag = "${{ steps.release_tag.outputs.tag }}"
-          git tag -f $tag $env:GITHUB_SHA
-          if ($LASTEXITCODE -ne 0) { throw "Could not point release tag at the verified commit" }
-          git push --force origin "refs/tags/$tag"
-          if ($LASTEXITCODE -ne 0) { throw "Could not update remote release tag" }
+        run: .\\build_windows.ps1
 
       - name: Publish release installer
-        if: startsWith(github.ref, 'refs/tags/') || startsWith(github.ref, 'refs/heads/release/')
+        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.release_tag.outputs.tag }}
-          target_commitish: ${{ github.sha }}
-          name: SchoolPass ${{ steps.release_tag.outputs.tag }}
+          name: SchoolPass ${{ github.ref_name }}
           generate_release_notes: true
           files: |
             dist/SchoolPass_Setup.exe
