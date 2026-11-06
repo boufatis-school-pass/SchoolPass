@@ -143,5 +143,16 @@ class TestSchoolPass253(unittest.TestCase):
         self.assertGreater(result.stat().st_size, 500)
 
 
+    def test_rollback_preserves_newer_database_schema_and_tables(self):
+        with core.db_connect() as conn:
+            conn.execute("CREATE TABLE IF NOT EXISTS teachers (id INTEGER PRIMARY KEY, name TEXT)")
+            conn.execute("UPDATE settings SET setting_value='9' WHERE setting_key='schema_version'")
+        core.init_db()
+        self.assertEqual(core.setting("schema_version"), "9")
+        with core.db_connect() as conn:
+            self.assertIsNotNone(conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='teachers'").fetchone())
+
+
 if __name__ == "__main__":
     unittest.main()
