@@ -2913,6 +2913,8 @@ def _log_exception(exc_type, exc, tb):
 def _single_instance() -> bool:
     """Prevent duplicate app windows with an OS file lock, not a listening network socket."""
     global _INSTANCE_LOCK
+    if _INSTANCE_LOCK is not None:
+        return False
     lock_path = DATA_DIR / "schoolpass.instance.lock"
     handle = open(lock_path, "a+b")
     try:
