@@ -3794,13 +3794,19 @@ class SchoolPassApp:
         existing_ids = set(self.tree.get_children())
         for stale_id in existing_ids - wanted_ids:
             self.tree.delete(stale_id)
-        for index, (iid, values, tags) in enumerate(wanted):
+        for iid, values, tags in wanted:
             if iid in existing_ids:
                 current = self.tree.item(iid, 'values')
                 if tuple(current) != tuple(values):
                     self.tree.item(iid, values=values, tags=tags)
             else:
                 self.tree.insert('', END, iid=iid, values=values, tags=tags)
+        # One Tcl operation restores the canonical newest-first order after
+        # clearing a filter, instead of issuing one expensive move per row.
+        try:
+            self.tree.set_children('', *(iid for iid, _values, _tags in wanted))
+        except Exception:
+            pass
 
     def refresh_records(self):
         with db_connect() as conn:
