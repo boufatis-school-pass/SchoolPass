@@ -34,14 +34,12 @@ fake_reveal = lambda v: v.split(":", 1)[1][::-1]
 
 
 def tearDownModule():
-    core.stop_local_server()
     pass
 
 
 def fresh_db():
     # Each test owns a fresh data directory; never unlink a database that may
     # still be held by SQLite or a background server thread.
-    core.stop_local_server()
     core.init_db()
     admin_id, code = core.bootstrap_admin("director", "المدير", PW)
     sup_id = core.create_user_as(admin_id, "sup1", "مشرف أول", PW)
@@ -58,7 +56,6 @@ def write_csv(path: Path, rows, header=("رقم التعريف", "اللقب", "
 
 class Base(unittest.TestCase):
     def setUp(self):
-        core.stop_local_server()
         self.tmp = Path(tempfile.mkdtemp(dir=TEST_ROOT))
         self.data_dir = self.tmp / "data"
         self.data_dir.mkdir(parents=True, exist_ok=True)
@@ -113,7 +110,6 @@ class TestSecurityAndPermissions(Base):
             core.create_user_as(self.admin, "samename1", "x", "samename1")
 
     def test_no_default_accounts_or_passwords(self):
-        core.stop_local_server()
         for suffix in ("", "-wal", "-shm"):
             Path(str(core.DB_PATH) + suffix).unlink(missing_ok=True)
         core.init_db()
@@ -256,7 +252,6 @@ class TestDatabaseIntegrity(Base):
             c.execute("SELECT 1")
 
     def test_upgrade_from_0_2_0_database_keeps_data_and_adds_protection(self):
-        core.stop_local_server()
         for suffix in ("", "-wal", "-shm"):
             Path(str(core.DB_PATH) + suffix).unlink(missing_ok=True)
         old_schema = Path(__file__).resolve().parent / "tests_data" / "legacy_schema_fixture.sql"
