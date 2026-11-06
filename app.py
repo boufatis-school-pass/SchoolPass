@@ -3791,8 +3791,6 @@ class SchoolPassApp:
                 current = self.tree.item(iid, 'values')
                 if tuple(current) != tuple(values):
                     self.tree.item(iid, values=values, tags=tags)
-                if self.tree.index(iid) != index:
-                    self.tree.move(iid, '', index)
             else:
                 self.tree.insert('', END, iid=iid, values=values, tags=tags)
 
