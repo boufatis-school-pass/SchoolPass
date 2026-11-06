@@ -23,7 +23,7 @@ def test_treeview_returns_logical_arabic_values_for_search_and_updates():
         iid = tree.insert("", "end", values=("محمد بن علي", "رخصة الدخول"))
         assert tree.set(iid, "student") == "محمد بن علي"
         assert tree.item(iid, "values") == ("محمد بن علي", "رخصة الدخول")
-        assert tree.item(iid)["values"] == ("محمد بن علي", "رخصة الدخول")
+        assert tuple(tree.item(iid)["values"]) == ("محمد بن علي", "رخصة الدخول")
         tree.set(iid, "student", "أحمد")
         assert tree.set(iid, "student") == "أحمد"
         tree.item(iid, values=("سليم", "رخصة خروج"))
