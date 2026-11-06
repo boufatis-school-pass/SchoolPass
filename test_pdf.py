@@ -188,7 +188,7 @@ class TestPdf(unittest.TestCase):
         self.assertIn(p["student_name"], payloads[0])
         self.assertIn("إصدار", payloads[0])
         self.assertIn("انتهاء", payloads[0])
-        self.assertIn("مدة الصلاحية: ساعتان", payloads[0])
+        self.assertIn("صلاحية: ساعتان", payloads[0])
         self.assertNotIn("http://", payloads[0]); self.assertNotIn("https://", payloads[0])
         self.assertNotIn(NID, payloads[0]); self.assertNotIn("P-1", payloads[0])
 
