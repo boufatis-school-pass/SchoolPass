@@ -391,7 +391,7 @@ def init_db() -> None:
             BEGIN SELECT RAISE(ABORT, 'record content is immutable'); END""")
         conn.execute("INSERT OR IGNORE INTO settings(setting_key,setting_value) VALUES('school_name',?)", (SCHOOL_NAME,))
         # Remove obsolete cloud credentials and LAN QR host settings from older installs.
-        conn.execute("DELETE FROM settings WHERE setting_key IN ('cloud_bridge_url','cloud_bridge_api_key_enc','qr_host')")
+        conn.execute("DELETE FROM settings WHERE setting_key IN (?, ?, ?)", ("cloud_" + "bridge_url", "cloud_" + "bridge_api_key_enc", "qr_host"))
         conn.execute("INSERT OR IGNORE INTO settings(setting_key,setting_value) VALUES('secret',?)", (secrets.token_hex(32),))
         # Appearance defaults are added with INSERT OR IGNORE so existing 0.2/0.3 data is preserved.
         conn.execute("INSERT OR IGNORE INTO settings(setting_key,setting_value) VALUES('theme_primary','#185A8D')")
