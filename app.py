@@ -224,13 +224,15 @@ def make_style(root: Tk, primary: str | None = None, secondary: str | None = Non
     style.configure('Gold.TButton', background=gold, foreground='#27372F', borderwidth=0,
                     padding=(10, 7), font=('Segoe UI', 9, 'bold'))
     style.map('Gold.TButton', background=[('active', '#CDA849'), ('pressed', '#B99036')])
-    style.configure('Treeview', font=('Segoe UI', 10), rowheight=32, background=surface,
+    style.configure('Treeview', font=('Segoe UI', 10), rowheight=35, background=surface,
                     fieldbackground=surface, foreground=ink, borderwidth=0, relief='flat')
     style.configure('Treeview.Heading', font=('Segoe UI', 9, 'bold'), background=palette['heading'],
                     foreground=ink, padding=(8, 8), relief='flat')
     style.map('Treeview', background=[('selected', palette['selected'])], foreground=[('selected', ink)])
-    style.configure('TEntry', padding=6, fieldbackground=palette['field'], foreground=ink)
-    style.configure('TCombobox', padding=6, fieldbackground=palette['field'], foreground=ink)
+    style.configure('TEntry', padding=(9, 7), fieldbackground=palette['field'], foreground=ink, borderwidth=1, relief='solid', lightcolor=border, darkcolor=border)
+    style.map('TEntry', fieldbackground=[('focus', palette['field'])], lightcolor=[('focus', green2)], darkcolor=[('focus', green2)])
+    style.configure('TCombobox', padding=(9, 7), fieldbackground=palette['field'], foreground=ink, borderwidth=1, relief='solid', lightcolor=border, darkcolor=border)
+    style.map('TCombobox', fieldbackground=[('readonly', palette['field']), ('focus', palette['field'])], lightcolor=[('focus', green2)], darkcolor=[('focus', green2)])
     style.configure('TNotebook', background=bg, borderwidth=0)
     style.configure('TNotebook.Tab', padding=(15, 10), font=('Segoe UI', 9, 'bold'))
     style.configure('Horizontal.TProgressbar', troughcolor=border, background=green2)
@@ -783,22 +785,40 @@ class StudentPicker:
         bar.pack(fill=X, padx=12, pady=10)
         ttk.Button(bar, text='اختيار', command=self.pick_selected, style='Accent.TButton').pack(side=RIGHT, padx=4)
         ttk.Button(bar, text='إغلاق', command=self.win.destroy).pack(side=RIGHT, padx=4)
-        self.query.trace_add('write', lambda *_: self.refresh())
+        self._refresh_after_id = None
+        self.query.trace_add('write', lambda *_: self._schedule_refresh())
         ent.bind('<Return>', lambda _e: self.pick_selected())
         self.refresh()
         ent.focus_set()
 
+    def _schedule_refresh(self):
+        """Debounce typing and avoid rebuilding unchanged student rows."""
+        if self._refresh_after_id is not None:
+            try:
+                self.win.after_cancel(self._refresh_after_id)
+            except Exception:
+                pass
+        self._refresh_after_id = self.win.after(260, self.refresh)
+
     def refresh(self):
-        for item in self.tree.get_children():
-            self.tree.delete(item)
+        self._refresh_after_id = None
         q = self.query.get().strip()
         with db_connect() as conn:
             rows = conn.execute(
                 "SELECT * FROM students WHERE active=1 AND (student_key LIKE ? OR last_name LIKE ? OR first_name LIKE ? "
                 "OR (last_name||' '||first_name) LIKE ? OR (first_name||' '||last_name) LIKE ? OR class_name LIKE ?) "
-                "ORDER BY last_name,first_name LIMIT 250", (f'%{q}%',) * 6).fetchall()
-        for s in rows:
-            self.tree.insert('', END, iid=str(s['id']), values=(s['student_key'], student_name(s), s['class_name']))
+                "ORDER BY last_name,first_name LIMIT 180", (f'%{q}%',) * 6).fetchall()
+        wanted = {str(s['id']) for s in rows}
+        for item in self.tree.get_children():
+            if item not in wanted:
+                self.tree.delete(item)
+        for student in rows:
+            iid = str(student['id'])
+            values = (student['student_key'], student_name(student), student['class_name'])
+            if self.tree.exists(iid):
+                self.tree.item(iid, values=values)
+            else:
+                self.tree.insert('', END, iid=iid, values=values)
 
     def pick_selected(self, _event=None):
         sel = self.tree.selection()
@@ -933,6 +953,16 @@ class RecordForm:
             ent.pack(side=RIGHT, fill=X, expand=True)
             return ent
 
+        def add_combo_row(parent, key, label, values):
+            row = ttk.Frame(parent)
+            row.pack(fill=X, pady=5)
+            ttk.Label(row, text=label, width=29, anchor=E).pack(side=RIGHT, padx=(4, 8))
+            v = StringVar()
+            self.vars[key] = v
+            combo = ttk.Combobox(row, textvariable=v, values=tuple(values), state='normal', justify='right')
+            combo.pack(side=RIGHT, fill=X, expand=True)
+            return combo
+
         def add_date_row(parent, key, label, value=''):
             row = ttk.Frame(parent)
             row.pack(fill=X, pady=5)
@@ -1015,8 +1045,18 @@ class RecordForm:
             self.special_combo.pack(side=RIGHT, fill=X, expand=True)
             self.expulsion_frame = ttk.Frame(form, relief='groove', borderwidth=1)
             ttk.Label(self.expulsion_frame, text='معلومات الطرد من الحصة', font=('Segoe UI', 9, 'bold')).pack(anchor=E, padx=6, pady=4)
-            add_row(self.expulsion_frame, 'teacher_name', 'اسم الأستاذ الذي طرد التلميذ')
-            add_row(self.expulsion_frame, 'subject', 'المادة الدراسية')
+            teacher_rows = core.get_teachers()
+            teacher_names = sorted({r['teacher_name'] for r in teacher_rows}, key=str.casefold)
+            subjects = sorted({r['subject'] for r in teacher_rows}, key=str.casefold)
+            teacher_subjects = {}
+            for teacher in teacher_names:
+                matches = {r['subject'] for r in teacher_rows if r['teacher_name'] == teacher}
+                if len(matches) == 1:
+                    teacher_subjects[teacher] = next(iter(matches))
+            teacher_combo = add_combo_row(self.expulsion_frame, 'teacher_name', 'اسم الأستاذ الذي طرد التلميذ', teacher_names)
+            add_combo_row(self.expulsion_frame, 'subject', 'المادة الدراسية', subjects)
+            teacher_combo.bind('<<ComboboxSelected>>', lambda _e: self.vars['subject'].set(
+                teacher_subjects.get(self.vars['teacher_name'].get(), self.vars['subject'].get())))
             self.special_note = add_row(form, 'special_note', 'ملاحظة (اختياري)')
             self.special_combo.bind('<<ComboboxSelected>>', lambda _e: self._refresh_special_reason())
             self._refresh_special_reason()
@@ -1624,6 +1664,7 @@ class SchoolPassApp:
             ttk.Frame(sidebar, height=1, style='Sidebar.TFrame').pack(fill=X, padx=16, pady=9)
             ttk.Label(sidebar, text='إدارة النظام', style='SidebarSub.TLabel').pack(anchor=E, padx=18, pady=(0, 4))
             nav('◷   التقرير اليومي التفصيلي A4', self.daily_summary)
+            nav('♙   إدارة الأساتذة والمواد', self.manage_teachers)
             nav('♙   المستخدمون والصلاحيات', self.manage_users)
             nav('▣   النسخ الاحتياطي والاستعادة', self.backup_db)
             nav('⚙   إعدادات المؤسسة والطباعة', self.settings_dialog)
@@ -1754,7 +1795,7 @@ class SchoolPassApp:
         self.quick_search_var = StringVar(value='')
         self.quick_search_entry = ttk.Entry(search_row, textvariable=self.quick_search_var, justify='right')
         self.quick_search_entry.pack(side=RIGHT, fill=X, expand=True, padx=5)
-        self.quick_search_entry.bind('<KeyRelease>', lambda _e: self._apply_record_filter())
+        self.quick_search_entry.bind('<KeyRelease>', lambda _e: self._schedule_record_filter())
         ttk.Button(search_row, text='مسح', command=self.clear_quick_search).pack(side=LEFT, padx=3)
         table_wrap = ttk.Frame(panel, style='Surface.TFrame')
         table_wrap.pack(fill=BOTH, expand=True)
@@ -2023,9 +2064,25 @@ class SchoolPassApp:
     def clear_quick_search(self):
         if hasattr(self, 'quick_search_var'):
             self.quick_search_var.set('')
+        if getattr(self, '_record_filter_after_id', None) is not None:
+            try:
+                self.root.after_cancel(self._record_filter_after_id)
+            except Exception:
+                pass
+            self._record_filter_after_id = None
         self._apply_record_filter()
 
+    def _schedule_record_filter(self):
+        """Filter cached records after a brief pause in typing."""
+        if getattr(self, '_record_filter_after_id', None) is not None:
+            try:
+                self.root.after_cancel(self._record_filter_after_id)
+            except Exception:
+                pass
+        self._record_filter_after_id = self.root.after(220, self._apply_record_filter)
+
     def _apply_record_filter(self):
+        self._record_filter_after_id = None
         if not hasattr(self, 'tree'):
             return
         query = self.quick_search_var.get().strip().casefold() if hasattr(self, 'quick_search_var') else ''
@@ -2806,6 +2863,118 @@ class SchoolPassApp:
         ttk.Button(bar, text='تغيير كلمة المرور', command=reset).pack(side=RIGHT, padx=4)
         ttk.Button(bar, text='إيقاف / تفعيل الحساب', command=toggle).pack(side=RIGHT, padx=4)
         refresh()
+
+
+    def manage_teachers(self):
+        """Admin-only local teacher register with Excel/CSV import and a blank template."""
+        if self.current_user['role'] != 'admin':
+            messagebox.showwarning('صلاحيات محدودة', 'إدارة الأساتذة متاحة لمدير النظام فقط.', parent=self.root)
+            return
+        win = Toplevel(self.root)
+        win.title('إدارة الأساتذة والمواد')
+        win.geometry('900x610')
+        win.transient(self.root)
+        ttk.Label(win, text='قائمة الأساتذة والمواد', style='Title.TLabel').pack(pady=(14, 4))
+        ttk.Label(win, text='يمكن استيراد ملف Excel أو CSV. الإضافة والتحديث لا يحذفان أسماء الأساتذة السابقة.',
+                  wraplength=820).pack(pady=4)
+        top = ttk.Frame(win)
+        top.pack(fill=X, padx=16, pady=9)
+        search = StringVar()
+        ttk.Label(top, text='بحث:', anchor=E).pack(side=RIGHT, padx=(8, 4))
+        ent = ttk.Entry(top, textvariable=search, justify='right')
+        ent.pack(side=RIGHT, fill=X, expand=True, padx=4)
+        cols = ('teacher_name', 'subject', 'active', 'imported_at')
+        tree = ttk.Treeview(win, columns=cols, show='headings')
+        for col, title, width in [('teacher_name', 'اسم الأستاذ', 300), ('subject', 'المادة', 220),
+                                  ('active', 'الحالة', 90), ('imported_at', 'آخر تحديث', 170)]:
+            tree.heading(col, text=title)
+            tree.column(col, width=width, anchor=E)
+        tree.pack(fill=BOTH, expand=True, padx=16, pady=7)
+
+        def refresh(*_):
+            for item in tree.get_children():
+                tree.delete(item)
+            for row in core.get_teachers(search.get(), active_only=False):
+                tree.insert('', END, iid=str(row['id']),
+                            values=(row['teacher_name'], row['subject'], 'نشط' if row['active'] else 'موقوف', row['imported_at']))
+
+        def add_one():
+            dialog = Toplevel(win)
+            dialog.title('إضافة أستاذ')
+            dialog.geometry('430x230')
+            dialog.transient(win)
+            dialog.grab_set()
+            name, subject = StringVar(), StringVar()
+            form = ttk.Frame(dialog)
+            form.pack(fill=BOTH, expand=True, padx=18, pady=15)
+            for variable, label in ((name, 'اسم الأستاذ'), (subject, 'المادة')):
+                row = ttk.Frame(form)
+                row.pack(fill=X, pady=7)
+                ttk.Label(row, text=label, width=13, anchor=E).pack(side=RIGHT, padx=4)
+                ttk.Entry(row, textvariable=variable, justify='right').pack(side=RIGHT, fill=X, expand=True)
+            def save():
+                try:
+                    core.add_teacher_as(self.current_user['id'], name.get(), subject.get())
+                except USER_ERRORS as exc:
+                    show_error(dialog, 'تعذر حفظ الأستاذ', exc)
+                    return
+                dialog.destroy()
+                refresh()
+            buttons = ttk.Frame(form)
+            buttons.pack(fill=X, pady=10)
+            ttk.Button(buttons, text='حفظ', command=save, style='Accent.TButton').pack(side=RIGHT, padx=4)
+            ttk.Button(buttons, text='إلغاء', command=dialog.destroy).pack(side=RIGHT, padx=4)
+
+        def import_file():
+            path = filedialog.askopenfilename(parent=win, title='استيراد قائمة الأساتذة',
+                filetypes=[('ملفات الأساتذة', '*.xlsx *.csv'), ('كل الملفات', '*.*')])
+            if not path:
+                return
+            try:
+                result = core.import_teachers(path, self.current_user['id'])
+            except USER_ERRORS + (ImportError,) as exc:
+                show_error(win, 'تعذر استيراد الأساتذة', exc)
+                return
+            messagebox.showinfo('اكتمل الاستيراد',
+                f"أساتذة جدد: {result['inserted']}\nموجودون أو محدّثون: {result['updated']}\nالإجمالي في الملف: {result['total']}",
+                parent=win)
+            refresh()
+
+        def save_template():
+            path = filedialog.asksaveasfilename(parent=win, title='حفظ نموذج الأساتذة',
+                defaultextension='.csv', initialfile='قالب_قائمة_الأساتذة.csv',
+                filetypes=[('CSV', '*.csv')])
+            if not path:
+                return
+            try:
+                core.write_teachers_template(path)
+                messagebox.showinfo('تم حفظ النموذج', f'حُفظ نموذج الاستيراد هنا:\\n{path}', parent=win)
+            except OSError as exc:
+                show_error(win, 'تعذر حفظ النموذج', exc)
+
+        def toggle_selected():
+            selected = tree.selection()
+            if not selected:
+                messagebox.showinfo('اختيار أستاذ', 'حدد أستاذًا أولًا.', parent=win)
+                return
+            try:
+                current = next(r for r in core.get_teachers(search.get(), active_only=False) if str(r['id']) == selected[0])
+                core.set_teacher_active_as(self.current_user['id'], int(selected[0]), not bool(current['active']))
+            except (USER_ERRORS + (StopIteration,)) as exc:
+                show_error(win, 'تعذر تغيير الحالة', exc)
+                return
+            refresh()
+
+        buttons = ttk.Frame(win)
+        buttons.pack(fill=X, padx=16, pady=(0, 12))
+        ttk.Button(buttons, text='إضافة أستاذ', command=add_one, style='Accent.TButton').pack(side=RIGHT, padx=4)
+        ttk.Button(buttons, text='استيراد Excel / CSV', command=import_file).pack(side=RIGHT, padx=4)
+        ttk.Button(buttons, text='تنزيل نموذج فارغ', command=save_template).pack(side=RIGHT, padx=4)
+        ttk.Button(buttons, text='تفعيل / إيقاف المحدد', command=toggle_selected).pack(side=RIGHT, padx=4)
+        search.trace_add('write', refresh)
+        tree.bind('<Double-1>', lambda _e: toggle_selected())
+        refresh()
+        ent.focus_set()
 
     def backup_db(self):
         if self.current_user['role'] != 'admin':
