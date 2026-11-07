@@ -3,7 +3,7 @@ name: Build and test SchoolPass Windows installer
 on:
   push:
     branches:
-      - 'recovery/**'
+      - main
     tags:
       - 'v*'
   pull_request:
