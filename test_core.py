@@ -718,20 +718,29 @@ class TestBackupRestore(Base):
 
 
 class TestStaticQr(Base):
-    def test_qr_contains_public_permit_details_and_two_hour_expiry(self):
+    def test_qr_exit_permit_remains_open_until_return_and_contains_no_private_data(self):
         permit = self.permit()
         payload = core.qr_payload(permit)
         self.assertIn(permit["record_no"], payload)
         self.assertIn(permit["student_name"], payload)
         self.assertIn(permit["class_name"], payload)
         self.assertIn("إصدار", payload)
-        self.assertIn("انتهاء", payload)
-        self.assertIn("صلاحية: ساعتان", payload)
+        self.assertIn("انتهاء: عند تسجيل عودة التلميذ", payload)
+        self.assertIn("مفتوحة حتى تسجيل العودة", payload)
+        self.assertNotIn("صلاحية: ساعتان", payload)
         self.assertNotIn(FULL_NID, payload)
         self.assertNotIn(FULL_NID[-4:], payload)
         self.assertNotIn("http://", payload)
         self.assertNotIn("https://", payload)
         self.assertNotIn("192.168.", payload)
+
+    def test_qr_entry_permit_expires_two_hours_after_issue(self):
+        entry = core.create_late_slip(self.s1, self.sup, "حافلة")
+        payload = core.qr_payload(entry)
+        issued = datetime.fromisoformat(entry["issued_at"]).astimezone()
+        expires = issued + timedelta(hours=2)
+        self.assertIn(expires.isoformat(timespec="seconds"), payload)
+        self.assertIn("صلاحية: ساعتان", payload)
 
     def test_qr_marks_cancelled_or_returned_status_at_print_time(self):
         permit = self.permit()
@@ -741,13 +750,32 @@ class TestStaticQr(Base):
         core.return_from_exit(exit_permit["id"], self.sup)
         self.assertIn("عودة مسجلة", core.qr_payload(core.record_by_id(exit_permit["id"])))
 
-    def test_qr_expiry_is_two_hours_from_issue_time(self):
+    def test_return_receipt_qr_is_not_a_two_hour_permit(self):
         permit = self.permit()
-        payload = core.qr_payload(permit)
-        issued = datetime.fromisoformat(permit["issued_at"]).astimezone()
-        expires = issued + timedelta(hours=2)
-        self.assertIn(expires.isoformat(timespec="seconds"), payload)
+        slip = core.return_from_exit(permit["id"], self.sup)
+        payload = core.qr_payload(slip)
+        self.assertIn("إيصال إثبات عودة", payload)
+        self.assertNotIn("صلاحية: ساعتان", payload)
 
+
+class TestTeacherManagement(Base):
+    def test_teacher_csv_import_and_blank_template(self):
+        source = self.tmp / "teachers.csv"
+        source.write_text("اسم الأستاذ,المادة\\nأستاذ تجريبي,الرياضيات\\nأستاذة تجريبية,العلوم\\n",
+                          encoding="utf-8-sig")
+        imported = core.import_teachers(str(source), self.admin)
+        self.assertEqual(imported["inserted"], 2)
+        self.assertEqual(len(core.get_teachers()), 2)
+        template = self.tmp / "teacher_template.csv"
+        core.write_teachers_template(str(template))
+        self.assertEqual(core.read_teachers_file(str(template)), [])
+
+    def test_manual_teacher_addition_and_activation(self):
+        row = core.add_teacher_as(self.admin, "اسم الأستاذ", "الفيزياء")
+        self.assertEqual((row["teacher_name"], row["subject"]), ("اسم الأستاذ", "الفيزياء"))
+        core.set_teacher_active_as(self.admin, row["id"], False)
+        self.assertEqual(core.get_teachers(), [])
+        self.assertEqual(len(core.get_teachers(active_only=False)), 1)
 
 
 if __name__ == "__main__":
