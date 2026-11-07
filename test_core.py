@@ -695,7 +695,7 @@ class TestBackupRestore(Base):
         restored = json.loads(core.record_by_id(row["id"])["details_json"])
         self.assertEqual(restored["days_count"], 2)
         self.assertEqual(restored["date_difference_days"], 2)
-        self.assertEqual(core.setting("schema_version"), "6")
+        self.assertEqual(core.setting("schema_version"), "7")
 
     def test_external_daily_backup_is_mirrored_and_verified(self):
         external = self.tmp / "usb"; external.mkdir()
@@ -761,8 +761,11 @@ class TestStaticQr(Base):
 class TestTeacherManagement(Base):
     def test_teacher_csv_import_and_blank_template(self):
         source = self.tmp / "teachers.csv"
-        source.write_text("اسم الأستاذ,المادة\\nأستاذ تجريبي,الرياضيات\\nأستاذة تجريبية,العلوم\\n",
-                          encoding="utf-8-sig")
+        with source.open("w", encoding="utf-8-sig", newline="") as handle:
+            writer = csv.writer(handle)
+            writer.writerows([["اسم الأستاذ", "المادة"],
+                              ["أستاذ تجريبي", "الرياضيات"],
+                              ["أستاذة تجريبية", "العلوم"]])
         imported = core.import_teachers(str(source), self.admin)
         self.assertEqual(imported["inserted"], 2)
         self.assertEqual(len(core.get_teachers()), 2)
