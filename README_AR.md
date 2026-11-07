@@ -67,8 +67,8 @@
 4. أنشئ وادفع وسمًا مطابقًا للإصدار، مثل `v3.0.1` للإصدار الحالي:
 
 ```bash
-git tag v3.0.0
-git push origin v3.0.0
+git tag v3.0.1
+git push origin v3.0.1
 ```
 
 5. يبدأ GitHub Actions بناء نسخة Windows وتشغيل الاختبارات، ثم ينشر `SchoolPass_Setup.exe` وملف SHA-256 في GitHub Releases.
