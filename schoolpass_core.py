@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 APP_NAME = "SchoolPass"
-APP_VERSION = "3.0.1"
+APP_VERSION = "3.1.0"
 SCHOOL_NAME = "ثانوية المجاهد بسجراري لخضر بوفاطيس"
 MINISTRY_NAME = "الجمهورية الجزائرية الديمقراطية الشعبية — وزارة التربية الوطنية"
 QR_VALIDITY_HOURS = 2
@@ -173,7 +173,7 @@ def db_connect() -> sqlite3.Connection:
     return conn
 
 
-SCHEMA_VERSION = "6"
+SCHEMA_VERSION = "7"
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -201,6 +201,15 @@ CREATE TABLE IF NOT EXISTS students (
     active INTEGER NOT NULL DEFAULT 1,
     imported_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS teachers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    teacher_name TEXT NOT NULL COLLATE NOCASE,
+    subject TEXT NOT NULL DEFAULT '' COLLATE NOCASE,
+    active INTEGER NOT NULL DEFAULT 1,
+    imported_at TEXT NOT NULL,
+    UNIQUE(teacher_name, subject)
+);
+CREATE INDEX IF NOT EXISTS idx_teachers_active_name ON teachers(active, teacher_name);
 CREATE TABLE IF NOT EXISTS records (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     record_no TEXT NOT NULL UNIQUE,
@@ -784,6 +793,139 @@ def import_students(path: str, user_id, deactivate_missing: bool = False) -> Imp
           f"ملف: {Path(path).name}؛ جديد: {inserted}؛ محدّث: {updated}؛ أُوقف: {deactivated}؛ بلا رقم: {skipped}؛ مكرر: {dups}؛ تغيّر اسم: {renamed}"
           + ("؛ أمثلة: " + " | ".join(renamed_examples) if renamed_examples else ""))
     return report
+
+
+
+# ----------------------------------------------------------------------------- teachers
+def _teacher_rows_from_matrix(rows: list[list[str]]) -> list[dict]:
+    """Read teacher name/subject columns from a CSV/XLSX matrix using Arabic or English headers."""
+    name_headers = {"اسم الأستاذ", "اسم الاستاذ", "الأستاذ", "الاستاذ", "اسم المعلم", "teacher", "teacher name", "name"}
+    subject_headers = {"المادة", "المادة الدراسية", "التخصص", "subject", "discipline"}
+    for header_row, row in enumerate(rows):
+        headers = [_norm_header(v).strip().casefold() for v in row]
+        name_idx = next((i for i, h in enumerate(headers) if h in name_headers or any(x in h for x in ("اسم الأستاذ", "اسم الاستاذ", "teacher name"))), None)
+        subject_idx = next((i for i, h in enumerate(headers) if h in subject_headers or "المادة" in h or "subject" in h), None)
+        if name_idx is None or subject_idx is None:
+            continue
+        result, seen = [], set()
+        for data_row in rows[header_row + 1:]:
+            cells = list(data_row) + [""] * max(0, len(headers) - len(data_row))
+            name = " ".join(str(cells[name_idx] or "").replace("\u200f", "").split()).strip()
+            subject = " ".join(str(cells[subject_idx] or "").replace("\u200f", "").split()).strip()
+            if not name or not subject:
+                continue
+            if len(name) > 100 or len(subject) > 80:
+                raise ValueError("اسم الأستاذ يجب ألا يتجاوز 100 حرف والمادة 80 حرفًا.")
+            key = (name.casefold(), subject.casefold())
+            if key not in seen:
+                result.append({"teacher_name": name, "subject": subject})
+                seen.add(key)
+        return result
+    raise ValueError("لم أجد عمودي «اسم الأستاذ» و«المادة» في الملف.")
+
+
+def read_teachers_file(path: str) -> list[dict]:
+    """Read a teachers CSV/XLSX file without modifying the live database."""
+    suffix = Path(path).suffix.lower()
+    if suffix == ".xlsx":
+        from openpyxl import load_workbook
+        wb = load_workbook(path, read_only=True, data_only=True)
+        try:
+            for ws in wb.worksheets:
+                rows = [["" if value is None else str(value).strip() for value in row]
+                        for row in ws.iter_rows(values_only=True)]
+                try:
+                    return _teacher_rows_from_matrix(rows)
+                except ValueError:
+                    continue
+        finally:
+            wb.close()
+        raise ValueError("لم أجد ورقة Excel تحتوي اسم الأستاذ والمادة.")
+    if suffix == ".csv":
+        decoded = _decode_text(Path(path).read_bytes())
+        for delimiter in (",", ";", "\t"):
+            rows = list(csv.reader(io.StringIO(decoded, newline=""), delimiter=delimiter))
+            try:
+                return _teacher_rows_from_matrix(rows)
+            except ValueError:
+                continue
+        raise ValueError("لم أجد عمودي «اسم الأستاذ» و«المادة» في ملف CSV.")
+    raise ValueError("الصيغ المقبولة لاستيراد الأساتذة هي XLSX أو CSV.")
+
+
+def get_teachers(search: str = "", active_only: bool = True) -> list[sqlite3.Row]:
+    query = str(search or "").strip()
+    clauses, params = [], []
+    if active_only:
+        clauses.append("active=1")
+    if query:
+        clauses.append("(teacher_name LIKE ? OR subject LIKE ?)")
+        params.extend((f"%{query}%", f"%{query}%"))
+    sql = "SELECT * FROM teachers"
+    if clauses:
+        sql += " WHERE " + " AND ".join(clauses)
+    sql += " ORDER BY teacher_name COLLATE NOCASE, subject COLLATE NOCASE"
+    with db_connect() as conn:
+        return conn.execute(sql, params).fetchall()
+
+
+def import_teachers(path: str, user_id) -> dict:
+    admin = require_admin(user_id)
+    teachers = read_teachers_file(path)
+    if not teachers:
+        raise ValueError("لم يتضمن الملف أي أستاذ صالحًا للاستيراد.")
+    inserted = updated = 0
+    stamp = now_iso()
+    with db_connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        for item in teachers:
+            old = conn.execute("SELECT id FROM teachers WHERE teacher_name=? AND subject=?",
+                               (item["teacher_name"], item["subject"])).fetchone()
+            conn.execute("""INSERT INTO teachers(teacher_name,subject,active,imported_at) VALUES(?,?,1,?)
+                ON CONFLICT(teacher_name,subject) DO UPDATE SET active=1,imported_at=excluded.imported_at""",
+                (item["teacher_name"], item["subject"], stamp))
+            if old:
+                updated += 1
+            else:
+                inserted += 1
+    audit(admin["id"], "استيراد قائمة الأساتذة", "teachers", "",
+          f"الملف: {Path(path).name}؛ جديد: {inserted}؛ موجود/محدّث: {updated}")
+    return {"inserted": inserted, "updated": updated, "total": len(teachers)}
+
+
+def add_teacher_as(actor, teacher_name: str, subject: str) -> sqlite3.Row:
+    admin = require_admin(actor)
+    name, discipline = " ".join(str(teacher_name or "").split()), " ".join(str(subject or "").split())
+    if not name or not discipline:
+        raise ValueError("اسم الأستاذ والمادة حقول إلزامية.")
+    if len(name) > 100 or len(discipline) > 80:
+        raise ValueError("اسم الأستاذ يجب ألا يتجاوز 100 حرف والمادة 80 حرفًا.")
+    with db_connect() as conn:
+        conn.execute("""INSERT INTO teachers(teacher_name,subject,active,imported_at) VALUES(?,?,1,?)
+            ON CONFLICT(teacher_name,subject) DO UPDATE SET active=1,imported_at=excluded.imported_at""",
+            (name, discipline, now_iso()))
+        row = conn.execute("SELECT * FROM teachers WHERE teacher_name=? AND subject=?", (name, discipline)).fetchone()
+    audit(admin["id"], "إضافة أستاذ", "teacher", str(row["id"]), f"{name} — {discipline}")
+    return row
+
+
+def set_teacher_active_as(actor, teacher_id: int, active: bool) -> None:
+    admin = require_admin(actor)
+    with db_connect() as conn:
+        row = conn.execute("SELECT * FROM teachers WHERE id=?", (int(teacher_id),)).fetchone()
+        if not row:
+            raise ValueError("الأستاذ غير موجود.")
+        conn.execute("UPDATE teachers SET active=? WHERE id=?", (1 if active else 0, int(teacher_id)))
+    audit(admin["id"], "تغيير حالة أستاذ", "teacher", str(teacher_id),
+          f"{row['teacher_name']} — {row['subject']}؛ نشط={bool(active)}")
+
+
+def write_teachers_template(path: str) -> Path:
+    out = Path(path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with out.open("w", encoding="utf-8-sig", newline="") as handle:
+        csv.writer(handle).writerow(["اسم الأستاذ", "المادة"])
+    return out
 
 
 def student_name(row) -> str:
@@ -1765,36 +1907,55 @@ def save_preferences_as(actor, school_name: str, primary: str, secondary: str,
 
 # ----------------------------------------------------------------------------- static QR data
 def qr_payload(row) -> str:
-    """Return a self-contained, human-readable permit payload; no URL, server or network."""
+    """Build a self-contained offline QR payload with permit-specific validity rules.
+
+    Entry permits expire two hours after issue. An exceptional exit stays open until
+    the school records the student's return. A QR printed earlier is a snapshot:
+    it cannot learn about a later cancellation/return without querying the local DB.
+    """
     issued_text = str(row["issued_at"] or row["created_at"] or "").strip()
     try:
         issued = datetime.fromisoformat(issued_text)
-        if issued.tzinfo is None:
-            issued = issued.astimezone()
-        else:
-            issued = issued.astimezone()
+        issued = issued.astimezone()
     except (TypeError, ValueError):
         raise ValueError("توقيت إصدار الرخصة غير صالح؛ لا يمكن إنشاء رمز تحقق موثوق.")
-    expires = issued + timedelta(hours=QR_VALIDITY_HOURS)
-    status = str(row["status"] or "active")
-    if status == "cancelled":
-        state = "ملغاة"
-    elif status == "returned":
-        state = "عودة مسجلة"
+    kind = str(row["kind"] or "")
+    status = str(row["status"] or "valid")
+    timed_entry = kind in ("late", "absence_return", "special_entry")
+    if timed_entry:
+        expires = issued + timedelta(hours=QR_VALIDITY_HOURS)
+        expiry_line = f"انتهاء: {expires.isoformat(timespec='seconds')}"
+        validity_line = f"صلاحية: ساعتان من وقت الإصدار ({QR_VALIDITY_HOURS}h)"
+        verification_line = "التحقق الزمني: قارن الساعة المحلية بوقت الإصدار والانتهاء."
+    elif kind == "exit_permit":
+        expiry_line = "انتهاء: عند تسجيل عودة التلميذ إلى المؤسسة"
+        validity_line = "الصلاحية: مفتوحة حتى تسجيل العودة أو إلغاء الرخصة"
+        verification_line = "تنبيه: الرمز المطبوع لقطة وقت الإصدار ولا يتحدث تلقائيًا بعد العودة أو الإلغاء."
     else:
-        state = "سارية عند الطباعة"
+        expiry_line = "انتهاء: لا ينطبق — إيصال إثبات عودة"
+        validity_line = "النوع: إثبات تسجيل العودة"
+        verification_line = "هذا الإيصال يثبت حدث العودة المسجل في المؤسسة."
+    if status == "cancelled":
+        state = "ملغاة عند الطباعة"
+    elif status == "returned":
+        state = "عودة مسجلة عند الطباعة"
+    else:
+        state = "سارية عند الطباعة" if timed_entry else ("مفتوحة عند الطباعة" if kind == "exit_permit" else "مسجلة")
     lines = [
         "SchoolPass",
         f"رقم: {row['record_no']}",
-        f"النوع: {kind_label(row['kind'])}",
+        f"النوع: {kind_label(kind)}",
         f"التلميذ: {row['student_name']}",
         f"القسم: {row['class_name']}",
         f"إصدار: {issued.isoformat(timespec='seconds')}",
-        f"انتهاء: {expires.isoformat(timespec='seconds')}",
-        "صلاحية: ساعتان",
+        expiry_line,
+        validity_line,
         f"الحالة: {state}",
-        "التحقق: الرخصة صالحة فقط بين وقت الإصدار والانتهاء.",
+        verification_line,
     ]
+    returned_at = str(row["returned_at"] or "").strip()
+    if returned_at:
+        lines.append(f"وقت العودة: {returned_at}")
     return "\n".join(lines)
 
 
