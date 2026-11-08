@@ -773,6 +773,21 @@ class TestTeacherManagement(Base):
         core.write_teachers_template(str(template))
         self.assertEqual(core.read_teachers_file(str(template)), [])
 
+    def test_legacy_teacher_table_is_repaired_without_losing_rows(self):
+        with core.db_connect() as conn:
+            conn.execute("DROP INDEX IF EXISTS idx_teachers_active_name")
+            conn.execute("DROP TABLE teachers")
+            conn.execute("CREATE TABLE teachers (id INTEGER PRIMARY KEY, name TEXT, matiere TEXT)")
+            conn.execute("INSERT INTO teachers(id,name,matiere) VALUES(1,'أستاذ قديم','الرياضيات')")
+        core.init_db()
+        rows = core.get_teachers(active_only=False)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual((rows[0]["teacher_name"], rows[0]["subject"]), ("أستاذ قديم", "الرياضيات"))
+        added = core.add_teacher_as(self.admin, "أستاذ جديد", "العلوم")
+        self.assertEqual(added["teacher_name"], "أستاذ جديد")
+        with core.db_connect() as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM teachers").fetchone()[0], 2)
+
     def test_manual_teacher_addition_and_activation(self):
         row = core.add_teacher_as(self.admin, "اسم الأستاذ", "الفيزياء")
         self.assertEqual((row["teacher_name"], row["subject"]), ("اسم الأستاذ", "الفيزياء"))

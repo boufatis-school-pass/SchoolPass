@@ -173,7 +173,7 @@ def db_connect() -> sqlite3.Connection:
     return conn
 
 
-SCHEMA_VERSION = "7"
+SCHEMA_VERSION = "8"
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -209,7 +209,6 @@ CREATE TABLE IF NOT EXISTS teachers (
     imported_at TEXT NOT NULL,
     UNIQUE(teacher_name, subject)
 );
-CREATE INDEX IF NOT EXISTS idx_teachers_active_name ON teachers(active, teacher_name);
 CREATE TABLE IF NOT EXISTS records (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     record_no TEXT NOT NULL UNIQUE,
@@ -275,6 +274,55 @@ CREATE TRIGGER IF NOT EXISTS trg_audit_no_update BEFORE UPDATE ON audit_logs
 BEGIN SELECT RAISE(ABORT, 'audit log is append-only'); END;
 """
 
+def _ensure_teacher_schema(conn: sqlite3.Connection) -> None:
+    """Repair older local teacher tables in place without discarding teacher data.
+
+    Earlier builds may have created a teachers table with a different name column
+    (for example name/teacher) or without the newer metadata columns. This repair
+    is intentionally structural and idempotent; it runs even if a stale schema
+    version marker incorrectly claims the database is already current.
+    """
+    conn.execute("""CREATE TABLE IF NOT EXISTS teachers (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        teacher_name TEXT NOT NULL DEFAULT '',
+        subject TEXT NOT NULL DEFAULT '',
+        active INTEGER NOT NULL DEFAULT 1,
+        imported_at TEXT NOT NULL DEFAULT ''
+    )""")
+    info = conn.execute("PRAGMA table_info(teachers)").fetchall()
+    columns = {str(row[1]).casefold(): str(row[1]) for row in info}
+
+    if "id" not in columns:
+        conn.execute("ALTER TABLE teachers ADD COLUMN id INTEGER")
+        conn.execute("UPDATE teachers SET id=rowid WHERE id IS NULL")
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_teachers_id ON teachers(id)")
+        columns["id"] = "id"
+
+    if "teacher_name" not in columns:
+        conn.execute("ALTER TABLE teachers ADD COLUMN teacher_name TEXT NOT NULL DEFAULT ''")
+        source = next((columns[key] for key in (
+            "name", "full_name", "teacher", "teachername", "nom", "nom_enseignant",
+            "اسم الأستاذ", "اسم_الأستاذ"
+        ) if key in columns), None)
+        if source:
+            conn.execute(f'UPDATE teachers SET teacher_name=TRIM(COALESCE("{source}", ""))')
+        columns["teacher_name"] = "teacher_name"
+
+    if "subject" not in columns:
+        conn.execute("ALTER TABLE teachers ADD COLUMN subject TEXT NOT NULL DEFAULT ''")
+        source = next((columns[key] for key in ("matiere", "discipline", "المادة") if key in columns), None)
+        if source:
+            conn.execute(f'UPDATE teachers SET subject=TRIM(COALESCE("{source}", ""))')
+        columns["subject"] = "subject"
+
+    if "active" not in columns:
+        conn.execute("ALTER TABLE teachers ADD COLUMN active INTEGER NOT NULL DEFAULT 1")
+    if "imported_at" not in columns:
+        conn.execute("ALTER TABLE teachers ADD COLUMN imported_at TEXT NOT NULL DEFAULT ''")
+
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_teachers_active_name ON teachers(active, teacher_name)")
+
+
 
 def _migrate_absence_day_counts(conn: sqlite3.Connection, prior_version: str) -> int:
     """Migrate historical records so the return date is excluded from absence days."""
@@ -316,6 +364,7 @@ def init_db() -> None:
         # not on every short-lived connection opened by dashboard/search widgets.
         conn.execute("PRAGMA journal_mode=WAL")
         conn.executescript(_SCHEMA)
+        _ensure_teacher_schema(conn)
         # Explicit issue timestamp; older records retain their historical created_at value.
         columns = {r[1] for r in conn.execute("PRAGMA table_info(records)")}
         if "issued_at" not in columns:
@@ -879,14 +928,15 @@ def import_teachers(path: str, user_id) -> dict:
     with db_connect() as conn:
         conn.execute("BEGIN IMMEDIATE")
         for item in teachers:
-            old = conn.execute("SELECT id FROM teachers WHERE teacher_name=? AND subject=?",
+            old = conn.execute("SELECT id FROM teachers WHERE teacher_name=? AND subject=? ORDER BY id LIMIT 1",
                                (item["teacher_name"], item["subject"])).fetchone()
-            conn.execute("""INSERT INTO teachers(teacher_name,subject,active,imported_at) VALUES(?,?,1,?)
-                ON CONFLICT(teacher_name,subject) DO UPDATE SET active=1,imported_at=excluded.imported_at""",
-                (item["teacher_name"], item["subject"], stamp))
             if old:
+                conn.execute("UPDATE teachers SET active=1,imported_at=? WHERE id=?",
+                             (stamp, old["id"]))
                 updated += 1
             else:
+                conn.execute("INSERT INTO teachers(teacher_name,subject,active,imported_at) VALUES(?,?,1,?)",
+                             (item["teacher_name"], item["subject"], stamp))
                 inserted += 1
     audit(admin["id"], "استيراد قائمة الأساتذة", "teachers", "",
           f"الملف: {Path(path).name}؛ جديد: {inserted}؛ موجود/محدّث: {updated}")
@@ -901,10 +951,15 @@ def add_teacher_as(actor, teacher_name: str, subject: str) -> sqlite3.Row:
     if len(name) > 100 or len(discipline) > 80:
         raise ValueError("اسم الأستاذ يجب ألا يتجاوز 100 حرف والمادة 80 حرفًا.")
     with db_connect() as conn:
-        conn.execute("""INSERT INTO teachers(teacher_name,subject,active,imported_at) VALUES(?,?,1,?)
-            ON CONFLICT(teacher_name,subject) DO UPDATE SET active=1,imported_at=excluded.imported_at""",
-            (name, discipline, now_iso()))
-        row = conn.execute("SELECT * FROM teachers WHERE teacher_name=? AND subject=?", (name, discipline)).fetchone()
+        existing = conn.execute("SELECT id FROM teachers WHERE teacher_name=? AND subject=? ORDER BY id LIMIT 1",
+                                 (name, discipline)).fetchone()
+        if existing:
+            conn.execute("UPDATE teachers SET active=1,imported_at=? WHERE id=?", (now_iso(), existing["id"]))
+        else:
+            conn.execute("INSERT INTO teachers(teacher_name,subject,active,imported_at) VALUES(?,?,1,?)",
+                         (name, discipline, now_iso()))
+        row = conn.execute("SELECT * FROM teachers WHERE teacher_name=? AND subject=? ORDER BY id LIMIT 1",
+                           (name, discipline)).fetchone()
     audit(admin["id"], "إضافة أستاذ", "teacher", str(row["id"]), f"{name} — {discipline}")
     return row
 
